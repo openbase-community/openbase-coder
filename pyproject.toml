@@ -37,8 +37,8 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/gabemontague/openbase-coder-cli"
-Issues = "https://github.com/gabemontague/openbase-coder-cli/issues"
+Repository = "https://github.com/openbase-community/openbase-coder"
+Issues = "https://github.com/openbase-community/openbase-coder/issues"
 
 [project.scripts]
 openbase-coder = "openbase_coder_cli.cli:main"

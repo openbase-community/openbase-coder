@@ -1,1 +1,1 @@
-`openbase-coder-cli` is a CLI tool.
+`openbase-coder` is the main Openbase Coder runtime repository.

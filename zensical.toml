@@ -1,9 +1,9 @@
 [project]
 site_name = "Openbase CLI Documentation"
 site_description = "Set up and operate the Openbase local CLI runtime"
-site_url = "https://montaguegabe.github.io/openbase-coder-cli"
+site_url = "https://openbase-community.github.io/openbase-coder"
 site_author = "Openbase"
-repo_url = "https://github.com/montaguegabe/openbase-coder-cli"
+repo_url = "https://github.com/openbase-community/openbase-coder"
 
 nav = [
   { "Home" = "index.md" },
