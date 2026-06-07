@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import subprocess
 
 setup_cli = importlib.import_module("openbase_coder_cli.cli.setup")
@@ -50,6 +51,60 @@ def test_update_existing_custom_workspace_uses_pull(tmp_path, monkeypatch) -> No
 
     assert [command for command, _kwargs in commands] == [
         ["git", "-C", str(workspace), "pull", "--ff-only"],
+    ]
+
+
+def test_remove_managed_repo_symlinks_removes_selected_symlink(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    target = tmp_path / "target"
+    workspace.mkdir()
+    target.mkdir()
+    (workspace / "multi.json").write_text(
+        json.dumps(
+            {
+                "repos": [
+                    {"name": "console", "installSets": ["default"]},
+                    {"name": "ios", "installSets": ["dev"]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "console").symlink_to(target)
+    (workspace / "ios").symlink_to(target)
+    monkeypatch.setattr(setup_cli, "DEFAULT_WORKSPACE_DIR", workspace)
+
+    setup_cli._remove_managed_repo_symlinks(workspace)
+
+    assert not (workspace / "console").exists()
+    assert (workspace / "ios").is_symlink()
+
+
+def test_update_install_set_repos_resets_managed_repos(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    repo = workspace / "console"
+    (repo / ".git").mkdir(parents=True)
+    (workspace / "multi.json").write_text(
+        json.dumps({"repos": [{"name": "console", "installSets": ["default"]}]}),
+        encoding="utf-8",
+    )
+    commands = []
+
+    monkeypatch.setattr(setup_cli, "DEFAULT_WORKSPACE_DIR", workspace)
+
+    def fake_run(command, **kwargs):
+        commands.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    monkeypatch.setattr(setup_cli.subprocess, "run", fake_run)
+
+    setup_cli._update_install_set_repos(workspace)
+
+    assert [command for command, _kwargs in commands] == [
+        ["git", "-C", str(repo), "fetch", "origin", "main"],
+        ["git", "-C", str(repo), "reset", "--hard", "origin/main"],
     ]
 
 

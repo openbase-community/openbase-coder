@@ -27,7 +27,12 @@ def test_run_workspace_package_command_prefers_pnpm_workspace(monkeypatch, tmp_p
 
     assert node.run_workspace_package_command(workspace_dir, package_dir, "install") is True
 
-    assert calls[0][0][0] == ["/bin/pnpm", "install", "--frozen-lockfile"]
+    assert calls[0][0][0] == [
+        "/bin/pnpm",
+        "install",
+        "--no-lockfile",
+        "--shamefully-hoist",
+    ]
     assert calls[0][1]["cwd"] == str(package_dir)
     assert calls[0][1]["check"] is True
 
@@ -85,7 +90,12 @@ def test_run_workspace_package_command_finds_pnpm_home_when_not_on_path(
 
     assert node.run_workspace_package_command(workspace_dir, package_dir, "install") is True
 
-    assert calls[0][0][0] == [str(pnpm_bin), "install", "--frozen-lockfile"]
+    assert calls[0][0][0] == [
+        str(pnpm_bin),
+        "install",
+        "--no-lockfile",
+        "--shamefully-hoist",
+    ]
 
 
 def test_run_workspace_package_command_allows_pnpm_install_without_lockfile(

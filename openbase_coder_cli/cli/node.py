@@ -24,6 +24,7 @@ def run_workspace_package_command(workspace_dir: Path, package_dir: Path, *args:
     subprocess.run(
         [executable, *command_prefix, *command_args],
         cwd=str(package_dir),
+        env=_package_manager_env(executable, command_args),
         check=True,
     )
     return True
@@ -93,12 +94,22 @@ def _normalize_package_manager_args(
     workspace_dir: Path,
     args: tuple[str, ...],
 ) -> tuple[str, ...]:
-    """Keep managed workspace installs reproducible when using pnpm."""
+    """Avoid mutating or validating partial install-set lockfiles with pnpm."""
     if (
         Path(executable).name == "pnpm"
         and args == ("install",)
         and (workspace_dir / "pnpm-lock.yaml").is_file()
     ):
-        return ("install", "--frozen-lockfile")
+        return ("install", "--no-lockfile", "--shamefully-hoist")
 
     return args
+
+
+def _package_manager_env(
+    executable: str,
+    args: tuple[str, ...],
+) -> dict[str, str] | None:
+    if Path(executable).name == "pnpm" and args and args[0] == "install":
+        return {**os.environ, "CI": "true"}
+
+    return None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import platform
 import secrets
 import shlex
@@ -142,7 +143,9 @@ def _clone_workspace(workspace_dir: str) -> None:
     if ws.exists() and (ws / ".git").is_dir():
         click.echo(f"Workspace already exists at {ws}, pulling latest...")
         _update_existing_workspace(ws)
+        _remove_managed_repo_symlinks(ws)
         _multi_sync(ws)
+        _update_install_set_repos(ws)
         return
 
     click.echo(f"Cloning workspace to {ws}...")
@@ -151,6 +154,7 @@ def _clone_workspace(workspace_dir: str) -> None:
         check=True,
     )
     _multi_sync(ws)
+    _update_install_set_repos(ws)
 
 
 def _update_existing_workspace(ws: Path) -> None:
@@ -174,6 +178,57 @@ def _update_existing_workspace(ws: Path) -> None:
             return
 
     subprocess.run(["git", "-C", str(ws), "pull", "--ff-only"], check=True)
+
+
+def _remove_managed_repo_symlinks(ws: Path) -> None:
+    if ws.resolve() != DEFAULT_WORKSPACE_DIR.resolve():
+        return
+
+    for repo_name in _install_set_repo_names(ws):
+        repo_path = ws / repo_name
+        if repo_path.is_symlink():
+            click.echo(f"Removing symlinked install repo at {repo_path}")
+            repo_path.unlink()
+
+
+def _update_install_set_repos(ws: Path) -> None:
+    for repo_name in _install_set_repo_names(ws):
+        repo_path = ws / repo_name
+        if not (repo_path / ".git").exists():
+            continue
+
+        if ws.resolve() == DEFAULT_WORKSPACE_DIR.resolve():
+            click.echo(f"Updating managed install repo {repo_name}...")
+            subprocess.run(
+                ["git", "-C", str(repo_path), "fetch", "origin", "main"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_path), "reset", "--hard", "origin/main"],
+                check=True,
+            )
+        else:
+            subprocess.run(["git", "-C", str(repo_path), "pull", "--ff-only"], check=True)
+
+
+def _install_set_repo_names(ws: Path) -> list[str]:
+    multi_json_path = ws / "multi.json"
+    if not multi_json_path.is_file():
+        return []
+
+    try:
+        multi_json = json.loads(multi_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    names = []
+    for repo in multi_json.get("repos", []):
+        install_sets = repo.get("installSets")
+        if install_sets is not None and WORKSPACE_INSTALL_SET not in install_sets:
+            continue
+        if name := repo.get("name"):
+            names.append(name)
+    return names
 
 
 def _multi_sync(ws_path: Path) -> None:
