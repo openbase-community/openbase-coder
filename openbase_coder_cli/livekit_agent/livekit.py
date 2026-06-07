@@ -42,6 +42,15 @@ from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN
 from livekit.plugins import assemblyai, cartesia, deepgram, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+from openbase_coder_cli.brain_score import (
+    brain_score_token_configured,
+    brain_score_token_file,
+    load_brain_score_token,
+)
+from openbase_coder_cli.cartesia_voice_catalog import (
+    DEFAULT_SUPER_AGENT_VOICE_IDS,
+    cartesia_voice_for_id,
+)
 from openbase_coder_cli.dispatcher_config import dispatcher_voice
 from openbase_coder_cli.livekit_agent.codex_app_client import CodexAppServerClient
 from openbase_coder_cli.livekit_agent.speech_formatter import format_for_speech
@@ -165,12 +174,7 @@ BRAIN_SCORE_OUTPUT_PATH = Path(
         str(Path.home() / ".openbase" / "brain_score.json"),
     )
 ).expanduser()
-BRAIN_SCORE_TOKEN_FILE = Path(
-    os.getenv(
-        "OPENBASE_BRAIN_SCORE_TOKEN_FILE",
-        str(Path.home() / ".openbase" / "brain_score_token"),
-    )
-).expanduser()
+BRAIN_SCORE_TOKEN_FILE = brain_score_token_file()
 BRAIN_SCORE_LATITUDE = os.getenv("OPENBASE_BRAIN_SCORE_LATITUDE", "").strip()
 BRAIN_SCORE_LONGITUDE = os.getenv("OPENBASE_BRAIN_SCORE_LONGITUDE", "").strip()
 
@@ -179,27 +183,6 @@ BRAIN_SCORE_LONGITUDE = os.getenv("OPENBASE_BRAIN_SCORE_LONGITUDE", "").strip()
 class CartesiaVoice:
     voice_id: str
     name: str
-
-
-def _super_agent_voices(env: Mapping[str, str]) -> tuple[CartesiaVoice, ...]:
-    named_configured = env.get("CARTESIA_SUPER_AGENT_VOICES")
-    if named_configured is not None:
-        return _parse_voices(named_configured)
-
-    configured = env.get("CARTESIA_SUPER_AGENT_VOICE_IDS")
-    if configured is not None:
-        return _voices_from_ids(_parse_voice_ids(configured))
-
-    dispatcher_voice_id = env.get("CARTESIA_VOICE_ID", DEFAULT_CARTESIA_VOICE_ID)
-    announcer_voice_id = env.get(
-        "CARTESIA_ANNOUNCER_VOICE_ID",
-        DEFAULT_CARTESIA_ANNOUNCER_VOICE_ID,
-    )
-    return _voices_from_ids(
-        voice_id
-        for voice_id in (announcer_voice_id,)
-        if voice_id and voice_id != dispatcher_voice_id
-    )
 
 
 def dispatcher_voice_config(
@@ -212,49 +195,27 @@ def dispatcher_voice_config(
     return CartesiaVoice(voice_id=configured["id"], name=configured["name"])
 
 
-def _parse_voice_ids(value: str) -> tuple[str, ...]:
-    return tuple(
-        voice_id for voice_id in (part.strip() for part in value.split(",")) if voice_id
-    )
-
-
-def _parse_voices(value: str) -> tuple[CartesiaVoice, ...]:
-    voices: list[CartesiaVoice] = []
-    for part in (part.strip() for part in value.split(",")):
-        if not part:
-            continue
-        voice_id, separator, name = part.partition(":")
-        trimmed_voice_id = voice_id.strip()
-        if not trimmed_voice_id:
-            continue
-        trimmed_name = name.strip() if separator else ""
-        voices.append(
-            CartesiaVoice(
-                voice_id=trimmed_voice_id,
-                name=trimmed_name or f"Voice {len(voices) + 1}",
-            )
-        )
-    return tuple(voices)
-
-
 def _voices_from_ids(voice_ids) -> tuple[CartesiaVoice, ...]:
     return tuple(
-        CartesiaVoice(voice_id=voice_id, name=f"Voice {index + 1}")
+        CartesiaVoice(
+            voice_id=voice_id,
+            name=cartesia_voice_for_id(voice_id).name
+            if cartesia_voice_for_id(voice_id)
+            else f"Voice {index + 1}",
+        )
         for index, voice_id in enumerate(voice_ids)
     )
 
 
-CARTESIA_SUPER_AGENT_VOICES = _super_agent_voices(os.environ)
-CARTESIA_SUPER_AGENT_VOICE_IDS = tuple(
-    voice.voice_id for voice in CARTESIA_SUPER_AGENT_VOICES
-)
+SUPER_AGENT_VOICE_IDS = DEFAULT_SUPER_AGENT_VOICE_IDS
+SUPER_AGENT_VOICES = _voices_from_ids(SUPER_AGENT_VOICE_IDS)
 
 
 def _current_super_agent_voices() -> tuple[CartesiaVoice, ...]:
-    voice_ids = tuple(voice.voice_id for voice in CARTESIA_SUPER_AGENT_VOICES)
-    if voice_ids == tuple(CARTESIA_SUPER_AGENT_VOICE_IDS):
-        return CARTESIA_SUPER_AGENT_VOICES
-    return _voices_from_ids(CARTESIA_SUPER_AGENT_VOICE_IDS)
+    voice_ids = tuple(voice.voice_id for voice in SUPER_AGENT_VOICES)
+    if voice_ids == tuple(SUPER_AGENT_VOICE_IDS):
+        return SUPER_AGENT_VOICES
+    return _voices_from_ids(SUPER_AGENT_VOICE_IDS)
 
 
 def _normalize_spoken_command(text: str) -> str:
@@ -507,20 +468,11 @@ def _event_text_hash(text: str) -> str:
 
 
 def _load_brain_score_token() -> str:
-    configured = os.getenv("OPENBASE_BRAIN_SCORE_TOKEN", "").strip()
-    if configured:
-        return configured
-    try:
-        return BRAIN_SCORE_TOKEN_FILE.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return ""
-    except OSError:
-        logger.warning(
-            "Unable to read brain score token file %s",
-            BRAIN_SCORE_TOKEN_FILE,
-            exc_info=True,
-        )
-        return ""
+    return load_brain_score_token()
+
+
+def _brain_score_enabled() -> bool:
+    return BRAIN_SCORE_ENABLED and brain_score_token_configured()
 
 
 class BrainScoreSTT(livekit_stt.STT):
@@ -2559,12 +2511,12 @@ def _build_stt():
     if LIVEKIT_STT_PROVIDER == "deepgram":
         logger.info("Using Deepgram STT")
         stt = deepgram.STT(api_key=DEEPGRAM_API_KEY)
-        stt = BrainScoreSTT(stt) if BRAIN_SCORE_ENABLED else stt
+        stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
         return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
     if LIVEKIT_STT_PROVIDER == "assemblyai":
         logger.info("Using AssemblyAI STT")
         stt = assemblyai.STT(api_key=ASSEMBLY_AI_API_KEY)
-        stt = BrainScoreSTT(stt) if BRAIN_SCORE_ENABLED else stt
+        stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
         return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
 
     raise ValueError(f"Unsupported LIVEKIT_STT_PROVIDER={LIVEKIT_STT_PROVIDER!r}")

@@ -6,13 +6,13 @@ import json
 import os
 import time
 import uuid
-from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import livekit.api as livekit_api
 
 from openbase_coder_cli.cartesia_voice_catalog import (
+    DEFAULT_SUPER_AGENT_VOICE_IDS,
     cartesia_voice_for_id,
     cartesia_voice_for_name,
 )
@@ -120,52 +120,6 @@ def instruction_override_supported() -> bool:
     return True
 
 
-def _super_agent_voices(env: Mapping[str, str]) -> tuple[CartesiaVoice, ...]:
-    named_configured = env.get("CARTESIA_SUPER_AGENT_VOICES")
-    if named_configured is not None:
-        return _parse_voices(named_configured)
-
-    configured = env.get("CARTESIA_SUPER_AGENT_VOICE_IDS")
-    if configured is not None:
-        return _voices_from_ids(_parse_voice_ids(configured))
-
-    dispatcher_voice_id = env.get("CARTESIA_VOICE_ID", DEFAULT_CARTESIA_VOICE_ID)
-    announcer_voice_id = env.get(
-        "CARTESIA_ANNOUNCER_VOICE_ID",
-        DEFAULT_CARTESIA_ANNOUNCER_VOICE_ID,
-    )
-    return _voices_from_ids(
-        voice_id
-        for voice_id in (announcer_voice_id,)
-        if voice_id and voice_id != dispatcher_voice_id
-    )
-
-
-def _parse_voice_ids(value: str) -> tuple[str, ...]:
-    return tuple(
-        voice_id for voice_id in (part.strip() for part in value.split(",")) if voice_id
-    )
-
-
-def _parse_voices(value: str) -> tuple[CartesiaVoice, ...]:
-    voices: list[CartesiaVoice] = []
-    for part in (part.strip() for part in value.split(",")):
-        if not part:
-            continue
-        voice_id, separator, name = part.partition(":")
-        trimmed_voice_id = voice_id.strip()
-        if not trimmed_voice_id:
-            continue
-        trimmed_name = name.strip() if separator else ""
-        voices.append(
-            CartesiaVoice(
-                voice_id=trimmed_voice_id,
-                name=trimmed_name or f"Voice {len(voices) + 1}",
-            )
-        )
-    return tuple(voices)
-
-
 def _voices_from_ids(voice_ids) -> tuple[CartesiaVoice, ...]:
     return tuple(
         CartesiaVoice(
@@ -178,17 +132,15 @@ def _voices_from_ids(voice_ids) -> tuple[CartesiaVoice, ...]:
     )
 
 
-CARTESIA_SUPER_AGENT_VOICES = _super_agent_voices(os.environ)
-CARTESIA_SUPER_AGENT_VOICE_IDS = tuple(
-    voice.voice_id for voice in CARTESIA_SUPER_AGENT_VOICES
-)
+SUPER_AGENT_VOICE_IDS = DEFAULT_SUPER_AGENT_VOICE_IDS
+SUPER_AGENT_VOICES = _voices_from_ids(SUPER_AGENT_VOICE_IDS)
 
 
 def _current_super_agent_voices() -> tuple[CartesiaVoice, ...]:
-    voice_ids = tuple(voice.voice_id for voice in CARTESIA_SUPER_AGENT_VOICES)
-    if voice_ids == tuple(CARTESIA_SUPER_AGENT_VOICE_IDS):
-        return CARTESIA_SUPER_AGENT_VOICES
-    return _voices_from_ids(CARTESIA_SUPER_AGENT_VOICE_IDS)
+    voice_ids = tuple(voice.voice_id for voice in SUPER_AGENT_VOICES)
+    if voice_ids == tuple(SUPER_AGENT_VOICE_IDS):
+        return SUPER_AGENT_VOICES
+    return _voices_from_ids(SUPER_AGENT_VOICE_IDS)
 
 
 def stable_super_agent_voice(

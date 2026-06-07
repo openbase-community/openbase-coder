@@ -100,35 +100,27 @@ class FakeSessionManager:
             raise RuntimeError("resume failed")
 
 
-def test_super_agent_voices_parse_named_and_legacy_configs():
-    named = voice_route._super_agent_voices(
-        {"CARTESIA_SUPER_AGENT_VOICES": "voice-a:Alice, voice-b: Bob"}
-    )
-    assert [(voice.voice_id, voice.name) for voice in named] == [
-        ("voice-a", "Alice"),
-        ("voice-b", "Bob"),
-    ]
+def test_super_agent_voices_use_builtin_catalog_pool():
+    voices = voice_route._current_super_agent_voices()
 
-    legacy = voice_route._super_agent_voices(
-        {"CARTESIA_SUPER_AGENT_VOICE_IDS": "voice-a, voice-b"}
-    )
-    assert [(voice.voice_id, voice.name) for voice in legacy] == [
-        ("voice-a", "Voice 1"),
-        ("voice-b", "Voice 2"),
-    ]
+    assert len(voices) > 1
+    assert voice_route.DEFAULT_CARTESIA_VOICE_ID not in {
+        voice.voice_id for voice in voices
+    }
+    assert any(voice.name == "Katie" for voice in voices)
 
 
 def test_super_agent_voice_context_prefers_agent_name(monkeypatch):
     monkeypatch.setattr(
         voice_route,
-        "CARTESIA_SUPER_AGENT_VOICES",
+        "SUPER_AGENT_VOICES",
         (
             voice_route.CartesiaVoice("voice-carl", "Carl"),
             voice_route.CartesiaVoice("voice-dottie", "Dottie"),
         ),
     )
     monkeypatch.setattr(
-        voice_route, "CARTESIA_SUPER_AGENT_VOICE_IDS", ("voice-carl", "voice-dottie")
+        voice_route, "SUPER_AGENT_VOICE_IDS", ("voice-carl", "voice-dottie")
     )
 
     assert super_agent_voice_id_for_context("thread-1", "Build", "Dottie") == "voice-dottie"
@@ -287,7 +279,7 @@ def test_transfer_to_thread_prepares_then_publishes(tmp_path: Path, monkeypatch)
     )
     monkeypatch.setattr(
         voice_route,
-        "CARTESIA_SUPER_AGENT_VOICES",
+        "SUPER_AGENT_VOICES",
         (
             voice_route.CartesiaVoice("voice-a", "Alice"),
             voice_route.CartesiaVoice("voice-b", "Bob"),
@@ -295,7 +287,7 @@ def test_transfer_to_thread_prepares_then_publishes(tmp_path: Path, monkeypatch)
         ),
     )
     monkeypatch.setattr(
-        voice_route, "CARTESIA_SUPER_AGENT_VOICE_IDS", ("voice-a", "voice-b", "voice-dottie")
+        voice_route, "SUPER_AGENT_VOICE_IDS", ("voice-a", "voice-b", "voice-dottie")
     )
     manager = FakeSessionManager()
     monkeypatch.setattr(
@@ -347,7 +339,7 @@ def test_transfer_to_thread_reuses_existing_thread_voice_history(
     monkeypatch.setenv("OPENBASE_CODER_CLI_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(
         voice_route,
-        "CARTESIA_SUPER_AGENT_VOICES",
+        "SUPER_AGENT_VOICES",
         (
             voice_route.CartesiaVoice("voice-asher", "Asher"),
             voice_route.CartesiaVoice("voice-brooke", "Brooke"),
@@ -355,7 +347,7 @@ def test_transfer_to_thread_reuses_existing_thread_voice_history(
     )
     monkeypatch.setattr(
         voice_route,
-        "CARTESIA_SUPER_AGENT_VOICE_IDS",
+        "SUPER_AGENT_VOICE_IDS",
         ("voice-asher", "voice-brooke"),
     )
     record_voice_assignment(

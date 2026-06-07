@@ -184,6 +184,48 @@ def test_ensure_codex_home_default_files_skips_missing_sources(
     assert not target_path.exists()
 
 
+def test_ensure_codex_home_dispatcher_config_creates_default(
+    tmp_path, monkeypatch
+) -> None:
+    config_path = tmp_path / "codex_home" / "dispatcher-config.json"
+    monkeypatch.setattr(setup_cli, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
+
+    setup_cli._ensure_codex_home_dispatcher_config()
+
+    assert json.loads(config_path.read_text(encoding="utf-8")) == {
+        "dispatcher_reasoning_effort": "low",
+        "super_agents_reasoning_effort": "high",
+    }
+    assert config_path.read_text(encoding="utf-8") == (
+        "{\n"
+        '  "dispatcher_reasoning_effort": "low",\n'
+        '  "super_agents_reasoning_effort": "high"\n'
+        "}\n"
+    )
+
+
+def test_ensure_codex_home_dispatcher_config_preserves_existing(
+    tmp_path, monkeypatch
+) -> None:
+    config_path = tmp_path / "codex_home" / "dispatcher-config.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        "{\n"
+        '  "dispatcher_reasoning_effort": "medium",\n'
+        '  "super_agents_reasoning_effort": "xhigh"\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(setup_cli, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
+
+    setup_cli._ensure_codex_home_dispatcher_config()
+
+    assert json.loads(config_path.read_text(encoding="utf-8")) == {
+        "dispatcher_reasoning_effort": "medium",
+        "super_agents_reasoning_effort": "xhigh",
+    }
+
+
 def test_symlink_codex_home_skills_links_workspace_skills(
     tmp_path, monkeypatch
 ) -> None:
@@ -239,6 +281,111 @@ def test_symlink_codex_home_skills_preserves_real_directories(
 
     assert not target.is_symlink()
     assert (target / "SKILL.md").read_text(encoding="utf-8") == "# Custom\n"
+
+
+def test_ensure_codex_home_config_creates_config(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    command = workspace / ".venv" / "bin" / "super-agents-mcp"
+    codex_home = tmp_path / "codex_home"
+    command.parent.mkdir(parents=True)
+    command.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(setup_cli, "CODEX_HOME_DIR", codex_home)
+
+    setup_cli._ensure_codex_home_config(str(workspace))
+
+    assert (codex_home / "config.toml").read_text(encoding="utf-8") == (
+        'sandbox_mode = "danger-full-access"\n'
+        "approval_policy = { granular = { sandbox_approval = false, rules = false, "
+        "mcp_elicitations = false, request_permissions = false, "
+        "skill_approval = false } }\n"
+        "\n"
+        "[mcp_servers.super-agents]\n"
+        f"command = {json.dumps(str(command))}\n"
+    )
+
+
+def test_ensure_codex_home_config_replaces_stale_values(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    command = workspace / ".venv" / "bin" / "super-agents-mcp"
+    codex_home = tmp_path / "codex_home"
+    config_path = codex_home / "config.toml"
+    command.parent.mkdir(parents=True)
+    command.write_text("#!/bin/sh\n", encoding="utf-8")
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        "\n".join(
+            [
+                'sandbox_mode = "workspace-write"',
+                'approval_policy = "on-request"',
+                "",
+                '[projects."/Users/gabemontague"]',
+                'trust_level = "trusted"',
+                "",
+                "[mcp_servers.super-agents]",
+                'command = "/Users/gabemontague/.local/bin/uv"',
+                'args = ["--directory", "/bad", "run", "super-agents-mcp"]',
+                "",
+                "[mcp_servers.playwright]",
+                'command = "npx"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(setup_cli, "CODEX_HOME_DIR", codex_home)
+
+    setup_cli._ensure_codex_home_config(str(workspace))
+
+    updated = config_path.read_text(encoding="utf-8")
+    assert 'sandbox_mode = "workspace-write"' not in updated
+    assert 'approval_policy = "on-request"' not in updated
+    assert 'sandbox_mode = "danger-full-access"' in updated
+    assert (
+        "approval_policy = { granular = { sandbox_approval = false, rules = false, "
+        "mcp_elicitations = false, request_permissions = false, "
+        "skill_approval = false } }"
+    ) in updated
+    assert updated.count("[mcp_servers.super-agents]") == 1
+    assert "/Users/gabemontague/.local/bin/uv" not in updated
+    assert "args =" not in updated
+    assert "[projects.\"/Users/gabemontague\"]\ntrust_level = \"trusted\"" in updated
+    assert f"command = {json.dumps(str(command))}" in updated
+    assert "[mcp_servers.playwright]\ncommand = \"npx\"" in updated
+
+
+def test_ensure_codex_home_config_falls_back_to_resolved_uv(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    cli_dir = workspace / "cli"
+    codex_home = tmp_path / "codex_home"
+    uv_bin = tmp_path / "homebrew" / "bin" / "uv"
+    cli_dir.mkdir(parents=True)
+    uv_bin.parent.mkdir(parents=True)
+    uv_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(setup_cli, "CODEX_HOME_DIR", codex_home)
+    monkeypatch.setattr(
+        setup_cli,
+        "which",
+        lambda command: str(uv_bin) if command == "uv" else None,
+    )
+
+    setup_cli._ensure_codex_home_config(str(workspace))
+
+    assert (codex_home / "config.toml").read_text(encoding="utf-8") == (
+        'sandbox_mode = "danger-full-access"\n'
+        "approval_policy = { granular = { sandbox_approval = false, rules = false, "
+        "mcp_elicitations = false, request_permissions = false, "
+        "skill_approval = false } }\n"
+        "\n"
+        "[mcp_servers.super-agents]\n"
+        f"command = {json.dumps(str(uv_bin))}\n"
+        f"args = {json.dumps(['--directory', str(cli_dir), 'run', 'super-agents-mcp'])}\n"
+    )
 
 
 def test_workspace_skill_sources_supports_direct_skill_dirs(tmp_path) -> None:

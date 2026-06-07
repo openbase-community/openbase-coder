@@ -132,10 +132,10 @@ def test_annotate_thread_payload_does_not_derive_agent_name_from_thread_name(
     monkeypatch.setenv("OPENBASE_CODER_CLI_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(
         voice_route,
-        "CARTESIA_SUPER_AGENT_VOICES",
+        "SUPER_AGENT_VOICES",
         (voice_route.CartesiaVoice("voice-a", "Alice"),),
     )
-    monkeypatch.setattr(voice_route, "CARTESIA_SUPER_AGENT_VOICE_IDS", ("voice-a",))
+    monkeypatch.setattr(voice_route, "SUPER_AGENT_VOICE_IDS", ("voice-a",))
 
     payload = annotate_thread_payload(
         {

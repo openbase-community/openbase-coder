@@ -36,11 +36,13 @@ uvx --python 3.13 openbase-coder setup
 5. Creates `.env` with generated secrets if missing.
 6. Symlinks `~/.openbase/codex_home/auth.json` to `~/.codex/auth.json` so launchd Codex services use the normal Codex login.
 7. Creates missing default instruction files in `~/.openbase/codex_home` from the workspace `instructions/` directory: `AGENTS.md`, `VOICE_INSTRUCTIONS.md`, `DISPATCHER_INSTRUCTIONS.md`, and `SUPER_AGENT_INSTRUCTIONS.md`.
-8. Symlinks workspace skills from `skills/skills/` into `~/.openbase/codex_home/skills`.
-9. Initializes `cli` with `uv sync` and LiveKit model downloads.
-10. Writes Codex app-server defaults like `CODEX_MODEL=gpt-5.5`, `CODEX_MODEL_REASONING_EFFORT=high`, `CODEX_SERVICE_TIER=fast`, `CODEX_APP_SERVER_URL`, and `LIVEKIT_CODEX_THREAD_CWD` into the shared `.env`.
-11. Builds `console`.
-12. Installs launchd services unless skipped.
+8. Creates missing `~/.openbase/codex_home/dispatcher-config.json` with dispatcher reasoning effort `low` and Super Agents reasoning effort `high`.
+9. Symlinks workspace skills from `skills/skills/` into `~/.openbase/codex_home/skills`.
+10. Initializes `cli` with `uv sync` and LiveKit model downloads.
+11. Configures `~/.openbase/codex_home/config.toml` with full Codex local access (`sandbox_mode = "danger-full-access"`), disabled permission prompts, and the Super Agents MCP server. The MCP command prefers the workspace venv executable and falls back to the resolved local `uv` path.
+12. Writes Codex app-server defaults like `CODEX_MODEL=gpt-5.5`, `CODEX_MODEL_REASONING_EFFORT=high`, `CODEX_SERVICE_TIER=fast`, `CODEX_APP_SERVER_URL`, and `LIVEKIT_CODEX_THREAD_CWD` into the shared `.env`.
+13. Builds `console`.
+14. Installs launchd services unless skipped.
 
 ## Example
 
@@ -54,5 +56,7 @@ uvx --python 3.13 openbase-coder setup \
 
 - If `.env` already exists, setup leaves it unchanged.
 - If instruction files already exist in `~/.openbase/codex_home`, setup leaves them unchanged.
+- If `dispatcher-config.json` already exists in `~/.openbase/codex_home`, setup leaves it unchanged.
 - Existing skill symlinks in `~/.openbase/codex_home/skills` are updated to the workspace source. Real skill directories or files are left unchanged.
+- Existing `~/.openbase/codex_home/config.toml` content is preserved, except setup enforces the root permission keys and creates or replaces the `[mcp_servers.super-agents]` table.
 - If `npm`, `uv`, or `multi` are missing, related steps are skipped with messages.

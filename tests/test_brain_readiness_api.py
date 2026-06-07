@@ -30,7 +30,8 @@ def test_parallel_voice_threshold_for_score() -> None:
     assert parallel_voice_threshold_for_score(99) == 7
 
 
-def test_brain_readiness_response_reads_score_file(tmp_path) -> None:
+def test_brain_readiness_response_reads_score_file(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("OPENBASE_BRAIN_SCORE_TOKEN", "token-1")
     score_path = tmp_path / "brain_score.json"
     updated_at = time.time() - 3
     score_path.write_text(
@@ -56,9 +57,26 @@ def test_brain_readiness_response_reads_score_file(tmp_path) -> None:
     assert response["age_seconds"] >= 0
 
 
+def test_brain_readiness_response_is_disabled_without_token(monkeypatch, tmp_path) -> None:
+    score_path = tmp_path / "brain_score.json"
+    missing_token_path = tmp_path / "missing-token"
+    score_path.write_text(json.dumps({"brs": 84}), encoding="utf-8")
+    monkeypatch.delenv("OPENBASE_BRAIN_SCORE_TOKEN", raising=False)
+    monkeypatch.setenv("OPENBASE_BRAIN_SCORE_TOKEN_FILE", str(missing_token_path))
+
+    response = build_brain_readiness_response(score_path)
+
+    assert response["available"] is False
+    assert response["brain_readiness_score"] is None
+    assert response["brs"] is None
+    assert response["parallel_voice_threshold"] is None
+    assert response["disabled_reason"] == "missing_token"
+
+
 def test_brain_readiness_endpoint_uses_configured_score_path(monkeypatch, tmp_path) -> None:
     score_path = tmp_path / "brain_score.json"
     score_path.write_text(json.dumps({"brs": 19}), encoding="utf-8")
+    monkeypatch.setenv("OPENBASE_BRAIN_SCORE_TOKEN", "token-1")
     monkeypatch.setenv("OPENBASE_BRAIN_SCORE_OUTPUT_PATH", str(score_path))
 
     request = APIRequestFactory().get("/api/brain-readiness/")

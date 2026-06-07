@@ -19,14 +19,22 @@ This page lists the key files Openbase CLI creates or consumes.
 | `~/.openbase/codex_home/VOICE_INSTRUCTIONS.md` | `openbase-coder setup` | Default direct voice-session instructions |
 | `~/.openbase/codex_home/DISPATCHER_INSTRUCTIONS.md` | `openbase-coder setup` | Default dispatcher-only instructions |
 | `~/.openbase/codex_home/SUPER_AGENT_INSTRUCTIONS.md` | `openbase-coder setup` | Default Super Agent thread instructions |
+| `~/.openbase/codex_home/dispatcher-config.json` | `openbase-coder setup`, user/MCP commands | Dispatcher runtime settings, including dispatcher and Super Agents reasoning effort |
+| `~/.openbase/codex_home/config.toml` | `openbase-coder setup` | Openbase service Codex config, including broad local access and the Super Agents MCP server |
 | `~/.openbase/codex_home/skills/<skill>/` | `openbase-coder setup` | Symlink to a workspace-owned skill source under `skills/skills/<skill>/` |
 | `~/.openbase/workspace/` | `openbase-coder setup` | Openbase workspace repo clone |
 | `~/.openbase/workspace/cli/.venv/` | `openbase-coder setup` | CLI and bundled LiveKit worker environment |
 
 The four instruction files above are seeded from the workspace `instructions/`
 directory and are only created when missing.
+The dispatcher config is created when missing with dispatcher reasoning effort
+`low` and Super Agents reasoning effort `high`; setup does not overwrite an
+existing dispatcher config.
 Workspace skills are symlink-installed, not copied, so edits to source skills
 are visible to the Openbase Codex home immediately.
+The Codex home config grants full local sandbox access, disables permission
+prompts, and uses the workspace venv Super Agents MCP executable when available;
+otherwise setup records the resolved absolute `uv` path for the current machine.
 
 ## Service Artifacts
 

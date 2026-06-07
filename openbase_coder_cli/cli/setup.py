@@ -15,6 +15,7 @@ from openbase_coder_cli.cli.node import run_workspace_package_command
 from openbase_coder_cli.paths import (
     CODEX_AGENTS_MD_PATH,
     CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
+    CODEX_DISPATCHER_CONFIG_PATH,
     CODEX_DISPATCHER_INSTRUCTIONS_PATH,
     CODEX_HOME_DIR,
     CODEX_SUPER_AGENT_INSTRUCTIONS_PATH,
@@ -35,6 +36,21 @@ CODEX_HOME_DEFAULT_FILES = (
     ("DISPATCHER_INSTRUCTIONS.md", CODEX_DISPATCHER_INSTRUCTIONS_PATH),
     ("SUPER_AGENT_INSTRUCTIONS.md", CODEX_SUPER_AGENT_INSTRUCTIONS_PATH),
 )
+SUPER_AGENTS_MCP_TABLE = "mcp_servers.super-agents"
+SUPER_AGENTS_MCP_COMMAND = "super-agents-mcp"
+CODEX_HOME_PERMISSION_VALUES = (
+    ("sandbox_mode", json.dumps("danger-full-access")),
+    (
+        "approval_policy",
+        "{ granular = { sandbox_approval = false, rules = false, "
+        "mcp_elicitations = false, request_permissions = false, "
+        "skill_approval = false } }",
+    ),
+)
+CODEX_HOME_DEFAULT_DISPATCHER_CONFIG = {
+    "dispatcher_reasoning_effort": "low",
+    "super_agents_reasoning_effort": "high",
+}
 
 
 @click.command()
@@ -110,10 +126,14 @@ def setup(
     # --- Symlink Codex auth into the service CODEX_HOME ---
     _symlink_codex_auth()
     _ensure_codex_home_default_files(workspace_dir)
+    _ensure_codex_home_dispatcher_config()
     _symlink_codex_home_skills(workspace_dir)
 
     # --- Initialize CLI workspace ---
     _init_cli_workspace(workspace_dir)
+
+    # --- Configure the service CODEX_HOME ---
+    _ensure_codex_home_config(workspace_dir)
 
     # --- Install/update user-facing CLI shim ---
     _install_cli_shim(workspace_dir)
@@ -310,6 +330,23 @@ def _ensure_codex_home_default_files(workspace_dir: str) -> None:
         click.echo(f"Created Codex home default at {target_path}")
 
 
+def _ensure_codex_home_dispatcher_config() -> None:
+    """Create the missing Openbase dispatcher config."""
+    if CODEX_DISPATCHER_CONFIG_PATH.exists():
+        click.echo(
+            f"Codex home dispatcher config already exists at "
+            f"{CODEX_DISPATCHER_CONFIG_PATH}"
+        )
+        return
+
+    CODEX_DISPATCHER_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CODEX_DISPATCHER_CONFIG_PATH.write_text(
+        json.dumps(CODEX_HOME_DEFAULT_DISPATCHER_CONFIG, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    click.echo(f"Created Codex home dispatcher config at {CODEX_DISPATCHER_CONFIG_PATH}")
+
+
 def _symlink_codex_home_skills(workspace_dir: str) -> None:
     """Symlink workspace-owned skills into the Openbase Codex home."""
     source_root = Path(workspace_dir) / CODEX_HOME_SKILLS_SOURCE_DIR
@@ -337,6 +374,141 @@ def _symlink_codex_home_skills(workspace_dir: str) -> None:
 
         target_path.symlink_to(source_path)
         click.echo(f"Linked Codex home skill {target_path} → {source_path}")
+
+
+def _ensure_codex_home_config(workspace_dir: str) -> None:
+    """Configure Openbase's service Codex home."""
+    CODEX_HOME_DIR.mkdir(parents=True, exist_ok=True)
+    config_path = CODEX_HOME_DIR / "config.toml"
+    command_path, args = _super_agents_mcp_command(Path(workspace_dir))
+    block = (
+        f"[{SUPER_AGENTS_MCP_TABLE}]\n"
+        f"command = {json.dumps(str(command_path))}\n"
+        f"{_toml_args_line(args)}"
+    )
+
+    if not command_path.is_file():
+        click.echo(
+            f"Super Agents MCP command not found at {command_path}; "
+            "writing the expected config path anyway."
+        )
+
+    existing = ""
+    if config_path.is_file():
+        existing = config_path.read_text(encoding="utf-8")
+
+    updated = _ensure_toml_root_values(existing, CODEX_HOME_PERMISSION_VALUES)
+    updated = _replace_toml_table(updated, SUPER_AGENTS_MCP_TABLE, block)
+    if updated == existing:
+        click.echo(f"Codex home config already configured at {config_path}")
+        return
+
+    config_path.write_text(updated, encoding="utf-8")
+    click.echo(f"Configured Codex home config at {config_path}")
+
+
+def _super_agents_mcp_command(workspace_dir: Path) -> tuple[Path, list[str]]:
+    candidates = (
+        workspace_dir / ".venv" / "bin" / SUPER_AGENTS_MCP_COMMAND,
+        workspace_dir / "cli" / ".venv" / "bin" / SUPER_AGENTS_MCP_COMMAND,
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate, []
+
+    if command := which(SUPER_AGENTS_MCP_COMMAND):
+        return Path(command), []
+
+    if uv_bin := which("uv"):
+        run_dir = workspace_dir / "cli"
+        if not run_dir.is_dir():
+            run_dir = workspace_dir
+        return Path(uv_bin), [
+            "--directory",
+            str(run_dir),
+            "run",
+            SUPER_AGENTS_MCP_COMMAND,
+        ]
+
+    return candidates[0], []
+
+
+def _toml_args_line(args: list[str]) -> str:
+    if not args:
+        return ""
+    return f"args = {json.dumps(args)}\n"
+
+
+def _ensure_toml_root_values(
+    text: str,
+    values: tuple[tuple[str, str], ...],
+) -> str:
+    lines = text.splitlines()
+    first_table_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.strip().startswith("[") and line.strip().endswith("]")
+        ),
+        len(lines),
+    )
+    root_lines = lines[:first_table_index]
+    table_lines = lines[first_table_index:]
+    keys = {key for key, _value in values}
+    updated_root = [
+        line
+        for line in root_lines
+        if _toml_root_key(line) not in keys
+    ]
+
+    while updated_root and not updated_root[-1].strip():
+        updated_root.pop()
+
+    for key, value in values:
+        updated_root.append(f"{key} = {value}")
+
+    while table_lines and not table_lines[0].strip():
+        table_lines.pop(0)
+
+    if table_lines:
+        return "\n".join(updated_root) + "\n\n" + "\n".join(table_lines) + "\n"
+    return "\n".join(updated_root) + "\n"
+
+
+def _toml_root_key(line: str) -> str | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in stripped:
+        return None
+    return stripped.split("=", 1)[0].strip()
+
+
+def _replace_toml_table(text: str, table_name: str, block: str) -> str:
+    target_header = f"[{table_name}]"
+    lines = text.splitlines()
+    output: list[str] = []
+    index = 0
+
+    while index < len(lines):
+        if lines[index].strip() == target_header:
+            index += 1
+            while index < len(lines):
+                stripped = lines[index].strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    break
+                index += 1
+            while output and not output[-1].strip():
+                output.pop()
+            continue
+
+        output.append(lines[index])
+        index += 1
+
+    while output and not output[-1].strip():
+        output.pop()
+
+    if output:
+        return "\n".join(output) + "\n\n" + block
+    return block
 
 
 def _workspace_skill_sources(source_root: Path) -> list[Path]:
@@ -474,8 +646,6 @@ def _ensure_env_file(
         "LIVEKIT_CODEX_THREAD_CWD=~",
         "# Cartesia voice used by the LiveKit agent TTS.",
         "CARTESIA_VOICE_ID=9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
-        "# Optional comma-separated voices for direct thread routing: voice-id:Display Name.",
-        "# CARTESIA_SUPER_AGENT_VOICES=f786b574-daa5-4673-aa0c-cbe3e8534c02:Alice",
         "OPENBASE_CODER_CLI_OAUTH_CLIENT_ID=openbase-coder-cli",
     ]
 

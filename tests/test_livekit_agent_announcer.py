@@ -378,22 +378,14 @@ def test_direct_livekit_instruction_loader_priority(tmp_path):
     )
 
 
-def test_super_agent_voices_parse_named_and_legacy_configs():
-    named = livekit._super_agent_voices(
-        {"CARTESIA_SUPER_AGENT_VOICES": "voice-a:Alice, voice-b: Bob"}
-    )
-    assert [(voice.voice_id, voice.name) for voice in named] == [
-        ("voice-a", "Alice"),
-        ("voice-b", "Bob"),
-    ]
+def test_super_agent_voices_use_builtin_catalog_pool():
+    voices = livekit._current_super_agent_voices()
 
-    legacy = livekit._super_agent_voices(
-        {"CARTESIA_SUPER_AGENT_VOICE_IDS": "voice-a, voice-b"}
-    )
-    assert [(voice.voice_id, voice.name) for voice in legacy] == [
-        ("voice-a", "Voice 1"),
-        ("voice-b", "Voice 2"),
-    ]
+    assert len(voices) > 1
+    assert livekit.DEFAULT_CARTESIA_VOICE_ID not in {
+        voice.voice_id for voice in voices
+    }
+    assert any(voice.name == "Katie" for voice in voices)
 
 
 class FakeSpeechHandle:
@@ -702,15 +694,13 @@ async def test_voice_router_transfers_to_prepared_target(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         livekit,
-        "CARTESIA_SUPER_AGENT_VOICES",
+        "SUPER_AGENT_VOICES",
         (
             livekit.CartesiaVoice("voice-a", "Alice"),
             livekit.CartesiaVoice("voice-b", "Bob"),
         ),
     )
-    monkeypatch.setattr(
-        livekit, "CARTESIA_SUPER_AGENT_VOICE_IDS", ("voice-a", "voice-b")
-    )
+    monkeypatch.setattr(livekit, "SUPER_AGENT_VOICE_IDS", ("voice-a", "voice-b"))
 
     async def fake_prepare(self):
         prepared.append(

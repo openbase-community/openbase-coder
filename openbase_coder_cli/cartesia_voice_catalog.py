@@ -96,6 +96,12 @@ CARTESIA_VOICE_CATALOG: tuple[CartesiaVoiceCatalogEntry, ...] = (
     CartesiaVoiceCatalogEntry("91b4cf29-5166-44eb-8054-30d40ecc8081", "Tina", "en", "US", "feminine"),
 )
 
+DEFAULT_SUPER_AGENT_VOICE_IDS = tuple(
+    voice.id
+    for voice in CARTESIA_VOICE_CATALOG
+    if voice.id != "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
+)
+
 _CATALOG_BY_ID = {voice.id: voice for voice in CARTESIA_VOICE_CATALOG}
 _CATALOG_BY_NORMALIZED_NAME = {
     " ".join(voice.name.casefold().split()): voice for voice in CARTESIA_VOICE_CATALOG

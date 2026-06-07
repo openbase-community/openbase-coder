@@ -113,14 +113,14 @@ def test_user_super_agent_name_derives_from_thread_name(monkeypatch):
     voice_route = importlib.import_module("openbase_coder_cli.livekit_voice_route")
     monkeypatch.setattr(
         voice_route,
-        "CARTESIA_SUPER_AGENT_VOICES",
+        "SUPER_AGENT_VOICES",
         (
             voice_route.CartesiaVoice("voice-carl", "Carl"),
             voice_route.CartesiaVoice("voice-dottie", "Dottie"),
         ),
     )
     monkeypatch.setattr(
-        voice_route, "CARTESIA_SUPER_AGENT_VOICE_IDS", ("voice-carl", "voice-dottie")
+        voice_route, "SUPER_AGENT_VOICE_IDS", ("voice-carl", "voice-dottie")
     )
 
     result = CliRunner().invoke(main_cli.main, ["super-agent-name", "Build Thing"])
@@ -147,11 +147,11 @@ def test_user_super_agent_name_json(monkeypatch):
     voice_route = importlib.import_module("openbase_coder_cli.livekit_voice_route")
     monkeypatch.setattr(
         voice_route,
-        "CARTESIA_SUPER_AGENT_VOICES",
+        "SUPER_AGENT_VOICES",
         (voice_route.CartesiaVoice("voice-dottie", "Dottie"),),
     )
     monkeypatch.setattr(
-        voice_route, "CARTESIA_SUPER_AGENT_VOICE_IDS", ("voice-dottie",)
+        voice_route, "SUPER_AGENT_VOICE_IDS", ("voice-dottie",)
     )
 
     result = CliRunner().invoke(

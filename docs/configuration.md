@@ -33,7 +33,6 @@ Openbase CLI reads configuration from environment variables (usually loaded from
 | `ASSEMBLY_AI_API_KEY`      | Optional | Speech-to-text provider      |
 | `CARTESIA_API_KEY`         | Optional | Text-to-speech provider      |
 | `CARTESIA_VOICE_ID`        | Optional | Text-to-speech voice ID      |
-| `CARTESIA_SUPER_AGENT_VOICES` | Optional | Comma-separated direct thread voices as `voice-id:Display Name` |
 
 ## Auth Modes
 
