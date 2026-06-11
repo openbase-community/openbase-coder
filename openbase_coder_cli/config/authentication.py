@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import httpx
 from django.conf import settings
@@ -12,6 +13,65 @@ from rest_framework import authentication, exceptions
 from openbase_coder_cli.config.jwt_validation import InvalidTokenError, JWKSValidator
 
 logger = logging.getLogger(__name__)
+
+
+def _allow_any_subject() -> bool:
+    """Whether the single-owner identity check is disabled (opt-in)."""
+    return os.environ.get(
+        "OPENBASE_CODER_CLI_ALLOW_ANY_SUBJECT", "false"
+    ).strip().lower() == "true"
+
+
+def is_owner_identity(claims: dict) -> bool:
+    """Return whether ``claims`` identify the machine owner.
+
+    The local server holds the keys to one user's filesystem and agent
+    runtime. A cloud JWT only proves the bearer is *some* valid Openbase
+    user, not the owner of this machine, so signature validity alone is not
+    authorization. We pin the server to the account that ran
+    ``openbase-coder login`` and reject every other subject.
+
+    Returns ``True`` (check disabled) when
+    ``OPENBASE_CODER_CLI_ALLOW_ANY_SUBJECT=true`` — only for trusted
+    multi-user setups that intentionally share one server. Returns ``False``
+    when no owner is logged in (the server has no authorized identity yet).
+    """
+    if _allow_any_subject():
+        return True
+
+    # Imported lazily to avoid import-time settings access.
+    from openbase_coder_cli.config.token_manager import get_token_manager
+
+    owner = get_token_manager().get_owner_identity()
+    if not owner:
+        return False
+
+    token_sub = str(claims.get("sub") or "")
+    if token_sub and token_sub == owner.get("sub"):
+        return True
+
+    token_email = str(claims.get("email") or "").strip().lower()
+    return bool(token_email and token_email == owner.get("email"))
+
+
+def enforce_owner_identity(claims: dict) -> None:
+    """Raise ``AuthenticationFailed`` unless ``claims`` are the owner's."""
+    if is_owner_identity(claims):
+        return
+    if not _allow_any_subject() and not get_token_manager_owner():
+        raise exceptions.AuthenticationFailed(
+            "This server has no logged-in owner. Run 'openbase-coder login'."
+        )
+    raise exceptions.AuthenticationFailed(
+        "Token identity is not authorized for this server."
+    )
+
+
+def get_token_manager_owner() -> dict:
+    """Owner identity from local credentials (empty when not logged in)."""
+    from openbase_coder_cli.config.token_manager import get_token_manager
+
+    return get_token_manager().get_owner_identity()
 
 _validator: JWKSValidator | None = None
 
@@ -146,6 +206,7 @@ class JWTAuthentication(authentication.BaseAuthentication):
             except InvalidTokenError:
                 raise exceptions.AuthenticationFailed(str(exc)) from None
 
+        enforce_owner_identity(claims)
         user = _get_or_create_user(sub=claims["sub"])
         return (user, claims)
 

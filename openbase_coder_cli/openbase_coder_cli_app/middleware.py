@@ -9,7 +9,9 @@ import httpx
 from channels.middleware import BaseMiddleware
 from django.conf import settings
 
+from openbase_coder_cli.config.authentication import is_owner_identity
 from openbase_coder_cli.config.jwt_validation import InvalidTokenError, JWKSValidator
+from openbase_coder_cli.config.token_manager import decode_jwt_claims_unverified
 
 logger = logging.getLogger(__name__)
 
@@ -112,17 +114,27 @@ class TokenAuthMiddleware(BaseMiddleware):
 
         scope["user"] = None
 
-        if token:
-            if token.count(".") == 2:
-                validator = _get_ws_validator()
-                if validator:
-                    try:
-                        await validator.validate_async(token)
+        if token and token.count(".") == 2:
+            validator = _get_ws_validator()
+            if validator:
+                claims: dict | None = None
+                try:
+                    claims = await validator.validate_async(token)
+                except InvalidTokenError:
+                    if await _validate_ws_via_auth_session_async(token):
+                        # Backend vouched for the signature; read identity
+                        # claims from the (now-trusted) token to pin owner.
+                        claims = decode_jwt_claims_unverified(token)
+                    else:
+                        logger.debug("WebSocket JWT validation failed")
+
+                if claims is not None:
+                    if is_owner_identity(claims):
                         scope["user"] = "authenticated"
-                    except InvalidTokenError:
-                        if await _validate_ws_via_auth_session_async(token):
-                            scope["user"] = "authenticated"
-                        else:
-                            logger.debug("WebSocket JWT validation failed")
+                    else:
+                        logger.warning(
+                            "Rejecting WebSocket: token identity is not the "
+                            "server owner"
+                        )
 
         return await super().__call__(scope, receive, send)
