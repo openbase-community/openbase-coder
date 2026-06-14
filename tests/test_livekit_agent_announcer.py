@@ -34,6 +34,10 @@ from openbase_coder_cli.livekit_agent.livekit import (
     parse_voice_route_packet,
     stable_super_agent_voice_id,
 )
+from openbase_coder_cli.livekit_agent.super_agents_client import (
+    SuperAgentsLiveKitClient,
+)
+from openbase_coder_cli.tts_providers import KOKORO_PROVIDER_ID
 
 
 def test_parse_announcer_packet_ignores_other_topics():
@@ -78,6 +82,154 @@ def test_parse_announcer_audio_packet_reads_path():
         audio_path="/tmp/done.wav",
     )
     assert parse_announcer_packet(packet) is None
+
+
+def test_openbase_audio_proxy_token_fails_closed_when_login_missing(monkeypatch):
+    class MissingLoginManager:
+        def get_access_token(self):
+            raise livekit.AuthLoginRequiredError("login required")
+
+    monkeypatch.setattr(livekit, "OPENBASE_AUDIO_PROXY_ENABLED", True)
+    monkeypatch.setattr(livekit, "WEB_BACKEND_URL", "https://app.openbase.cloud")
+    monkeypatch.setattr(
+        livekit, "get_token_manager", lambda _url: MissingLoginManager()
+    )
+
+    with pytest.raises(livekit.AudioProxyAuthenticationError) as exc_info:
+        livekit._openbase_audio_proxy_token()
+
+    message = str(exc_info.value)
+    assert "Openbase audio proxy is enabled" in message
+    assert "openbase-coder login" in message
+    assert "OPENBASE_AUDIO_PROXY_ENABLED=0" in message
+
+
+def test_openbase_audio_proxy_token_fails_closed_on_empty_token(monkeypatch):
+    class EmptyTokenManager:
+        def get_access_token(self):
+            return ""
+
+    monkeypatch.setattr(livekit, "OPENBASE_AUDIO_PROXY_ENABLED", True)
+    monkeypatch.setattr(livekit, "WEB_BACKEND_URL", "https://app.openbase.cloud")
+    monkeypatch.setattr(livekit, "get_token_manager", lambda _url: EmptyTokenManager())
+
+    with pytest.raises(livekit.AudioProxyAuthenticationError) as exc_info:
+        livekit._openbase_audio_proxy_token()
+
+    assert "empty Openbase access token" in str(exc_info.value)
+
+
+def test_openbase_audio_proxy_token_allows_direct_fallback_when_disabled(monkeypatch):
+    def fail_get_token_manager(_url):
+        raise AssertionError("token manager should not be used when proxy is disabled")
+
+    monkeypatch.setattr(livekit, "OPENBASE_AUDIO_PROXY_ENABLED", False)
+    monkeypatch.setattr(livekit, "get_token_manager", fail_get_token_manager)
+
+    assert livekit._openbase_audio_proxy_token() == ""
+
+
+def test_openbase_audio_proxy_token_required_fails_when_disabled(monkeypatch):
+    monkeypatch.setattr(livekit, "OPENBASE_AUDIO_PROXY_ENABLED", False)
+
+    with pytest.raises(livekit.AudioProxyAuthenticationError) as exc_info:
+        livekit._openbase_audio_proxy_token(required=True)
+
+    assert "Openbase Cloud audio is selected" in str(exc_info.value)
+
+
+def test_livekit_agent_capacity_uses_livekit_defaults_for_remote_models(monkeypatch):
+    monkeypatch.delenv(livekit.LIVEKIT_AGENT_LOAD_THRESHOLD_ENV, raising=False)
+    monkeypatch.delenv(livekit.LIVEKIT_AGENT_NUM_IDLE_PROCESSES_ENV, raising=False)
+    monkeypatch.setattr(
+        livekit,
+        "selected_stt_provider_id",
+        lambda: livekit.ASSEMBLYAI_STT_PROVIDER_ID,
+    )
+    monkeypatch.setattr(
+        livekit,
+        "selected_tts_provider_id",
+        lambda: livekit.CARTESIA_PROVIDER_ID,
+    )
+
+    assert livekit._livekit_agent_server_options() == {}
+
+
+def test_livekit_agent_capacity_uses_local_friendly_defaults_for_local_stt(monkeypatch):
+    monkeypatch.delenv(livekit.LIVEKIT_AGENT_LOAD_THRESHOLD_ENV, raising=False)
+    monkeypatch.delenv(livekit.LIVEKIT_AGENT_NUM_IDLE_PROCESSES_ENV, raising=False)
+    monkeypatch.setattr(
+        livekit,
+        "selected_stt_provider_id",
+        lambda: livekit.LOCAL_MLX_WHISPER_STT_PROVIDER_ID,
+    )
+    monkeypatch.setattr(
+        livekit,
+        "selected_tts_provider_id",
+        lambda: livekit.CARTESIA_PROVIDER_ID,
+    )
+
+    assert livekit._livekit_agent_server_options() == {
+        "load_threshold": float("inf"),
+        "num_idle_processes": 1,
+    }
+
+
+def test_livekit_agent_capacity_uses_local_friendly_defaults_for_local_tts(monkeypatch):
+    monkeypatch.delenv(livekit.LIVEKIT_AGENT_LOAD_THRESHOLD_ENV, raising=False)
+    monkeypatch.delenv(livekit.LIVEKIT_AGENT_NUM_IDLE_PROCESSES_ENV, raising=False)
+    monkeypatch.setattr(
+        livekit,
+        "selected_stt_provider_id",
+        lambda: livekit.ASSEMBLYAI_STT_PROVIDER_ID,
+    )
+    monkeypatch.setattr(
+        livekit,
+        "selected_tts_provider_id",
+        lambda: KOKORO_PROVIDER_ID,
+    )
+
+    assert livekit._livekit_agent_server_options() == {
+        "load_threshold": float("inf"),
+        "num_idle_processes": 1,
+    }
+
+
+def test_livekit_agent_capacity_accepts_env_overrides_for_remote_models(monkeypatch):
+    monkeypatch.setenv(livekit.LIVEKIT_AGENT_LOAD_THRESHOLD_ENV, "1.5")
+    monkeypatch.setenv(livekit.LIVEKIT_AGENT_NUM_IDLE_PROCESSES_ENV, "3")
+    monkeypatch.setattr(
+        livekit,
+        "selected_stt_provider_id",
+        lambda: livekit.ASSEMBLYAI_STT_PROVIDER_ID,
+    )
+    monkeypatch.setattr(
+        livekit,
+        "selected_tts_provider_id",
+        lambda: livekit.CARTESIA_PROVIDER_ID,
+    )
+
+    assert livekit._livekit_agent_server_options() == {
+        "load_threshold": 1.5,
+        "num_idle_processes": 3,
+    }
+
+
+def test_livekit_agent_capacity_ignores_invalid_env_for_remote_models(monkeypatch):
+    monkeypatch.setenv(livekit.LIVEKIT_AGENT_LOAD_THRESHOLD_ENV, "nope")
+    monkeypatch.setenv(livekit.LIVEKIT_AGENT_NUM_IDLE_PROCESSES_ENV, "-1")
+    monkeypatch.setattr(
+        livekit,
+        "selected_stt_provider_id",
+        lambda: livekit.ASSEMBLYAI_STT_PROVIDER_ID,
+    )
+    monkeypatch.setattr(
+        livekit,
+        "selected_tts_provider_id",
+        lambda: livekit.CARTESIA_PROVIDER_ID,
+    )
+
+    assert livekit._livekit_agent_server_options() == {}
 
 
 def test_parse_voice_route_packet_reads_exit_action():
@@ -385,12 +537,32 @@ def test_direct_livekit_instruction_loader_priority(tmp_path):
     )
 
 
-def test_super_agent_voices_use_builtin_catalog_pool():
+def test_super_agent_voices_use_builtin_catalog_pool(monkeypatch):
+    monkeypatch.setattr(
+        livekit,
+        "selected_tts_provider_id",
+        lambda: livekit.CARTESIA_PROVIDER_ID,
+    )
     voices = livekit._current_super_agent_voices()
 
     assert len(voices) > 1
     assert livekit.DEFAULT_CARTESIA_VOICE_ID not in {voice.voice_id for voice in voices}
     assert any(voice.name == "Katie" for voice in voices)
+
+
+def test_kokoro_super_agent_voices_are_english_only(monkeypatch):
+    monkeypatch.setattr(
+        livekit,
+        "selected_tts_provider_id",
+        lambda: KOKORO_PROVIDER_ID,
+    )
+
+    voices = livekit._current_super_agent_voices()
+
+    assert len(voices) > 1
+    assert {voice.voice_id[:1] for voice in voices} <= {"a", "b"}
+    assert "jf_tebukuro" not in {voice.voice_id for voice in voices}
+    assert "zm_yunjian" not in {voice.voice_id for voice in voices}
 
 
 class FakeSpeechHandle:
@@ -718,7 +890,7 @@ async def test_voice_router_transfers_to_prepared_target(monkeypatch, tmp_path):
         )
         return self._thread_id
 
-    monkeypatch.setattr(CodexAppServerClient, "prepare", fake_prepare)
+    monkeypatch.setattr(SuperAgentsLiveKitClient, "prepare", fake_prepare)
 
     router = LiveKitVoiceRouter(dispatcher)
     await router.transfer_to_thread(

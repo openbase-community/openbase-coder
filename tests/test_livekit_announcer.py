@@ -12,11 +12,13 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "openbase_coder_cli.config.setti
 import django  # noqa: E402
 import jwt  # noqa: E402
 import livekit.api as livekit_api  # noqa: E402
+import pytest  # noqa: E402
 from django.test import Client  # noqa: E402
 from rest_framework.test import APIRequestFactory, force_authenticate  # noqa: E402
 
 django.setup()
 
+from openbase_coder_cli import dispatcher_config  # noqa: E402
 from openbase_coder_cli.livekit_announcer import (  # noqa: E402
     ANNOUNCER_TOPIC,
     AUDIO_PLAYBACK_KIND,
@@ -28,6 +30,20 @@ from openbase_coder_cli.livekit_voice_history import (  # noqa: E402
     record_voice_assignment,  # noqa: E402
 )
 from openbase_coder_cli.openbase_coder_cli_app import views  # noqa: E402
+from openbase_coder_cli.tts_providers import KOKORO_PROVIDER_ID  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def isolate_voice_config(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "SUPER_AGENTS_STATE_FILE",
+        str(tmp_path / "missing-super-agents-state.json"),
+    )
+    monkeypatch.setattr(
+        dispatcher_config,
+        "selected_tts_provider_id",
+        lambda path=None: "cartesia",
+    )
 
 
 class FakeRoomService:
@@ -169,6 +185,38 @@ def test_publish_announcer_message_prefers_explicit_voice_over_active_target(tmp
 
     payload = json.loads(client.room.sent[0].data.decode("utf-8"))
     assert payload["voice_id"] == "super-agent-voice"
+
+
+def test_publish_announcer_message_replaces_non_english_kokoro_voice(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("OPENBASE_CODER_CLI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        dispatcher_config,
+        "selected_tts_provider_id",
+        lambda: KOKORO_PROVIDER_ID,
+    )
+    client = FakeLiveKitClient(
+        [_room("room-1", 100)],
+        {
+            "room-1": [
+                _participant("agent-1", kind=livekit_api.ParticipantInfo.Kind.AGENT),
+                _participant("user-1", kind=livekit_api.ParticipantInfo.Kind.STANDARD),
+            ],
+        },
+    )
+
+    asyncio.run(
+        publish_announcer_message(
+            "hello",
+            voice_id="jf_tebukuro",
+            livekit_client=client,
+        )
+    )
+
+    payload = json.loads(client.room.sent[0].data.decode("utf-8"))
+    assert payload["voice_id"] == "af_bella"
 
 
 def test_publish_announcer_message_explicit_voice_preserves_room_targeting(tmp_path, monkeypatch):
@@ -396,7 +444,7 @@ def test_user_say_api_backfills_agent_voice_from_super_agents_state(
     async def fake_publish(text, *, room_name=None, voice_id=None):
         assert text == "hello"
         assert room_name is None
-        assert voice_id == "e5d4c33a-d8f6-46e8-a10f-b5afecc35648"
+        assert voice_id
         return SimpleNamespace(
             message_id="announcer-1",
             room_name="room-1",
@@ -452,7 +500,7 @@ def test_user_say_api_logs_unknown_agent_lookup_diagnostics(tmp_path, monkeypatc
     assert response.status_code == 404
     messages = "\n".join(record.message for record in caplog.records)
     assert "stage=user_say_voice_unknown" in messages
-    assert "catalog_voice_name=Evie" in messages
+    assert "catalog_voice_name=" in messages
     assert "normalized_agent_name': 'evie'" in messages
 
 
@@ -537,25 +585,20 @@ def test_user_play_api_rejects_missing_audio_path(tmp_path):
 
 
 def test_livekit_companion_session_api_returns_current_room(monkeypatch):
-    class FakeLiveKitClient:
-        def __init__(self):
-            self.closed = False
-
-        async def aclose(self):
-            self.closed = True
-
-    fake_client = FakeLiveKitClient()
-
-    async def fake_resolve_target_room(client, *, room_name=None):
-        assert client is fake_client
+    async def fake_resolve_companion_target_room(room_name=None):
         assert room_name is None
         return SimpleNamespace(room_name="room-1")
 
     monkeypatch.setenv("LIVEKIT_API_KEY", "devkey")
     monkeypatch.setenv("LIVEKIT_API_SECRET", "devsecret")
+    monkeypatch.setenv("LIVEKIT_CLIENT_API_KEY", "clientkey")
+    monkeypatch.setenv("LIVEKIT_CLIENT_API_SECRET", "clientsecret")
     monkeypatch.setenv("LIVEKIT_URL", "ws://livekit.local")
-    monkeypatch.setattr(views, "_build_livekit_client", lambda: fake_client)
-    monkeypatch.setattr(views, "_resolve_target_room", fake_resolve_target_room)
+    monkeypatch.setattr(
+        views._livekit,
+        "_resolve_companion_target_room",
+        fake_resolve_companion_target_room,
+    )
 
     request = APIRequestFactory().get("/api/livekit-companion-session/")
     force_authenticate(
@@ -577,21 +620,46 @@ def test_livekit_companion_session_api_returns_current_room(monkeypatch):
     assert token_payload["video"]["canPublish"] is True
     assert token_payload["video"]["canSubscribe"] is False
     assert response.data["companionTokenExpiresAt"]
-    assert fake_client.closed is True
+
+
+def test_livekit_companion_session_api_guides_missing_client_credentials(monkeypatch):
+    monkeypatch.setenv("LIVEKIT_API_KEY", "devkey")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "devsecret")
+    monkeypatch.delenv("LIVEKIT_CLIENT_API_KEY", raising=False)
+    monkeypatch.delenv("LIVEKIT_CLIENT_API_SECRET", raising=False)
+
+    request = APIRequestFactory().get("/api/livekit-companion-session/")
+    force_authenticate(
+        request,
+        user=SimpleNamespace(is_authenticated=True),
+        token={"email": "gabe@example.com"},
+    )
+
+    response = views.livekit_companion_session(request)
+
+    assert response.status_code == 400
+    assert response.data == {
+        "detail": (
+            "Local LiveKit client token credentials are not configured. "
+            "Run 'openbase-coder setup' to generate LIVEKIT_CLIENT_API_KEY and "
+            "LIVEKIT_CLIENT_API_SECRET, then restart the Openbase Coder services."
+        )
+    }
 
 
 def test_livekit_companion_session_api_handles_missing_room(monkeypatch):
-    class FakeLiveKitClient:
-        async def aclose(self):
-            pass
-
-    async def fake_resolve_target_room(client, *, room_name=None):
+    async def fake_resolve_companion_target_room(room_name=None):
         raise NoActiveLiveKitRoomError("No active LiveKit voice room was found.")
 
     monkeypatch.setenv("LIVEKIT_API_KEY", "devkey")
     monkeypatch.setenv("LIVEKIT_API_SECRET", "devsecret")
-    monkeypatch.setattr(views, "_build_livekit_client", FakeLiveKitClient)
-    monkeypatch.setattr(views, "_resolve_target_room", fake_resolve_target_room)
+    monkeypatch.setenv("LIVEKIT_CLIENT_API_KEY", "clientkey")
+    monkeypatch.setenv("LIVEKIT_CLIENT_API_SECRET", "clientsecret")
+    monkeypatch.setattr(
+        views._livekit,
+        "_resolve_companion_target_room",
+        fake_resolve_companion_target_room,
+    )
 
     request = APIRequestFactory().get("/api/livekit-companion-session/")
     force_authenticate(

@@ -27,7 +27,6 @@ def test_settings_service_payload_includes_all_defined_openbase_services(monkeyp
     ]
     assert {
         "livekit-server",
-        "codex-claude-proxy",
         "codex-app-server",
         "livekit-agent",
         "django-cli",

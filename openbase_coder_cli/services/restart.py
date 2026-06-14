@@ -14,7 +14,7 @@ import click
 from openbase_coder_cli.services.definitions import SERVICES, default_services
 from openbase_coder_cli.services.launchd import (
     install_service,
-    launchctl_kill,
+    launchctl_bootout,
     launchctl_status,
 )
 from openbase_coder_cli.services.registry import find_service, require_installation
@@ -115,7 +115,7 @@ def execute_restart_plan(plan: RestartPlan) -> None:
     services = [find_service(name) for name in plan.services]
     for service in services:
         if launchctl_status(service)["installed"]:
-            launchctl_kill(service)
+            launchctl_bootout(service)
 
     if services:
         time.sleep(2)

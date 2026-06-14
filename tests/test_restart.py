@@ -139,7 +139,11 @@ def test_execute_recreate_dispatcher_warms_thread_after_services_start(monkeypat
         lambda: InstallationConfig(workspace_path="/tmp/workspace", env_file="/tmp/.env"),
     )
     monkeypatch.setattr(restart_module, "launchctl_status", lambda _svc: {"installed": True})
-    monkeypatch.setattr(restart_module, "launchctl_kill", lambda svc: calls.append(f"kill:{svc.name}"))
+    monkeypatch.setattr(
+        restart_module,
+        "launchctl_bootout",
+        lambda svc: calls.append(f"stop:{svc.name}"),
+    )
     monkeypatch.setattr(
         restart_module,
         "install_service",
@@ -169,4 +173,4 @@ def test_execute_recreate_dispatcher_warms_thread_after_services_start(monkeypat
         )
     )
 
-    assert calls == ["prepare", "kill:livekit-agent", "start:livekit-agent", "warm"]
+    assert calls == ["prepare", "stop:livekit-agent", "start:livekit-agent", "warm"]

@@ -17,9 +17,10 @@ from openbase_coder_cli.cartesia_voice_catalog import (
     cartesia_voice_for_id,
 )
 
-TTSProviderId = Literal["cartesia", "kokoro"]
+TTSProviderId = Literal["cartesia", "openbase_cloud", "kokoro"]
 
 CARTESIA_PROVIDER_ID = "cartesia"
+OPENBASE_CLOUD_TTS_PROVIDER_ID = "openbase_cloud"
 KOKORO_PROVIDER_ID = "kokoro"
 DEFAULT_TTS_PROVIDER_ID: TTSProviderId = CARTESIA_PROVIDER_ID
 DEFAULT_CARTESIA_VOICE_ID = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
@@ -76,6 +77,27 @@ class BaseTTSProvider:
             (
                 voice
                 for voice in self.voices()
+                if _normalize_voice_name(voice.name) == normalized
+            ),
+            None,
+        )
+
+    def super_agent_voice_for_id(self, voice_id: str | None) -> TTSVoice | None:
+        if not voice_id:
+            return None
+        return next(
+            (voice for voice in self.super_agent_voices() if voice.id == voice_id),
+            None,
+        )
+
+    def super_agent_voice_for_name(self, name: str | None) -> TTSVoice | None:
+        normalized = _normalize_voice_name(name)
+        if not normalized:
+            return None
+        return next(
+            (
+                voice
+                for voice in self.super_agent_voices()
                 if _normalize_voice_name(voice.name) == normalized
             ),
             None,
@@ -174,6 +196,11 @@ class CartesiaTTSProvider(BaseTTSProvider):
         )
 
 
+class OpenbaseCloudTTSProvider(CartesiaTTSProvider):
+    provider_id: TTSProviderId = OPENBASE_CLOUD_TTS_PROVIDER_ID
+    display_name = "Openbase Cloud"
+
+
 class KokoroTTSProvider(BaseTTSProvider):
     provider_id: TTSProviderId = KOKORO_PROVIDER_ID
     display_name = "Local Kokoro"
@@ -183,7 +210,7 @@ class KokoroTTSProvider(BaseTTSProvider):
         self._pipeline_lock = threading.Lock()
 
     def voices(self) -> tuple[TTSVoice, ...]:
-        return KOKORO_VOICE_CATALOG
+        return KOKORO_SUPPORTED_VOICE_CATALOG
 
     def default_dispatcher_voice(self) -> TTSVoice:
         return (
@@ -196,6 +223,9 @@ class KokoroTTSProvider(BaseTTSProvider):
             self.voice_for_id(DEFAULT_KOKORO_ANNOUNCER_VOICE_ID)
             or self.default_dispatcher_voice()
         )
+
+    def super_agent_voices(self) -> tuple[TTSVoice, ...]:
+        return self.voices()
 
     def readiness(self) -> TTSDownloadStatus:
         files = _kokoro_required_files()
@@ -349,9 +379,11 @@ class KokoroChunkedStream(livekit_tts.ChunkedStream):
 
 
 _CARTESIA_PROVIDER = CartesiaTTSProvider()
+_OPENBASE_CLOUD_PROVIDER = OpenbaseCloudTTSProvider()
 _KOKORO_PROVIDER = KokoroTTSProvider()
 _PROVIDERS: dict[TTSProviderId, BaseTTSProvider] = {
     CARTESIA_PROVIDER_ID: _CARTESIA_PROVIDER,
+    OPENBASE_CLOUD_TTS_PROVIDER_ID: _OPENBASE_CLOUD_PROVIDER,
     KOKORO_PROVIDER_ID: _KOKORO_PROVIDER,
 }
 
@@ -367,8 +399,12 @@ def all_tts_providers() -> tuple[BaseTTSProvider, ...]:
 
 def normalize_tts_provider_id(provider_id: str | None) -> TTSProviderId:
     normalized = (provider_id or DEFAULT_TTS_PROVIDER_ID).strip().lower()
+    if normalized in {"openbase", "openbase-cloud", "cloud"}:
+        normalized = OPENBASE_CLOUD_TTS_PROVIDER_ID
     if normalized not in _PROVIDERS:
-        raise ValueError("TTS provider must be one of: cartesia, kokoro.")
+        raise ValueError(
+            "TTS provider must be one of: cartesia, openbase_cloud, kokoro."
+        )
     return normalized  # type: ignore[return-value]
 
 
@@ -388,7 +424,7 @@ def voice_name_for_id(provider_id: str | None, voice_id: str | None) -> str | No
 
 def _kokoro_required_files() -> tuple[str, ...]:
     return tuple(KOKORO_MODEL_FILES) + tuple(
-        f"voices/{voice.id}.pt" for voice in KOKORO_VOICE_CATALOG
+        f"voices/{voice.id}.pt" for voice in KOKORO_SUPPORTED_VOICE_CATALOG
     )
 
 
@@ -476,4 +512,8 @@ KOKORO_VOICE_CATALOG: tuple[TTSVoice, ...] = (
     _kokoro_voice("zm_yunxi", "Yunxi", "zh", None, "masculine"),
     _kokoro_voice("zm_yunxia", "Yunxia", "zh", None, "masculine"),
     _kokoro_voice("zm_yunyang", "Yunyang", "zh", None, "masculine"),
+)
+
+KOKORO_SUPPORTED_VOICE_CATALOG: tuple[TTSVoice, ...] = tuple(
+    voice for voice in KOKORO_VOICE_CATALOG if voice.language == "en"
 )

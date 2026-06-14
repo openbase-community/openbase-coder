@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any, Literal
 
 from openbase_coder_cli.dispatcher_config import selected_tts_provider_id
@@ -14,8 +16,10 @@ from openbase_coder_cli.livekit_voice_route import (
 from openbase_coder_cli.openbase_coder_cli_app.item_tags import thread_tags
 from openbase_coder_cli.openbase_coder_cli_app.thread_favorites import favorite_payload
 from openbase_coder_cli.tts_providers import voice_name_for_id
+from super_agents.state import read_state_file_locked
 
 VoiceRouteRole = Literal["none", "dispatcher", "active_target"]
+SUPER_AGENTS_STATE_FILE_ENV = "SUPER_AGENTS_STATE_FILE"
 
 
 def get_livekit_shared_thread_id() -> str | None:
@@ -50,7 +54,9 @@ def annotate_thread_payload(
         role = "dispatcher"
 
     display_name = "dispatcher" if is_dispatcher else _thread_display_name(payload)
-    agent_name = _thread_agent_name(payload)
+    agent_name = _thread_agent_name(payload) or _super_agents_agent_name(
+        resolved_thread_id
+    )
     assignment = None
 
     if is_dispatcher:
@@ -130,6 +136,23 @@ def _thread_display_name(payload: dict[str, Any]) -> str:
 def _thread_agent_name(payload: dict[str, Any]) -> str | None:
     value = payload.get("agent_name") or payload.get("agentName")
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _super_agents_agent_name(thread_id: str | None) -> str | None:
+    if not thread_id:
+        return None
+    state_path = _super_agents_state_path()
+    if not state_path.is_file():
+        return None
+    session = read_state_file_locked(state_path).sessions.get(thread_id)
+    return session.agent_name if session else None
+
+
+def _super_agents_state_path() -> Path:
+    configured = os.environ.get(SUPER_AGENTS_STATE_FILE_ENV)
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".super-agents" / "state.json"
 
 
 def _voice_assignment_from_history(history: VoiceHistoryEntry) -> dict[str, str | None]:

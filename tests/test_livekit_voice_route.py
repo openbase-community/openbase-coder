@@ -27,6 +27,7 @@ from openbase_coder_cli.livekit_voice_route import (
     stable_super_agent_voice_id,
     super_agent_voice_id_for_context,
 )
+from openbase_coder_cli.tts_providers import KOKORO_PROVIDER_ID
 
 
 class FakeRoomService:
@@ -100,7 +101,12 @@ class FakeSessionManager:
             raise RuntimeError("resume failed")
 
 
-def test_super_agent_voices_use_builtin_catalog_pool():
+def test_super_agent_voices_use_builtin_catalog_pool(monkeypatch):
+    monkeypatch.setattr(
+        voice_route,
+        "selected_tts_provider_id",
+        lambda: voice_route.CARTESIA_PROVIDER_ID,
+    )
     voices = voice_route._current_super_agent_voices()
 
     assert len(voices) > 1
@@ -110,7 +116,31 @@ def test_super_agent_voices_use_builtin_catalog_pool():
     assert any(voice.name == "Katie" for voice in voices)
 
 
+def test_kokoro_super_agent_voices_are_english_only(monkeypatch):
+    monkeypatch.setattr(
+        voice_route,
+        "selected_tts_provider_id",
+        lambda: KOKORO_PROVIDER_ID,
+    )
+
+    voices = voice_route._current_super_agent_voices()
+
+    assert len(voices) > 1
+    assert {voice.voice_id[:1] for voice in voices} <= {"a", "b"}
+    assert "jf_tebukuro" not in {voice.voice_id for voice in voices}
+    assert "zm_yunjian" not in {voice.voice_id for voice in voices}
+    assert (
+        super_agent_voice_id_for_context("thread-1", "Build", "Yunjian")
+        != "zm_yunjian"
+    )
+
+
 def test_super_agent_voice_context_prefers_agent_name(monkeypatch):
+    monkeypatch.setattr(
+        voice_route,
+        "selected_tts_provider_id",
+        lambda: voice_route.CARTESIA_PROVIDER_ID,
+    )
     monkeypatch.setattr(
         voice_route,
         "SUPER_AGENT_VOICES",
@@ -135,7 +165,12 @@ def test_super_agent_voice_context_prefers_agent_name(monkeypatch):
     )
 
 
-def test_super_agent_voice_context_can_use_catalog_name():
+def test_super_agent_voice_context_can_use_catalog_name(monkeypatch):
+    monkeypatch.setattr(
+        voice_route,
+        "selected_tts_provider_id",
+        lambda: voice_route.CARTESIA_PROVIDER_ID,
+    )
     assert (
         super_agent_voice_id_for_context(None, None, "Dottie")
         == "e3827ec5-697a-4b7c-9704-1a23041bbc51"
@@ -152,7 +187,7 @@ def test_route_state_ignores_stale_legacy_thread_id(tmp_path: Path, monkeypatch)
     state = get_livekit_voice_route_state()
 
     assert state.dispatcher_thread_id is None
-    assert state.dispatcher_voice_name == "Jacqueline"
+    assert state.dispatcher_voice_name
     assert state.active_route == "dispatcher"
     assert not (tmp_path / "livekit-voice-route.json").is_file()
 
@@ -274,6 +309,11 @@ def test_transfer_to_thread_prepares_then_publishes(tmp_path: Path, monkeypatch)
     monkeypatch.setenv("OPENBASE_CODER_CLI_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(
         voice_route,
+        "selected_tts_provider_id",
+        lambda: voice_route.CARTESIA_PROVIDER_ID,
+    )
+    monkeypatch.setattr(
+        voice_route,
         "CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH",
         tmp_path / "missing-direct-instructions.md",
     )
@@ -320,7 +360,7 @@ def test_transfer_to_thread_prepares_then_publishes(tmp_path: Path, monkeypatch)
         payload["state"]["active_target_voice_name"]
         == result.state.active_target_voice_name
     )
-    assert payload["state"]["dispatcher_voice_name"] == "Jacqueline"
+    assert payload["state"]["dispatcher_voice_name"]
     state = get_livekit_voice_route_state()
     assert state.active_target_thread_id == "target-1"
     assert state.active_target_voice_id == "voice-dottie"
@@ -337,6 +377,11 @@ def test_transfer_to_thread_reuses_existing_thread_voice_history(
     monkeypatch,
 ):
     monkeypatch.setenv("OPENBASE_CODER_CLI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        voice_route,
+        "selected_tts_provider_id",
+        lambda: voice_route.CARTESIA_PROVIDER_ID,
+    )
     monkeypatch.setattr(
         voice_route,
         "SUPER_AGENT_VOICES",

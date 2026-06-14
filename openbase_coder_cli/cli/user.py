@@ -9,7 +9,9 @@ from openbase_coder_cli.dispatcher_config import (
     REASONING_EFFORTS,
     dispatcher_reasoning_effort,
     set_dispatcher_reasoning_effort,
+    set_super_agents_model,
     set_super_agents_reasoning_effort,
+    super_agents_model,
     super_agents_reasoning_effort,
 )
 from openbase_coder_cli.livekit_announcer import (
@@ -215,6 +217,22 @@ def super_agents_reasoning(level: str | None) -> None:
     click.echo(f"Super Agents reasoning effort set to {normalized}.")
 
 
+@user.command("super-agents-model")
+@click.argument("model", required=False)
+def super_agents_model_command(model: str | None) -> None:
+    """Show or set the Super Agents default model."""
+    if model is None:
+        current = super_agents_model() or "backend default"
+        click.echo(f"Super Agents model: {current}")
+        return
+
+    try:
+        set_super_agents_model(model)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Super Agents model set to {' '.join(model.split())}.")
+
+
 @user.command("transfer-to-thread")
 @click.argument("thread_id")
 @click.option(
@@ -272,3 +290,4 @@ def transfer_to_agent(agent_name: str, room_name: str) -> None:
 
 user.add_command(dispatcher_reasoning, "operator-reasoning")
 user.add_command(super_agents_reasoning, "super-agent-reasoning")
+user.add_command(super_agents_model_command, "super-agent-model")

@@ -19,8 +19,10 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     bootstrap_run,
     brain_readiness,
     cartesia_voice_settings,
+    coding_backend_settings,
     devices_list,
     dispatcher_voice_settings,
+    env_settings,
     git_diff,
     global_reports_projects,
     health_check,
@@ -185,6 +187,16 @@ urlpatterns = [
         "settings/openbase-services/<str:service_name>/",
         openbase_service_action,
         name="openbase-service-action",
+    ),
+    path(
+        "settings/coding-backend/",
+        coding_backend_settings,
+        name="coding-backend-settings",
+    ),
+    path(
+        "settings/env/",
+        env_settings,
+        name="env-settings",
     ),
     path(
         "settings/cartesia-voices/",

@@ -177,9 +177,7 @@ def test_user_super_agent_name_json(monkeypatch):
         "SUPER_AGENT_VOICES",
         (voice_route.CartesiaVoice("voice-dottie", "Dottie"),),
     )
-    monkeypatch.setattr(
-        voice_route, "SUPER_AGENT_VOICE_IDS", ("voice-dottie",)
-    )
+    monkeypatch.setattr(voice_route, "SUPER_AGENT_VOICE_IDS", ("voice-dottie",))
 
     result = CliRunner().invoke(
         main_cli.main,
@@ -420,6 +418,20 @@ def test_super_agents_reasoning_sets_config_file(monkeypatch, tmp_path):
             "super_agents_reasoning_effort"
         ]
         == "medium"
+    )
+
+
+def test_super_agents_model_sets_config_file(monkeypatch, tmp_path):
+    config_path = tmp_path / "dispatcher-config.json"
+    monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
+
+    result = CliRunner().invoke(user_cli.user, ["super-agents-model", "opus"])
+
+    assert result.exit_code == 0
+    assert "set to opus" in result.output
+    assert (
+        json.loads(config_path.read_text(encoding="utf-8"))["super_agents_model"]
+        == "opus"
     )
 
 

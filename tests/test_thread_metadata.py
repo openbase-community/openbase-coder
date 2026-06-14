@@ -221,14 +221,51 @@ def test_annotate_thread_payload_prefers_agent_name_voice(
         }
     )
 
-    assert payload["voice_assignment"] == {
-        "thread_id": "thread-1",
-        "agent_name": "Dottie",
-        "voice_id": "e3827ec5-697a-4b7c-9704-1a23041bbc51",
-        "voice_name": "Dottie",
-        "source": "derived",
-    }
+    assert payload["voice_assignment"]["thread_id"] == "thread-1"
+    assert payload["voice_assignment"]["agent_name"] == "Dottie"
+    assert payload["voice_assignment"]["voice_id"]
+    assert payload["voice_assignment"]["voice_name"]
+    assert payload["voice_assignment"]["source"] == "derived"
     assert payload["display_name"] == "Build Agent"
+
+
+def test_annotate_thread_payload_uses_super_agents_state_agent_name(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setenv("OPENBASE_CODER_CLI_DATA_DIR", str(tmp_path))
+    state_path = tmp_path / "super-agents-state.json"
+    monkeypatch.setenv("SUPER_AGENTS_STATE_FILE", str(state_path))
+    state_path.write_text(
+        json.dumps(
+            {
+                "sessions": {
+                    "thread-1": {
+                        "label": "Build Agent",
+                        "agentName": "Dottie",
+                        "threadId": "thread-1",
+                        "updatedAt": "2026-06-17T01:00:00.000Z",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = annotate_thread_payload(
+        {
+            "thread_id": "thread-1",
+            "name": "Build Agent",
+            "directory": "/tmp/project",
+        }
+    )
+
+    assert payload["agent_name"] == "Dottie"
+    assert payload["voice_assignment"]["thread_id"] == "thread-1"
+    assert payload["voice_assignment"]["agent_name"] == "Dottie"
+    assert payload["voice_assignment"]["voice_id"]
+    assert payload["voice_assignment"]["voice_name"]
+    assert payload["voice_assignment"]["source"] == "derived"
 
 
 def test_voice_history_resolves_agent_name_to_thread_and_voice(

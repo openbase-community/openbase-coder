@@ -83,31 +83,16 @@ SERVICES: list[ServiceDefinition] = [
             "        exit 1\n"
             "        ;;\n"
             "esac\n"
-            'exec {livekit} --dev --bind "$LIVEKIT_BIND_IP" --config-body "$LIVEKIT_CONFIG_BODY" "${{NODE_IP_ARGS[@]}}" --keys "$LIVEKIT_API_KEY: $LIVEKIT_API_SECRET"'
+            'LIVEKIT_KEYS="$LIVEKIT_API_KEY: $LIVEKIT_API_SECRET"\n'
+            'if [ -n "${{LIVEKIT_CLIENT_API_KEY:-}}" ] && [ -n "${{LIVEKIT_CLIENT_API_SECRET:-}}" ] && [ "$LIVEKIT_CLIENT_API_KEY" != "$LIVEKIT_API_KEY" ] && [ "$LIVEKIT_CLIENT_API_SECRET" != "$LIVEKIT_API_SECRET" ]; then\n'
+            '    LIVEKIT_KEYS="$(printf \'%s\\n%s: %s\' "$LIVEKIT_KEYS" "$LIVEKIT_CLIENT_API_KEY" "$LIVEKIT_CLIENT_API_SECRET")"\n'
+            "fi\n"
+            'exec {livekit} --dev --bind "$LIVEKIT_BIND_IP" --config-body "$LIVEKIT_CONFIG_BODY" "${{NODE_IP_ARGS[@]}}" --keys "$LIVEKIT_KEYS"'
         ),
         workdir_template="{workspace}",
         port=7880,
         cleanup_ports=(7880, 7881),
         cleanup_command_substrings=("livekit-server",),
-    ),
-    ServiceDefinition(
-        name="codex-claude-proxy",
-        description="Codex Claude Proxy",
-        command_template=(
-            'CODEX_CLAUDE_PROXY_COMMAND="${{CODEX_CLAUDE_PROXY_COMMAND:-{super_agents_claude_proxy}}}"\n'
-            'CODEX_CLAUDE_PROXY_PORT="${{CODEX_CLAUDE_PROXY_PORT:-6066}}"\n'
-            'if [ -x "$CODEX_CLAUDE_PROXY_COMMAND" ]; then\n'
-            '    CODEX_CLAUDE_PROXY_RESOLVED="$CODEX_CLAUDE_PROXY_COMMAND"\n'
-            'elif ! CODEX_CLAUDE_PROXY_RESOLVED="$(command -v "$CODEX_CLAUDE_PROXY_COMMAND")"; then\n'
-            '    echo "Claude Code proxy command not found on PATH: $CODEX_CLAUDE_PROXY_COMMAND" >&2\n'
-            "    exit 1\n"
-            "fi\n"
-            'exec "$CODEX_CLAUDE_PROXY_RESOLVED" --port "$CODEX_CLAUDE_PROXY_PORT" --debug'
-        ),
-        workdir_template="{workspace}",
-        port=6066,
-        cleanup_ports=(6066,),
-        cleanup_command_substrings=("super-agents-claude-proxy",),
     ),
     ServiceDefinition(
         name="codex-app-server",
@@ -117,65 +102,12 @@ SERVICES: list[ServiceDefinition] = [
             'mkdir -p "$CODEX_HOME"\n'
             'CODEX_MODEL_REASONING_EFFORT="${{CODEX_MODEL_REASONING_EFFORT:-high}}"\n'
             'CODEX_SERVICE_TIER="${{CODEX_SERVICE_TIER:-fast}}"\n'
-            'OPENBASE_CODEX_BACKEND="${{OPENBASE_CODEX_BACKEND:-codex}}"\n'
-            'case "$OPENBASE_CODEX_BACKEND" in\n'
-            "    claude|claude-code|claude-code-proxy|claude-proxy)\n"
-            '        CODEX_CLAUDE_MODEL="${{CODEX_CLAUDE_MODEL:-claude-code}}"\n'
-            '        CODEX_CLAUDE_PROXY_PORT="${{CODEX_CLAUDE_PROXY_PORT:-6066}}"\n'
-            '        CODEX_CLAUDE_PROXY_BASE_URL="${{CODEX_CLAUDE_PROXY_BASE_URL:-http://127.0.0.1:$CODEX_CLAUDE_PROXY_PORT/v1}}"\n'
-            '        CODEX_CLAUDE_PROXY_HEALTH_URL="${{CODEX_CLAUDE_PROXY_HEALTH_URL:-http://127.0.0.1:$CODEX_CLAUDE_PROXY_PORT/health}}"\n'
-            '        CODEX_CLAUDE_PROXY_COMMAND="${{CODEX_CLAUDE_PROXY_COMMAND:-{super_agents_claude_proxy}}}"\n'
-            '        if [ -x "$CODEX_CLAUDE_PROXY_COMMAND" ]; then\n'
-            '            CODEX_CLAUDE_PROXY_RESOLVED="$CODEX_CLAUDE_PROXY_COMMAND"\n'
-            '        elif ! CODEX_CLAUDE_PROXY_RESOLVED="$(command -v "$CODEX_CLAUDE_PROXY_COMMAND")"; then\n'
-            '            echo "Claude Code proxy command not found on PATH: $CODEX_CLAUDE_PROXY_COMMAND" >&2\n'
-            "            exit 1\n"
-            "        fi\n"
-            '        if [ -z "${{CODEX_CLAUDE_MODEL_CATALOG_JSON:-}}" ]; then\n'
-            '            CODEX_CLAUDE_MODEL_CATALOG_JSON="$("$CODEX_CLAUDE_PROXY_RESOLVED" --print-model-catalog-path)"\n'
-            "        fi\n"
-            '        CODEX_MODEL_REASONING_SUMMARY="${{CODEX_MODEL_REASONING_SUMMARY:-concise}}"\n'
-            '        CODEX_WEB_SEARCH="${{CODEX_WEB_SEARCH:-live}}"\n'
-            '        if [ ! -f "$CODEX_CLAUDE_MODEL_CATALOG_JSON" ]; then\n'
-            '            echo "Claude Code model catalog not found at $CODEX_CLAUDE_MODEL_CATALOG_JSON" >&2\n'
-            "            exit 1\n"
-            "        fi\n"
-            "        for _openbase_codex_proxy_wait in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do\n"
-            '            if curl -fsS "$CODEX_CLAUDE_PROXY_HEALTH_URL" >/dev/null 2>&1; then\n'
-            "                break\n"
-            "            fi\n"
-            "            sleep 0.25\n"
-            "        done\n"
-            '        if ! curl -fsS "$CODEX_CLAUDE_PROXY_HEALTH_URL" >/dev/null 2>&1; then\n'
-            '            echo "Claude Code proxy did not become ready at $CODEX_CLAUDE_PROXY_HEALTH_URL" >&2\n'
-            "            exit 1\n"
-            "        fi\n"
-            "        {codex} app-server "
-            "-c \"model_providers.claude-code-proxy={{ name = 'Claude Proxy', base_url = '$CODEX_CLAUDE_PROXY_BASE_URL', wire_api = 'responses', requires_openai_auth = false }}\" "
-            '-c "model_provider=\\"claude-code-proxy\\"" '
-            '-c "model=\\"$CODEX_CLAUDE_MODEL\\"" '
-            '-c "model_catalog_json=\\"$CODEX_CLAUDE_MODEL_CATALOG_JSON\\"" '
-            '-c "model_reasoning_summary=\\"$CODEX_MODEL_REASONING_SUMMARY\\"" '
-            '-c "web_search=\\"$CODEX_WEB_SEARCH\\"" '
-            "--listen ws://127.0.0.1:4500\n"
-            "        ;;\n"
-            "    claude-tui|claude-code-tui)\n"
-            '        echo "OPENBASE_CODEX_BACKEND=$OPENBASE_CODEX_BACKEND bypasses codex-app-server; Super Agents uses the Claude TUI backend directly."\n'
-            "        exec sleep 86400\n"
-            "        ;;\n"
-            '    codex|openai|"")\n'
-            '        CODEX_MODEL="${{CODEX_MODEL:-gpt-5.5}}"\n'
-            "        exec {codex} app-server "
+            'CODEX_MODEL="${{CODEX_MODEL:-gpt-5.5}}"\n'
+            "exec {codex} app-server "
             '-c "model=\\"$CODEX_MODEL\\"" '
             '-c "model_reasoning_effort=\\"$CODEX_MODEL_REASONING_EFFORT\\"" '
             '-c "service_tier=\\"$CODEX_SERVICE_TIER\\"" '
-            "--listen ws://127.0.0.1:4500\n"
-            "        ;;\n"
-            "    *)\n"
-            '        echo "Unsupported OPENBASE_CODEX_BACKEND: $OPENBASE_CODEX_BACKEND" >&2\n'
-            "        exit 1\n"
-            "        ;;\n"
-            "esac"
+            "--listen ws://127.0.0.1:4500"
         ),
         workdir_template="{workspace}",
         port=4500,

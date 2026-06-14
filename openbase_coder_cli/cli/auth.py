@@ -15,6 +15,8 @@ import httpx
 from openbase_coder_cli.config.token_manager import (
     DEFAULT_OAUTH_CLIENT_ID,
     DEFAULT_OAUTH_REDIRECT_URI,
+    AuthLoginRequiredError,
+    AuthTransientError,
     TokenManager,
     create_pkce_challenge,
     create_pkce_verifier,
@@ -236,3 +238,24 @@ def logout() -> None:
         click.echo("Logged out. Tokens removed.")
     else:
         click.echo("Not logged in (no stored tokens found).")
+
+
+@click.group()
+def auth() -> None:
+    """Authentication helpers."""
+
+
+@auth.command("print-access-token")
+def print_access_token() -> None:
+    """Print a fresh Openbase JWT access token for command-backed auth."""
+    try:
+        token = TokenManager(_get_web_backend_url()).get_access_token()
+    except AuthLoginRequiredError as exc:
+        raise click.ClickException(
+            "Login required. Run `openbase-coder login` first."
+        ) from exc
+    except AuthTransientError as exc:
+        raise click.ClickException(f"Unable to refresh Openbase token: {exc}") from exc
+    if not token:
+        raise click.ClickException("Openbase token refresh returned an empty token.")
+    click.echo(token)

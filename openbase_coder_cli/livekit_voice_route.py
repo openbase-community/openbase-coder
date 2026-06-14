@@ -190,8 +190,11 @@ def super_agent_voice_for_agent_name(agent_name: str | None) -> CartesiaVoice | 
         if _normalize_voice_name(voice.name) == normalized:
             return voice
 
-    provider_voice = get_tts_provider(selected_tts_provider_id()).voice_for_name(
-        agent_name
+    provider = get_tts_provider(selected_tts_provider_id())
+    provider_voice = (
+        provider.super_agent_voice_for_name(agent_name)
+        if provider.provider_id != CARTESIA_PROVIDER_ID
+        else provider.voice_for_name(agent_name)
     )
     if provider_voice:
         return CartesiaVoice(voice_id=provider_voice.id, name=provider_voice.name)
@@ -487,7 +490,7 @@ async def publish_transfer_to_thread(
     )
     if history_named_voice:
         voice = history_named_voice
-    elif history_entry and history_entry.voice_id:
+    elif history_entry and _current_super_agent_voice_for_id(history_entry.voice_id):
         voice = CartesiaVoice(
             voice_id=history_entry.voice_id,
             name=history_entry.voice_name
@@ -567,6 +570,15 @@ async def _publish_route_command(
     finally:
         if owns_client:
             await client.aclose()
+
+
+def _current_super_agent_voice_for_id(voice_id: str | None) -> CartesiaVoice | None:
+    if not voice_id:
+        return None
+    return next(
+        (voice for voice in _current_super_agent_voices() if voice.voice_id == voice_id),
+        None,
+    )
 
 
 def _route_state_path() -> Path:

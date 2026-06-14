@@ -24,18 +24,18 @@ def test_returns_full_text_when_nothing_was_delivered():
     assert _undelivered_suffix("", "hello") == "hello"
 
 
-def test_default_model_name_uses_claude_code_backend(monkeypatch):
-    monkeypatch.setenv("OPENBASE_CODEX_BACKEND", "claude-code-proxy")
+def test_default_model_name_ignores_claude_backend_env(monkeypatch):
+    monkeypatch.setenv("OPENBASE_CODEX_BACKEND", "claude-agent-sdk")
     monkeypatch.setenv("CODEX_MODEL", "gpt-5.5")
 
-    assert client_module._default_model_name() == "claude-code"
+    assert client_module._default_model_name() == "gpt-5.5"
 
 
-def test_default_model_name_allows_claude_model_override(monkeypatch):
-    monkeypatch.setenv("OPENBASE_CODEX_BACKEND", "claude-code-proxy")
+def test_default_model_name_ignores_legacy_claude_model_override(monkeypatch):
+    monkeypatch.setenv("OPENBASE_CODEX_BACKEND", "claude-agent-sdk")
     monkeypatch.setenv("CODEX_CLAUDE_MODEL", "claude-custom")
 
-    assert client_module._default_model_name() == "claude-custom"
+    assert client_module._default_model_name() == "gpt-5.5"
 
 
 def test_returns_only_new_suffix_when_final_text_extends_streamed_text():

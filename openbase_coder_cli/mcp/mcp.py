@@ -115,5 +115,24 @@ class CodexThreadImportTools(MCPToolset):
             "applies_to": "next Super Agents turn",
         }
 
+    def get_super_agents_model(self) -> dict[str, Any]:
+        """Show the default model used by new Super Agents turns."""
+        model = dispatcher_config.super_agents_model()
+        return {
+            "model": model,
+            "effective": model or "backend default",
+            "config_path": str(dispatcher_config.CODEX_DISPATCHER_CONFIG_PATH),
+        }
+
+    def set_super_agents_model(self, model: str) -> dict[str, Any]:
+        """Set the default model used by new Super Agents turns."""
+        config_path = dispatcher_config.set_super_agents_model(model)
+        normalized = dispatcher_config.super_agents_model(config_path)
+        return {
+            "model": normalized,
+            "config_path": str(config_path),
+            "applies_to": "next Super Agents turn",
+        }
+
 
 __all__ = ["CodexThreadImportTools"]

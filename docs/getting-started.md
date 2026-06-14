@@ -67,7 +67,7 @@ What setup does:
 1. Clones or updates the Openbase workspace at `~/.openbase/workspace`.
 2. Writes `~/.openbase/installation.json`.
 3. Generates `~/.openbase/.env` (if it does not already exist).
-4. Creates missing default instruction files in `~/.openbase/codex_home` from the workspace `instructions/` directory.
+4. Maintains an editable `~/.openbase/codex_home/AGENTS.md` with an auto-refreshed Openbase Coder section, and links the other default instruction files from the workspace `instructions/` directory.
 5. Symlinks workspace skills into `~/.openbase/codex_home/skills`.
 6. Initializes the CLI workspace and bundled LiveKit worker (`uv sync`, LiveKit model downloads).
 7. Writes Codex app-server defaults such as `CODEX_MODEL=gpt-5.5`, `CODEX_MODEL_REASONING_EFFORT=high`, `CODEX_SERVICE_TIER=fast`, `CODEX_APP_SERVER_URL`, and `LIVEKIT_CODEX_THREAD_CWD`.

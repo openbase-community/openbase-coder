@@ -7,8 +7,12 @@ from __future__ import annotations
 import click
 
 from openbase_coder_cli._version import __version__
+from openbase_coder_cli.codex_home_instructions import (
+    refresh_openbase_agents_md_from_installation,
+)
 
-from .auth import login, logout
+from .auth import auth, login, logout
+from .backend import backend
 from .boilersync import boilersync
 from .bootstrap import bootstrap
 from .claude_chrome import claude_chrome
@@ -46,15 +50,17 @@ def main():
 
     OpenBase Coder CLI with embedded server
     """
-    pass
+    refresh_openbase_agents_md_from_installation()
 
 
 main.add_command(server)
 main.add_command(setup)
+main.add_command(backend)
 main.add_command(services)
 main.add_command(doctor)
 main.add_command(login)
 main.add_command(logout)
+main.add_command(auth)
 main.add_command(plugins)
 main.add_command(bootstrap)
 main.add_command(restart)

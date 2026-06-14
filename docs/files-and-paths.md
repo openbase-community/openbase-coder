@@ -16,12 +16,13 @@ This page lists the key files Openbase CLI creates or consumes.
 | `~/.openbase/installation.json` | `openbase-coder setup` | Stores `workspace_path` + `env_file` |
 | `~/.openbase/.env` | `openbase-coder setup` | Shared env config and generated secrets |
 | `~/.openbase/codex_home/auth.json` | `openbase-coder setup` | Symlink to `~/.codex/auth.json` for launchd Codex services |
-| `~/.openbase/codex_home/AGENTS.md` | `openbase-coder setup` | Default instructions for the Openbase voice Codex home |
+| `~/.openbase/codex_home/AGENTS.md` | `openbase-coder setup`, CLI launch | Editable instructions for the Openbase voice Codex home, with an auto-refreshed `## Openbase Coder Instructions` section |
 | `~/.openbase/codex_home/VOICE_INSTRUCTIONS.md` | `openbase-coder setup` | Default direct voice-session instructions |
 | `~/.openbase/codex_home/DISPATCHER_INSTRUCTIONS.md` | `openbase-coder setup` | Default dispatcher-only instructions |
 | `~/.openbase/codex_home/SUPER_AGENT_INSTRUCTIONS.md` | `openbase-coder setup` | Default Super Agent thread instructions |
-| `~/.openbase/codex_home/dispatcher-config.json` | `openbase-coder setup`, user/MCP commands | Dispatcher runtime settings, including dispatcher and Super Agents reasoning effort |
-| `~/.openbase/codex_home/config.toml` | `openbase-coder setup` | Openbase service Codex config, including broad local access and the Super Agents MCP server |
+| `~/.openbase/dispatcher-config.json` | `openbase-coder setup`, user/MCP commands | Dispatcher runtime settings, including dispatcher reasoning, Super Agents reasoning, and Super Agents model |
+| `~/.openbase/codex_home/dispatcher-config.json` | `openbase-coder setup` | Legacy symlink to `~/.openbase/dispatcher-config.json` |
+| `~/.openbase/codex_home/config.toml` | `openbase-coder setup` | Openbase service Codex config, including broad local access and the Super Agents MCP server. With `--link-codex-config`, this is a symlink to `~/.codex/config.toml` |
 | `~/.openbase/codex_home/skills/<skill>/` | `openbase-coder setup` | Symlink to a workspace-owned skill source under `skills/skills/<skill>/` |
 | `~/.openbase/workspace/` | `openbase-coder setup` | Openbase workspace repo clone |
 | `~/.openbase/workspace/cli/.venv/` | `openbase-coder setup` | CLI and bundled LiveKit worker environment |
@@ -36,6 +37,9 @@ are visible to the Openbase Codex home immediately.
 The Codex home config grants full local sandbox access, disables permission
 prompts, and uses the workspace venv Super Agents MCP executable when available;
 otherwise setup records the resolved absolute `uv` path for the current machine.
+By default this config is separate from the normal Codex config. Passing
+`--link-codex-config` links it to `~/.codex/config.toml` before setup writes the
+Super Agents MCP table.
 
 ## Service Artifacts
 

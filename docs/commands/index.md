@@ -17,6 +17,7 @@ openbase-coder [OPTIONS] COMMAND [ARGS]
 
 | Command | Description |
 |---|---|
+| [`backend`](backend.md) | View or switch the selected coding backend |
 | [`setup`](setup.md) | Full local bootstrap flow |
 | [`server`](server.md) | Run local Django/ASGI server |
 | [`restart`](restart.md) | Restart Openbase-managed services |
@@ -38,6 +39,9 @@ openbase-coder server --host 0.0.0.0 --port 7999
 
 # Check service states
 openbase-coder services status
+
+# Switch coding backend
+openbase-coder backend use codex
 
 # Restart Openbase-managed services
 openbase-coder restart

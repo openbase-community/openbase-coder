@@ -33,11 +33,15 @@ from openbase_coder_cli.openbase_coder_cli_app.auth import (
     auth_refresh_jwt,
     auth_session,
 )
+from openbase_coder_cli.openbase_coder_cli_app.backend_settings import (
+    coding_backend_settings,
+)
 from openbase_coder_cli.openbase_coder_cli_app.brain_readiness import brain_readiness
 from openbase_coder_cli.openbase_coder_cli_app.diagnostics import (
     devices_list,
     health_check,
 )
+from openbase_coder_cli.openbase_coder_cli_app.env_settings import env_settings
 from openbase_coder_cli.openbase_coder_cli_app.livekit import (
     livekit_room_token,
     livekit_voice_route,
@@ -231,9 +235,11 @@ __all__ = [
     "bootstrap_run",
     "brain_readiness",
     "cartesia_voice_settings",
+    "coding_backend_settings",
     "devices_list",
     "dispatcher_voice_settings",
     "dispatcher_voice",
+    "env_settings",
     "git_diff",
     "global_reports_projects",
     "health_check",

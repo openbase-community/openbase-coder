@@ -27,29 +27,11 @@ def test_livekit_server_service_supports_tailscale_and_local_modes():
     assert 'LIVEKIT_LOOPBACK_IFACE="lo"' in command
     assert 'ip -o -4 addr show 2>/dev/null | awk -v ip="$LIVEKIT_NODE_IP"' in command
     assert '"$LIVEKIT_LOOPBACK_IFACE"' in command
+    assert 'LIVEKIT_KEYS="$LIVEKIT_API_KEY: $LIVEKIT_API_SECRET"' in command
+    assert "LIVEKIT_CLIENT_API_KEY" in command
+    assert '--keys "$LIVEKIT_KEYS"' in command
     assert '--bind "$LIVEKIT_BIND_IP"' in command
     assert service.cleanup_ports == (7880, 7881)
-
-
-def test_codex_claude_proxy_service_runs_packaged_proxy():
-    service = next(svc for svc in SERVICES if svc.name == "codex-claude-proxy")
-    command = service.command_template.format(
-        data_dir="/tmp/openbase",
-        super_agents_claude_proxy="/tmp/workspace/cli/.venv/bin/super-agents-claude-proxy",
-        workspace="/tmp/workspace",
-    )
-
-    assert (
-        'CODEX_CLAUDE_PROXY_COMMAND="${CODEX_CLAUDE_PROXY_COMMAND:-/tmp/workspace/cli/.venv/bin/super-agents-claude-proxy}"'
-        in command
-    )
-    assert 'CODEX_CLAUDE_PROXY_PORT="${CODEX_CLAUDE_PROXY_PORT:-6066}"' in command
-    assert 'if [ -x "$CODEX_CLAUDE_PROXY_COMMAND" ]; then' in command
-    assert 'elif ! CODEX_CLAUDE_PROXY_RESOLVED="$(command -v "$CODEX_CLAUDE_PROXY_COMMAND")' in command
-    assert 'exec "$CODEX_CLAUDE_PROXY_RESOLVED" --port "$CODEX_CLAUDE_PROXY_PORT" --debug' in command
-    assert service.port == 6066
-    assert service.cleanup_ports == (6066,)
-    assert service.cleanup_command_substrings == ("super-agents-claude-proxy",)
 
 
 def test_codex_app_server_service_sets_model_defaults():
@@ -57,31 +39,16 @@ def test_codex_app_server_service_sets_model_defaults():
     command = service.command_template.format(
         codex="/usr/local/bin/codex",
         data_dir="/tmp/openbase",
-        super_agents_claude_proxy="/tmp/workspace/cli/.venv/bin/super-agents-claude-proxy",
         workspace="/tmp/workspace",
     )
 
-    assert 'OPENBASE_CODEX_BACKEND="${OPENBASE_CODEX_BACKEND:-codex}"' in command
-    assert "claude|claude-code|claude-code-proxy|claude-proxy)" in command
-    assert 'CODEX_CLAUDE_MODEL="${CODEX_CLAUDE_MODEL:-claude-code}"' in command
-    assert (
-        'CODEX_CLAUDE_PROXY_COMMAND="${CODEX_CLAUDE_PROXY_COMMAND:-/tmp/workspace/cli/.venv/bin/super-agents-claude-proxy}"'
-        in command
-    )
-    assert 'if [ -x "$CODEX_CLAUDE_PROXY_COMMAND" ]; then' in command
-    assert 'elif ! CODEX_CLAUDE_PROXY_RESOLVED="$(command -v "$CODEX_CLAUDE_PROXY_COMMAND")' in command
-    assert 'CODEX_CLAUDE_MODEL_CATALOG_JSON="$("$CODEX_CLAUDE_PROXY_RESOLVED" --print-model-catalog-path)"' in command
-    assert '"$CODEX_CLAUDE_PROXY_RESOLVED" --port "$CODEX_CLAUDE_PROXY_PORT" --debug &' not in command
-    assert (
-        "Claude Code proxy did not become ready at $CODEX_CLAUDE_PROXY_HEALTH_URL"
-        in command
-    )
-    assert "model_providers.claude-code-proxy=" in command
-    assert '-c "model_provider=\\"claude-code-proxy\\""' in command
-    assert '-c "model=\\"$CODEX_CLAUDE_MODEL\\""' in command
+    assert "OPENBASE_CODING_BACKEND" not in command
+    assert "OPENBASE_CODEX_BACKEND" not in command
+    assert "claude-agent-sdk" not in command
+    assert "bypasses codex-app-server" not in command
+    assert "exec /usr/local/bin/codex app-server" in command
+    assert "CODEX_CLAUDE_" not in command
     assert 'CODEX_MODEL="${CODEX_MODEL:-gpt-5.5}"' in command
-    assert "claude-tui|claude-code-tui)" in command
-    assert "bypasses codex-app-server" in command
     assert (
         'CODEX_MODEL_REASONING_EFFORT="${CODEX_MODEL_REASONING_EFFORT:-high}"'
         in command

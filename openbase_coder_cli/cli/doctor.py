@@ -27,6 +27,8 @@ _REQUIRED_ENV: list[tuple[str, list[str]]] = [
     ("LIVEKIT_API_SECRET", ["secret"]),
 ]
 
+_LIVEKIT_CLIENT_ENV = ("LIVEKIT_CLIENT_API_KEY", "LIVEKIT_CLIENT_API_SECRET")
+
 
 def _parse_env_file() -> dict[str, str]:
     """Read the .env file and return key-value pairs."""
@@ -106,6 +108,30 @@ def _get_listening_sockets_ss() -> list[tuple[str, int]]:
             seen.add(key)
             sockets.append(key)
     return sockets
+
+
+def _check_livekit_client_credentials(env: dict[str, str], warn, ok) -> None:
+    missing = [name for name in _LIVEKIT_CLIENT_ENV if not env.get(name)]
+    if missing:
+        warn(
+            "LiveKit client token credentials missing "
+            f"({', '.join(missing)}): run 'openbase-coder setup' and restart services"
+        )
+        return
+
+    reused = []
+    if env.get("LIVEKIT_CLIENT_API_KEY") == env.get("LIVEKIT_API_KEY"):
+        reused.append("LIVEKIT_CLIENT_API_KEY")
+    if env.get("LIVEKIT_CLIENT_API_SECRET") == env.get("LIVEKIT_API_SECRET"):
+        reused.append("LIVEKIT_CLIENT_API_SECRET")
+    if reused:
+        warn(
+            "LiveKit client token credentials reuse local server credentials "
+            f"({', '.join(reused)}): run 'openbase-coder setup' and restart services"
+        )
+        return
+
+    ok("LiveKit client token credentials: set and separate from server credentials")
 
 
 @click.command()
@@ -218,6 +244,8 @@ def doctor() -> None:
             fail(f"{var_name}: using insecure default value '{value}'")
         else:
             ok(f"{var_name}: set")
+
+    _check_livekit_client_credentials(env, warn, ok)
 
     # --- Summary ---
     click.echo()

@@ -117,7 +117,9 @@ def _append_index(home: Path, thread_id: str, name: str, updated_at: str) -> Non
         )
 
 
-def _append_terminal(rollout_path: Path, turn_id: str = "turn-1", message: str = "done") -> None:
+def _append_terminal(
+    rollout_path: Path, turn_id: str = "turn-1", message: str = "done"
+) -> None:
     with rollout_path.open("a", encoding="utf-8") as handle:
         handle.write(
             json.dumps(
@@ -349,10 +351,9 @@ def test_sync_codex_threads_once_transfers_completed_normal_thread(
     target_rollout = voice_home / source_rollout.relative_to(normal_home)
     assert target_rollout.exists()
     with sqlite3.connect(voice_home / "state_5.sqlite") as conn:
-        assert (
-            conn.execute("SELECT title FROM threads WHERE id = ?", ("thread-1",)).fetchone()
-            == ("Thread title",)
-        )
+        assert conn.execute(
+            "SELECT title FROM threads WHERE id = ?", ("thread-1",)
+        ).fetchone() == ("Thread title",)
 
 
 def test_sync_codex_threads_once_transfers_terminal_rollout_with_open_handle(
@@ -390,9 +391,9 @@ def test_sync_codex_threads_once_transfers_terminal_rollout_with_open_handle(
         max_age_days=None,
     )
 
-    assert [(result.thread_id, result.status, result.direction) for result in results] == [
-        ("thread-1", "transferred", "voice_to_normal")
-    ]
+    assert [
+        (result.thread_id, result.status, result.direction) for result in results
+    ] == [("thread-1", "transferred", "voice_to_normal")]
     target_rollout = normal_home / source_rollout.relative_to(voice_home)
     assert target_rollout.exists()
     index_lines = (
@@ -482,7 +483,9 @@ def test_sync_codex_threads_once_marks_same_content_duplicate_synced(
     voice_home = tmp_path / "voice"
     _create_state_db(normal_home / "state_5.sqlite")
     _create_state_db(voice_home / "state_5.sqlite")
-    normal_rollout = _insert_thread(normal_home, "thread-1", title="Normal", updated_at=20)
+    normal_rollout = _insert_thread(
+        normal_home, "thread-1", title="Normal", updated_at=20
+    )
     voice_rollout = _insert_thread(voice_home, "thread-1", title="Voice", updated_at=20)
     _append_terminal(normal_rollout)
     _append_terminal(voice_rollout)
@@ -532,7 +535,9 @@ def test_sync_codex_threads_once_skips_threads_older_than_max_age(
 def test_sync_result_logging_suppresses_routine_results(caplog) -> None:
     caplog.set_level(logging.INFO, logger="openbase_coder_cli.mcp.thread_import")
 
-    _log_sync_result(CodexThreadSyncResult("thread-old", "skipped", None, "skipped_old"))
+    _log_sync_result(
+        CodexThreadSyncResult("thread-old", "skipped", None, "skipped_old")
+    )
     _log_sync_result(
         CodexThreadSyncResult("thread-synced", "already_synced", None, "same_content")
     )
@@ -587,6 +592,8 @@ def test_mcp_module_registers_thread_import_toolset(monkeypatch) -> None:
     assert "set_dispatcher_reasoning_effort" in tools
     assert "get_super_agents_reasoning_effort" in tools
     assert "set_super_agents_reasoning_effort" in tools
+    assert "get_super_agents_model" in tools
+    assert "set_super_agents_model" in tools
 
 
 def test_mcp_dispatcher_reasoning_tools_share_cli_config(
@@ -663,3 +670,37 @@ def test_mcp_super_agents_reasoning_tools_share_cli_config(
 
     assert current["reasoning_effort"] == "xhigh"
     assert current["effective"] == "xhigh"
+
+
+def test_mcp_super_agents_model_tools_share_cli_config(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import django
+    from django.apps import apps
+
+    monkeypatch.setenv(
+        "DJANGO_SETTINGS_MODULE",
+        "openbase_coder_cli.config.settings",
+    )
+    if not apps.ready:
+        django.setup()
+
+    import openbase_coder_cli.dispatcher_config as dispatcher_config
+    import openbase_coder_cli.mcp.mcp as mcp_module
+
+    config_path = tmp_path / "dispatcher-config.json"
+    monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
+
+    result = mcp_module.CodexThreadImportTools.set_super_agents_model(None, "opus")
+
+    assert result["model"] == "opus"
+    assert result["applies_to"] == "next Super Agents turn"
+    assert (
+        json.loads(config_path.read_text(encoding="utf-8"))["super_agents_model"]
+        == "opus"
+    )
+
+    current = mcp_module.CodexThreadImportTools.get_super_agents_model(None)
+
+    assert current["model"] == "opus"
+    assert current["effective"] == "opus"

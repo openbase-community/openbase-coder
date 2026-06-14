@@ -58,13 +58,19 @@ from openbase_coder_cli.dispatcher_config import (
     selected_stt_provider_id,
     selected_tts_provider_id,
 )
-from openbase_coder_cli.livekit_agent.codex_app_client import CodexAppServerClient
 from openbase_coder_cli.livekit_agent.speech_formatter import format_for_speech
-from openbase_coder_cli.paths import CODEX_DISPATCHER_INSTRUCTIONS_PATH
+from openbase_coder_cli.livekit_agent.super_agents_client import (
+    SuperAgentsLiveKitClient,
+)
+from openbase_coder_cli.paths import (
+    CODEX_DISPATCHER_CONFIG_PATH,
+    CODEX_DISPATCHER_INSTRUCTIONS_PATH,
+)
 from openbase_coder_cli.stt_providers import (
     ASSEMBLYAI_STT_PROVIDER_ID,
     DEEPGRAM_STT_PROVIDER_ID,
     LOCAL_MLX_WHISPER_STT_PROVIDER_ID,
+    OPENBASE_CLOUD_STT_PROVIDER_ID,
     MLXWhisperSTT,
 )
 from openbase_coder_cli.tts_providers import (
@@ -72,6 +78,8 @@ from openbase_coder_cli.tts_providers import (
     DEFAULT_CARTESIA_ANNOUNCER_VOICE_ID,
     DEFAULT_CARTESIA_TTS_VOLUME,
     DEFAULT_CARTESIA_VOICE_ID,
+    KOKORO_PROVIDER_ID,
+    OPENBASE_CLOUD_TTS_PROVIDER_ID,
     get_tts_provider,
 )
 
@@ -110,6 +118,12 @@ OPENBASE_AUDIO_PROXY_CARTESIA_VERSION = os.getenv(
     "OPENBASE_AUDIO_PROXY_CARTESIA_VERSION",
     "2026-03-01",
 )
+
+
+class AudioProxyAuthenticationError(RuntimeError):
+    """Openbase audio proxy mode requires a valid Openbase access token."""
+
+
 ANNOUNCER_TOPIC = "openbase.announcer.say"
 VOICE_ROUTE_TOPIC = "openbase.voice.route"
 ANNOUNCER_AUDIO_KIND = "audio_file"
@@ -120,9 +134,9 @@ LIVEKIT_DISPATCH_AGENT_NAME = os.environ.get(
 )
 LIVEKIT_AGENT_HOST = os.getenv("LIVEKIT_AGENT_HOST", "127.0.0.1")
 LIVEKIT_AGENT_PORT = int(os.getenv("LIVEKIT_AGENT_PORT", "8081"))
-DEFAULT_LIVEKIT_DISPATCHER_CONFIG_PATH = (
-    Path.home() / ".openbase" / "codex_home" / "dispatcher-config.json"
-)
+LIVEKIT_AGENT_LOAD_THRESHOLD_ENV = "LIVEKIT_AGENT_LOAD_THRESHOLD"
+LIVEKIT_AGENT_NUM_IDLE_PROCESSES_ENV = "LIVEKIT_AGENT_NUM_IDLE_PROCESSES"
+DEFAULT_LIVEKIT_DISPATCHER_CONFIG_PATH = CODEX_DISPATCHER_CONFIG_PATH
 LIVEKIT_DISPATCHER_CONFIG_PATH = os.getenv(
     "LIVEKIT_DISPATCHER_CONFIG_PATH",
     str(DEFAULT_LIVEKIT_DISPATCHER_CONFIG_PATH),
@@ -212,6 +226,62 @@ BRAIN_SCORE_OUTPUT_PATH = Path(
 BRAIN_SCORE_TOKEN_FILE = brain_score_token_file()
 BRAIN_SCORE_LATITUDE = os.getenv("OPENBASE_BRAIN_SCORE_LATITUDE", "").strip()
 BRAIN_SCORE_LONGITUDE = os.getenv("OPENBASE_BRAIN_SCORE_LONGITUDE", "").strip()
+
+
+def _optional_float_env(name: str) -> float | None:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r", name, raw)
+        return None
+    if value <= 0:
+        logger.warning("Ignoring non-positive %s=%r", name, raw)
+        return None
+    return value
+
+
+def _optional_int_env(name: str) -> int | None:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r", name, raw)
+        return None
+    if value < 0:
+        logger.warning("Ignoring negative %s=%r", name, raw)
+        return None
+    return value
+
+
+def _uses_local_voice_model() -> bool:
+    return (
+        selected_stt_provider_id() == LOCAL_MLX_WHISPER_STT_PROVIDER_ID
+        or selected_tts_provider_id() == KOKORO_PROVIDER_ID
+    )
+
+
+def _livekit_agent_server_options() -> dict[str, float | int]:
+    uses_local_model = _uses_local_voice_model()
+    options: dict[str, float | int] = {}
+
+    load_threshold = _optional_float_env(LIVEKIT_AGENT_LOAD_THRESHOLD_ENV)
+    if load_threshold is not None:
+        options["load_threshold"] = load_threshold
+    elif uses_local_model:
+        options["load_threshold"] = float("inf")
+
+    num_idle_processes = _optional_int_env(LIVEKIT_AGENT_NUM_IDLE_PROCESSES_ENV)
+    if num_idle_processes is not None:
+        options["num_idle_processes"] = num_idle_processes
+    elif uses_local_model:
+        options["num_idle_processes"] = 1
+
+    return options
 
 
 @dataclass(frozen=True)
@@ -392,8 +462,8 @@ class CodexLLMStream(llm.LLMStream):
             ack_task = asyncio.create_task(self._emit_ack_after_delay())
 
         try:
-            codex_client = self._voice_router.active_client
-            result = await codex_client.run_turn(
+            voice_client = self._voice_router.active_client
+            result = await voice_client.run_turn(
                 prompt,
                 developer_instructions=load_direct_livekit_developer_instructions(),
             )
@@ -417,11 +487,11 @@ class CodexLLMStream(llm.LLMStream):
             self._event_ch.closed,
         )
         if speech_text and turn_id and not self._event_ch.closed:
-            if self._voice_router.claim_speech(codex_client, turn_id):
+            if self._voice_router.claim_speech(voice_client, turn_id):
                 try:
                     self._emit_delta(speech_text)
                 except Exception:
-                    codex_client.release_speech_claim(turn_id)
+                    voice_client.release_speech_claim(turn_id)
                     raise
 
     def _emit_delta(self, text: str) -> None:
@@ -1842,15 +1912,15 @@ class SpeechFormattingSynthesizeStream:
 
 
 class LiveKitVoiceRouter:
-    def __init__(self, dispatcher_client: CodexAppServerClient) -> None:
+    def __init__(self, dispatcher_client) -> None:
         self._dispatcher_client = dispatcher_client
         self._active_client = dispatcher_client
-        self._target_clients: dict[str, CodexAppServerClient] = {}
+        self._target_clients: dict[str, SuperAgentsLiveKitClient] = {}
         self._active_target_voice_id: str | None = None
         self._active_target_voice_name: str | None = None
 
     @property
-    def active_client(self) -> CodexAppServerClient:
+    def active_client(self):
         return self._active_client
 
     @property
@@ -1881,8 +1951,7 @@ class LiveKitVoiceRouter:
         target_voice_name = voice_name or (target_voice.name if target_voice else None)
         target_client = self._target_clients.get(thread_id)
         if target_client is None:
-            target_client = CodexAppServerClient(
-                ws_url=CODEX_APP_SERVER_URL,
+            target_client = SuperAgentsLiveKitClient(
                 cwd=cwd,
                 state_path=None,
                 approval_policy=LIVEKIT_CODEX_APPROVAL_POLICY,
@@ -1909,7 +1978,7 @@ class LiveKitVoiceRouter:
             active_target_voice_name=target_voice_name,
         )
 
-    def claim_speech(self, client: CodexAppServerClient, turn_id: str) -> bool:
+    def claim_speech(self, client, turn_id: str) -> bool:
         return self._active_client is client and client.claim_speech(turn_id)
 
     async def close(self) -> None:
@@ -2562,7 +2631,11 @@ def _register_session_diagnostics(session: AgentSession):
     return handlers
 
 
-server = LiveKitAgentServer(host=LIVEKIT_AGENT_HOST, port=LIVEKIT_AGENT_PORT)
+server = LiveKitAgentServer(
+    host=LIVEKIT_AGENT_HOST,
+    port=LIVEKIT_AGENT_PORT,
+    **_livekit_agent_server_options(),
+)
 
 
 def prewarm(proc: JobProcess):
@@ -2575,9 +2648,8 @@ def prewarm(proc: JobProcess):
 server.setup_fnc = prewarm
 
 
-def _build_codex_client(*, persist_thread: bool) -> CodexAppServerClient:
-    return CodexAppServerClient(
-        ws_url=CODEX_APP_SERVER_URL,
+def _build_voice_backend_client(*, persist_thread: bool) -> SuperAgentsLiveKitClient:
+    return SuperAgentsLiveKitClient(
         cwd=LIVEKIT_CODEX_THREAD_CWD,
         state_path=LIVEKIT_CODEX_THREAD_STATE_PATH,
         developer_instructions=_load_dispatcher_developer_instructions(),
@@ -2587,7 +2659,7 @@ def _build_codex_client(*, persist_thread: bool) -> CodexAppServerClient:
     )
 
 
-_shared_codex_client = _build_codex_client(persist_thread=True)
+_shared_voice_backend_client = _build_voice_backend_client(persist_thread=True)
 
 
 def _build_stt(vad_model=None):
@@ -2599,14 +2671,15 @@ def _build_stt(vad_model=None):
         return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
     if stt_provider == ASSEMBLYAI_STT_PROVIDER_ID:
         logger.info("Using AssemblyAI STT")
-        proxy_token = _openbase_audio_proxy_token()
-        if proxy_token:
-            stt = assemblyai.STT(
-                api_key=proxy_token,
-                base_url=_openbase_audio_proxy_ws_base_url("assemblyai"),
-            )
-        else:
-            stt = assemblyai.STT(api_key=ASSEMBLY_AI_API_KEY)
+        stt = assemblyai.STT(api_key=ASSEMBLY_AI_API_KEY)
+        stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
+        return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
+    if stt_provider == OPENBASE_CLOUD_STT_PROVIDER_ID:
+        logger.info("Using Openbase Cloud STT")
+        stt = assemblyai.STT(
+            api_key=_openbase_audio_proxy_token(required=True),
+            base_url=_openbase_audio_proxy_ws_base_url("assemblyai"),
+        )
         stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
         return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
     if stt_provider == LOCAL_MLX_WHISPER_STT_PROVIDER_ID:
@@ -2619,14 +2692,30 @@ def _build_stt(vad_model=None):
     raise ValueError(f"Unsupported STT provider={stt_provider!r}")
 
 
-def _openbase_audio_proxy_token() -> str:
+def _openbase_audio_proxy_token(*, required: bool = False) -> str:
     if not OPENBASE_AUDIO_PROXY_ENABLED:
+        if required:
+            raise AudioProxyAuthenticationError(
+                "Openbase Cloud audio is selected, but OPENBASE_AUDIO_PROXY_ENABLED is disabled."
+            )
         return ""
     try:
-        return get_token_manager(WEB_BACKEND_URL).get_access_token()
+        token = get_token_manager(WEB_BACKEND_URL).get_access_token()
     except (AuthLoginRequiredError, AuthTransientError) as exc:
-        logger.warning("Openbase audio proxy unavailable: %s", exc)
-        return ""
+        raise AudioProxyAuthenticationError(
+            "Openbase audio proxy is enabled, but Openbase Coder could not get "
+            "a valid Openbase access token. Run `openbase-coder login` and "
+            "restart the Openbase services, or set OPENBASE_AUDIO_PROXY_ENABLED=0 "
+            "to use direct provider API keys."
+        ) from exc
+    if not token:
+        raise AudioProxyAuthenticationError(
+            "Openbase audio proxy is enabled, but Openbase Coder received an "
+            "empty Openbase access token. Run `openbase-coder login` and restart "
+            "the Openbase services, or set OPENBASE_AUDIO_PROXY_ENABLED=0 to use "
+            "direct provider API keys."
+        )
+    return token
 
 
 def _openbase_audio_proxy_http_base_url(provider: str) -> str:
@@ -2689,18 +2778,17 @@ async def livekit_agent(ctx: JobContext):
         "room": ctx.room.name,
     }
     logger.info(
-        "Connecting LiveKit voice session to Codex app-server at %s with cwd=%s",
-        CODEX_APP_SERVER_URL,
+        "Connecting LiveKit voice session to Super Agents backend with cwd=%s",
         LIVEKIT_CODEX_THREAD_CWD,
     )
-    codex_client = (
-        _build_codex_client(persist_thread=False)
+    voice_backend_client = (
+        _build_voice_backend_client(persist_thread=False)
         if LIVEKIT_CODEX_FRESH_THREAD_PER_SESSION
-        else _shared_codex_client
+        else _shared_voice_backend_client
     )
-    prepare_task = asyncio.create_task(codex_client.prepare())
+    prepare_task = asyncio.create_task(voice_backend_client.prepare())
     prepare_task.add_done_callback(_log_prepare_result)
-    voice_router = LiveKitVoiceRouter(codex_client)
+    voice_router = LiveKitVoiceRouter(voice_backend_client)
 
     logger.info("Connecting to LiveKit room")
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
@@ -2717,13 +2805,15 @@ async def livekit_agent(ctx: JobContext):
         else None
     ) or tts_provider.default_announcer_voice()
     cartesia_proxy_token = (
-        _openbase_audio_proxy_token()
-        if tts_provider.provider_id == CARTESIA_PROVIDER_ID
+        _openbase_audio_proxy_token(required=True)
+        if tts_provider.provider_id == OPENBASE_CLOUD_TTS_PROVIDER_ID
         else ""
     )
     cartesia_api_key = cartesia_proxy_token or CARTESIA_API_KEY
     cartesia_base_url = (
-        _openbase_audio_proxy_http_base_url("cartesia") if cartesia_proxy_token else None
+        _openbase_audio_proxy_http_base_url("cartesia")
+        if cartesia_proxy_token
+        else None
     )
     cartesia_api_version = (
         OPENBASE_AUDIO_PROXY_CARTESIA_VERSION if cartesia_proxy_token else None

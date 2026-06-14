@@ -23,7 +23,5 @@ openbase-coder doctor
 ## Required Environment Keys
 
 - `OPENBASE_CODER_CLI_SECRET_KEY`
-- `OPENBASE_CODER_CLI_API_TOKEN`
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
-- `ANTHROPIC_API_KEY`

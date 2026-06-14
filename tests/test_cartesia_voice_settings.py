@@ -55,11 +55,17 @@ def test_cartesia_voice_settings_returns_catalog_and_dispatcher_default(
     assert response.data["provider"] == "cartesia"
     assert {provider["id"] for provider in response.data["providers"]} == {
         "cartesia",
+        "openbase_cloud",
         "kokoro",
     }
     assert response.data["voices"][0]["name"] == "Jacqueline"
     assert "kokoro" in response.data["voices_by_provider"]
-    assert len(response.data["voices_by_provider"]["kokoro"]) == 54
+    assert "openbase_cloud" in response.data["voices_by_provider"]
+    assert len(response.data["voices_by_provider"]["kokoro"]) == 28
+    assert all(
+        voice["language"] == "en"
+        for voice in response.data["voices_by_provider"]["kokoro"]
+    )
     assert any(voice["name"] == "Thandi" for voice in response.data["voices"])
 
 
@@ -148,8 +154,8 @@ def test_tts_settings_persists_kokoro_when_ready(monkeypatch, tmp_path: Path) ->
         lambda: TTSDownloadStatus(
             provider=KOKORO_PROVIDER_ID,
             ready=True,
-            required_files=56,
-            cached_files=56,
+            required_files=30,
+            cached_files=30,
         ),
     )
 
@@ -171,6 +177,71 @@ def test_tts_settings_persists_kokoro_when_ready(monkeypatch, tmp_path: Path) ->
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     assert payload["tts_provider"] == "kokoro"
     assert payload["dispatcher_voice_id"] == "af_heart"
+
+
+def test_tts_settings_persists_openbase_cloud(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "dispatcher-config.json"
+    monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
+    monkeypatch.setattr(
+        views,
+        "set_tts_provider_and_dispatcher_voice",
+        dispatcher_config.set_tts_provider_and_dispatcher_voice,
+    )
+
+    response = views.tts_settings(
+        _authenticated_request(
+            "PUT",
+            "/api/settings/tts/",
+            {
+                "provider": "openbase_cloud",
+                "voice_id": "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+            },
+        )
+    )
+
+    assert response.status_code == 200
+    assert response.data["provider"] == "openbase_cloud"
+    assert response.data["dispatcher_voice"] == {
+        "id": "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+        "name": "Jacqueline",
+        "provider": "openbase_cloud",
+    }
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert payload["tts_provider"] == "openbase_cloud"
+
+
+def test_tts_settings_rejects_non_english_kokoro_voice(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "dispatcher-config.json"
+    monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
+    monkeypatch.setattr(
+        views,
+        "set_tts_provider_and_dispatcher_voice",
+        dispatcher_config.set_tts_provider_and_dispatcher_voice,
+    )
+    monkeypatch.setattr(
+        get_tts_provider(KOKORO_PROVIDER_ID),
+        "readiness",
+        lambda: TTSDownloadStatus(
+            provider=KOKORO_PROVIDER_ID,
+            ready=True,
+            required_files=30,
+            cached_files=30,
+        ),
+    )
+
+    response = views.tts_settings(
+        _authenticated_request(
+            "PUT",
+            "/api/settings/tts/",
+            {"provider": "kokoro", "voice_id": "jf_tebukuro"},
+        )
+    )
+
+    assert response.status_code == 400
+    assert "catalog" in response.data["detail"]
 
 
 def test_stt_settings_returns_default_provider(monkeypatch, tmp_path: Path) -> None:
@@ -196,6 +267,7 @@ def test_stt_settings_returns_default_provider(monkeypatch, tmp_path: Path) -> N
     assert response.data["provider"] == "assemblyai"
     assert {provider["id"] for provider in response.data["providers"]} == {
         "assemblyai",
+        "openbase_cloud",
         "deepgram",
         "local_mlx_whisper",
     }
@@ -260,3 +332,22 @@ def test_stt_settings_persists_local_when_ready(monkeypatch, tmp_path: Path) -> 
     assert response.data["provider"] == "local_mlx_whisper"
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     assert payload["stt_provider"] == "local_mlx_whisper"
+
+
+def test_stt_settings_persists_openbase_cloud(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "dispatcher-config.json"
+    monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
+    monkeypatch.setattr(views, "set_stt_provider", dispatcher_config.set_stt_provider)
+
+    response = views.stt_settings(
+        _authenticated_request(
+            "PUT",
+            "/api/settings/stt/",
+            {"provider": "openbase_cloud"},
+        )
+    )
+
+    assert response.status_code == 200
+    assert response.data["provider"] == "openbase_cloud"
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert payload["stt_provider"] == "openbase_cloud"

@@ -18,6 +18,7 @@ from openbase_coder_cli.tts_providers import (
     DEFAULT_CARTESIA_VOICE_ID,
     DEFAULT_TTS_PROVIDER_ID,
     KOKORO_PROVIDER_ID,
+    OPENBASE_CLOUD_TTS_PROVIDER_ID,
     get_tts_provider,
     normalize_tts_provider_id,
 )
@@ -25,6 +26,7 @@ from openbase_coder_cli.tts_providers import (
 REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 DISPATCHER_REASONING_EFFORT_KEY = "dispatcher_reasoning_effort"
 SUPER_AGENTS_REASONING_EFFORT_KEY = "super_agents_reasoning_effort"
+SUPER_AGENTS_MODEL_KEY = "super_agents_model"
 TTS_PROVIDER_KEY = "tts_provider"
 STT_PROVIDER_KEY = "stt_provider"
 DISPATCHER_VOICE_ID_KEY = "dispatcher_voice_id"
@@ -60,6 +62,30 @@ def set_dispatcher_reasoning_effort(value: str, path: Path | None = None) -> Pat
 
 def set_super_agents_reasoning_effort(value: str, path: Path | None = None) -> Path:
     return _set_reasoning_effort(SUPER_AGENTS_REASONING_EFFORT_KEY, value, path)
+
+
+def super_agents_model(path: Path | None = None) -> str | None:
+    payload = read_dispatcher_config(path)
+    configured = _optional_str(payload.get(SUPER_AGENTS_MODEL_KEY))
+    if configured:
+        return configured
+    env_model = _optional_str(os.getenv("SUPER_AGENTS_MODEL"))
+    return env_model
+
+
+def set_super_agents_model(value: str, path: Path | None = None) -> Path:
+    normalized = " ".join(value.split())
+    if not normalized:
+        raise ValueError("Super Agents model cannot be blank.")
+    config_path = path or CODEX_DISPATCHER_CONFIG_PATH
+    _write_dispatcher_config(
+        {
+            **read_dispatcher_config(config_path),
+            SUPER_AGENTS_MODEL_KEY: normalized,
+        },
+        config_path,
+    )
+    return config_path
 
 
 def selected_tts_provider_id(path: Path | None = None) -> str:
@@ -118,7 +144,11 @@ def dispatcher_voice(path: Path | None = None) -> dict[str, str]:
     configured_voice_id = _optional_str(payload.get(DISPATCHER_VOICE_ID_KEY))
     voice_id = (
         configured_voice_id
-        or (legacy_env_voice_id if provider_id == CARTESIA_PROVIDER_ID else "")
+        or (
+            legacy_env_voice_id
+            if provider_id in {CARTESIA_PROVIDER_ID, OPENBASE_CLOUD_TTS_PROVIDER_ID}
+            else ""
+        )
         or default_voice.id
     )
     catalog_voice = provider.voice_for_id(voice_id)
@@ -129,7 +159,10 @@ def dispatcher_voice(path: Path | None = None) -> dict[str, str]:
             "name": configured_voice_name,
             "provider": provider_id,
         }
-    if catalog_voice is None and provider_id == CARTESIA_PROVIDER_ID:
+    if catalog_voice is None and provider_id in {
+        CARTESIA_PROVIDER_ID,
+        OPENBASE_CLOUD_TTS_PROVIDER_ID,
+    }:
         voice_id = DEFAULT_DISPATCHER_VOICE_ID
         catalog_voice = provider.voice_for_id(voice_id)
     if catalog_voice is None:

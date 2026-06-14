@@ -77,7 +77,9 @@ async def publish_announcer_message(
             "message_id": message_id,
             "text": normalized_text,
         }
-        target_voice_id = (voice_id or "").strip() or _active_target_voice_id()
+        target_voice_id = _safe_announcer_voice_id(
+            (voice_id or "").strip() or _active_target_voice_id()
+        )
         if target_voice_id:
             payload["voice_id"] = target_voice_id
         await client.room.send_data(
@@ -162,6 +164,30 @@ def _active_target_voice_id() -> str | None:
 
     state = get_livekit_voice_route_state()
     return state.active_target_voice_id if state.active_target_thread_id else None
+
+
+def _safe_announcer_voice_id(voice_id: str | None) -> str | None:
+    if not voice_id:
+        return None
+    from openbase_coder_cli.dispatcher_config import selected_tts_provider_id
+    from openbase_coder_cli.tts_providers import KOKORO_PROVIDER_ID, get_tts_provider
+
+    try:
+        provider = get_tts_provider(selected_tts_provider_id())
+    except ValueError:
+        return voice_id
+    if provider.provider_id != KOKORO_PROVIDER_ID:
+        return voice_id
+    if provider.super_agent_voice_for_id(voice_id):
+        return voice_id
+    fallback = provider.default_announcer_voice().id
+    logger.warning(
+        "announcer_voice_fallback provider=%s requested_voice_id=%s fallback_voice_id=%s",
+        provider.provider_id,
+        voice_id,
+        fallback,
+    )
+    return fallback
 
 
 @dataclass(frozen=True)

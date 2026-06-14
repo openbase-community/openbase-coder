@@ -69,6 +69,8 @@ logger = logging.getLogger(__name__)
 LIVEKIT_COMPANION_IDENTITY = "openbase-screen-share-companion"
 LIVEKIT_COMPANION_NAME = "Openbase Screen Share"
 LIVEKIT_COMPANION_TOKEN_TTL = timedelta(hours=1)
+LIVEKIT_CLIENT_API_KEY_ENV = "LIVEKIT_CLIENT_API_KEY"
+LIVEKIT_CLIENT_API_SECRET_ENV = "LIVEKIT_CLIENT_API_SECRET"
 
 
 class LiveKitRoomTokenSerializer(serializers.Serializer):
@@ -117,6 +119,36 @@ class AnnouncerPlaySerializer(serializers.Serializer):
                 f"Unsupported audio file extension. Supported: {supported}."
             )
         return str(path.resolve())
+
+
+def _livekit_client_token_credentials() -> tuple[str, str]:
+    api_key = os.environ.get(LIVEKIT_CLIENT_API_KEY_ENV, "").strip()
+    api_secret = os.environ.get(LIVEKIT_CLIENT_API_SECRET_ENV, "").strip()
+    if not api_key or not api_secret:
+        raise serializers.ValidationError(
+            {
+                "detail": (
+                    "Local LiveKit client token credentials are not configured. "
+                    "Run 'openbase-coder setup' to generate "
+                    "LIVEKIT_CLIENT_API_KEY and LIVEKIT_CLIENT_API_SECRET, then "
+                    "restart the Openbase Coder services."
+                )
+            }
+        )
+
+    server_api_key = os.environ.get("LIVEKIT_API_KEY", "").strip()
+    server_api_secret = os.environ.get("LIVEKIT_API_SECRET", "").strip()
+    if api_key == server_api_key or api_secret == server_api_secret:
+        raise serializers.ValidationError(
+            {
+                "detail": (
+                    "Client-facing LiveKit token credentials must be separate "
+                    "from the local server credentials. Run 'openbase-coder setup' "
+                    "to regenerate them, then restart the Openbase Coder services."
+                )
+            }
+        )
+    return api_key, api_secret
 
 
 class VoiceRouteCommandSerializer(serializers.Serializer):
@@ -694,12 +726,7 @@ def livekit_room_token(request):
     input_serializer = LiveKitRoomTokenSerializer(data=request.data)
     input_serializer.is_valid(raise_exception=True)
 
-    api_key = os.environ.get("LIVEKIT_API_KEY")
-    api_secret = os.environ.get("LIVEKIT_API_SECRET")
-    if not api_key or not api_secret:
-        raise serializers.ValidationError(
-            {"detail": "Local LiveKit credentials are not configured."}
-        )
+    api_key, api_secret = _livekit_client_token_credentials()
 
     if not isinstance(request.auth, dict):
         raise serializers.ValidationError(
@@ -774,12 +801,7 @@ def livekit_companion_session(request):
     input_serializer = LiveKitCompanionSessionSerializer(data=input_data)
     input_serializer.is_valid(raise_exception=True)
 
-    api_key = os.environ.get("LIVEKIT_API_KEY")
-    api_secret = os.environ.get("LIVEKIT_API_SECRET")
-    if not api_key or not api_secret:
-        raise serializers.ValidationError(
-            {"detail": "Local LiveKit credentials are not configured."}
-        )
+    api_key, api_secret = _livekit_client_token_credentials()
 
     if not isinstance(request.auth, dict):
         raise serializers.ValidationError(

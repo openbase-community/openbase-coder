@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
 import uuid
-import wave
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Literal
 
+import numpy as np
 from livekit import rtc
 from livekit.agents import stt as livekit_stt
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN
 
-STTProviderId = Literal["assemblyai", "deepgram", "local_mlx_whisper"]
+STTProviderId = Literal["assemblyai", "openbase_cloud", "deepgram", "local_mlx_whisper"]
 
 ASSEMBLYAI_STT_PROVIDER_ID = "assemblyai"
+OPENBASE_CLOUD_STT_PROVIDER_ID = "openbase_cloud"
 DEEPGRAM_STT_PROVIDER_ID = "deepgram"
 LOCAL_MLX_WHISPER_STT_PROVIDER_ID = "local_mlx_whisper"
 DEFAULT_STT_PROVIDER_ID: STTProviderId = ASSEMBLYAI_STT_PROVIDER_ID
@@ -50,6 +49,7 @@ class STTProviderOption:
 
 STT_PROVIDER_OPTIONS: tuple[STTProviderOption, ...] = (
     STTProviderOption(ASSEMBLYAI_STT_PROVIDER_ID, "AssemblyAI", False),
+    STTProviderOption(OPENBASE_CLOUD_STT_PROVIDER_ID, "Openbase Cloud", False),
     STTProviderOption(DEEPGRAM_STT_PROVIDER_ID, "Deepgram", False),
     STTProviderOption(
         LOCAL_MLX_WHISPER_STT_PROVIDER_ID,
@@ -62,11 +62,13 @@ STT_PROVIDER_OPTIONS: tuple[STTProviderOption, ...] = (
 
 def normalize_stt_provider_id(provider_id: str | None) -> STTProviderId:
     normalized = (provider_id or DEFAULT_STT_PROVIDER_ID).strip().lower()
+    if normalized in {"openbase", "openbase-cloud", "cloud"}:
+        normalized = OPENBASE_CLOUD_STT_PROVIDER_ID
     if normalized in {"local", "mlx", "mlx_whisper"}:
         normalized = LOCAL_MLX_WHISPER_STT_PROVIDER_ID
     if normalized not in {provider.id for provider in STT_PROVIDER_OPTIONS}:
         raise ValueError(
-            "STT provider must be one of: assemblyai, deepgram, local_mlx_whisper."
+            "STT provider must be one of: assemblyai, openbase_cloud, deepgram, local_mlx_whisper."
         )
     return normalized  # type: ignore[return-value]
 
@@ -163,27 +165,29 @@ class MLXWhisperSTT(livekit_stt.STT):
         import mlx_whisper
 
         frame = rtc.combine_audio_frames(buffer)
-        path = _write_frame_to_temp_wav(frame)
-        try:
-            result = mlx_whisper.transcribe(
-                str(path),
-                path_or_hf_repo=self._model,
-                language="en",
-                task="transcribe",
-                initial_prompt=self._initial_prompt,
-                verbose=False,
-            )
-        finally:
-            path.unlink(missing_ok=True)
+        audio = _frame_to_whisper_audio(frame)
+        result = mlx_whisper.transcribe(
+            audio,
+            path_or_hf_repo=self._model,
+            language="en",
+            task="transcribe",
+            initial_prompt=self._initial_prompt,
+            verbose=False,
+        )
         return " ".join(str(result.get("text") or "").strip().split())
 
 
-def _write_frame_to_temp_wav(frame: rtc.AudioFrame) -> Path:
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        path = Path(tmp.name)
-    with wave.open(str(path), "wb") as wav:
-        wav.setnchannels(frame.num_channels)
-        wav.setsampwidth(2)
-        wav.setframerate(frame.sample_rate)
-        wav.writeframes(frame.data.tobytes())
-    return path
+def _frame_to_whisper_audio(frame: rtc.AudioFrame) -> np.ndarray:
+    if frame.sample_rate != 16000:
+        resampler = rtc.AudioResampler(
+            input_rate=frame.sample_rate,
+            output_rate=16000,
+            num_channels=frame.num_channels,
+        )
+        frames = resampler.push(frame) + resampler.flush()
+        frame = rtc.combine_audio_frames(frames)
+
+    pcm = np.frombuffer(frame.data, dtype=np.int16).astype(np.float32)
+    if frame.num_channels > 1:
+        pcm = pcm.reshape(-1, frame.num_channels).mean(axis=1)
+    return pcm / 32768.0

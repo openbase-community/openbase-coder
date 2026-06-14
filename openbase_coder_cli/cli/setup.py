@@ -11,9 +11,15 @@ from shutil import which
 import click
 from multi.api import sync_workspace
 
+from openbase_coder_cli.backend_config import (
+    CODING_BACKEND_ENV_KEY,
+    DEFAULT_CODING_BACKEND,
+    LEGACY_CODEX_BACKEND_ENV_KEY,
+    SUPPORTED_BACKENDS,
+)
 from openbase_coder_cli.cli.node import run_workspace_package_command
+from openbase_coder_cli.codex_home_instructions import ensure_openbase_agents_md
 from openbase_coder_cli.paths import (
-    CODEX_AGENTS_MD_PATH,
     CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
     CODEX_DISPATCHER_CONFIG_PATH,
     CODEX_DISPATCHER_INSTRUCTIONS_PATH,
@@ -21,6 +27,8 @@ from openbase_coder_cli.paths import (
     CODEX_SUPER_AGENT_INSTRUCTIONS_PATH,
     DEFAULT_ENV_FILE_PATH,
     DEFAULT_WORKSPACE_DIR,
+    LEGACY_CODEX_DISPATCHER_CONFIG_PATH,
+    NORMAL_CODEX_CONFIG_PATH,
     OPENBASE_BASE_DIR,
 )
 from openbase_coder_cli.services.installation import InstallationConfig
@@ -35,11 +43,14 @@ WORKSPACE_INSTALL_SET = "default"
 CODEX_HOME_DEFAULT_SOURCE_DIR = "instructions"
 CODEX_HOME_SKILLS_SOURCE_DIR = "skills"
 CODEX_HOME_DEFAULT_FILES = (
-    ("AGENTS.md", CODEX_AGENTS_MD_PATH),
     ("VOICE_INSTRUCTIONS.md", CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH),
     ("DISPATCHER_INSTRUCTIONS.md", CODEX_DISPATCHER_INSTRUCTIONS_PATH),
     ("SUPER_AGENT_INSTRUCTIONS.md", CODEX_SUPER_AGENT_INSTRUCTIONS_PATH),
 )
+THREAD_SYNC_EXCHANGE_DIR_NAME = "thread-sync"
+THREAD_SYNC_MARKER_FILE_NAME = "syncthing-folder-openbase-thread-sync.txt"
+THREAD_SYNC_STIGNORE_CONTENT = "#include .stglobalignore\n"
+DEFAULT_SYNCTHING_GLOBAL_STIGNORE_CONTENT = "(?d).DS_Store\n"
 SUPER_AGENTS_MCP_TABLE = "mcp_servers.super-agents"
 SUPER_AGENTS_MCP_COMMAND = "super-agents-mcp"
 CODEX_HOME_PERMISSION_VALUES = (
@@ -55,8 +66,7 @@ CODEX_HOME_DEFAULT_DISPATCHER_CONFIG = {
     "dispatcher_reasoning_effort": "low",
     "super_agents_reasoning_effort": "high",
 }
-DEFAULT_CODEX_BACKEND = "claude-code-proxy"
-CODEX_BACKEND_OPTIONS = ("codex", "claude-code-proxy", "claude-tui")
+CODING_BACKEND_OPTIONS = SUPPORTED_BACKENDS
 
 
 @click.command()
@@ -97,12 +107,19 @@ CODEX_BACKEND_OPTIONS = ("codex", "claude-code-proxy", "claude-tui")
     help="Skip background service installation.",
 )
 @click.option(
+    "--link-codex-config",
+    is_flag=True,
+    help=(
+        "Symlink Openbase's service Codex config to the normal ~/.codex/config.toml."
+    ),
+)
+@click.option(
     "--backend",
-    "codex_backend",
-    type=click.Choice(CODEX_BACKEND_OPTIONS),
+    "coding_backend",
+    type=click.Choice(CODING_BACKEND_OPTIONS),
     default=None,
     help=(
-        "Default coding backend. New env files use claude-code-proxy when omitted; "
+        "Default coding backend. New env files use codex when omitted; "
         "existing env files are only changed when this option is provided."
     ),
 )
@@ -113,13 +130,15 @@ def setup(
     cartesia_api_key: str,
     skip_clone: bool,
     skip_services: bool,
-    codex_backend: str | None,
+    link_codex_config: bool,
+    coding_backend: str | None,
 ) -> None:
     """Full install flow for Openbase Coder."""
     if platform.system() not in ("Darwin", "Linux"):
         raise click.ClickException("Setup is only supported on macOS and Linux.")
 
     OPENBASE_BASE_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_thread_sync_exchange_dir()
 
     # --- Clone workspace ---
     if not skip_clone:
@@ -138,7 +157,7 @@ def setup(
         env_file,
         assembly_ai_api_key=assembly_ai_api_key,
         cartesia_api_key=cartesia_api_key,
-        codex_backend=codex_backend,
+        coding_backend=coding_backend,
     )
 
     # --- Symlink Codex auth into the service CODEX_HOME ---
@@ -151,7 +170,10 @@ def setup(
     _init_cli_workspace(workspace_dir)
 
     # --- Configure the service CODEX_HOME ---
-    _ensure_codex_home_config(workspace_dir)
+    if link_codex_config:
+        _ensure_codex_home_config(workspace_dir, link_codex_config=True)
+    else:
+        _ensure_codex_home_config(workspace_dir)
 
     # --- Install/update user-facing CLI shim ---
     _install_cli_shim(workspace_dir)
@@ -320,6 +342,47 @@ def _build_console(workspace_dir: str) -> None:
     click.echo("Console build complete.")
 
 
+def _ensure_thread_sync_exchange_dir() -> None:
+    """Create the Syncthing-backed cross-device Codex thread exchange folder."""
+    exchange_dir = OPENBASE_BASE_DIR / THREAD_SYNC_EXCHANGE_DIR_NAME
+    exchange_dir.mkdir(parents=True, exist_ok=True)
+
+    marker_dir = exchange_dir / ".stfolder"
+    marker_dir.mkdir(exist_ok=True)
+    marker_path = marker_dir / THREAD_SYNC_MARKER_FILE_NAME
+    if not marker_path.exists():
+        marker_path.write_text(
+            "Openbase Coder cross-device Codex thread snapshot exchange.\n",
+            encoding="utf-8",
+        )
+
+    stignore_path = exchange_dir / ".stignore"
+    if not stignore_path.exists():
+        stignore_path.write_text(THREAD_SYNC_STIGNORE_CONTENT, encoding="utf-8")
+
+    global_ignore_path = _syncthing_global_ignore_path()
+    if not global_ignore_path.exists():
+        global_ignore_path.parent.mkdir(parents=True, exist_ok=True)
+        global_ignore_path.write_text(
+            DEFAULT_SYNCTHING_GLOBAL_STIGNORE_CONTENT,
+            encoding="utf-8",
+        )
+
+    stglobal_path = exchange_dir / ".stglobalignore"
+    if stglobal_path.is_symlink():
+        if stglobal_path.resolve() != global_ignore_path.resolve():
+            stglobal_path.unlink()
+            stglobal_path.symlink_to(global_ignore_path)
+    elif not stglobal_path.exists():
+        stglobal_path.symlink_to(global_ignore_path)
+
+    click.echo(f"Prepared Codex thread sync exchange folder at {exchange_dir}")
+
+
+def _syncthing_global_ignore_path() -> Path:
+    return Path.home() / ".config" / "syncthing" / "global.stignore"
+
+
 def _symlink_codex_auth() -> None:
     """Point the service CODEX_HOME at the user's normal Codex login."""
     codex_auth = Path.home() / ".codex" / "auth.json"
@@ -357,13 +420,18 @@ def _symlink_codex_auth() -> None:
 
 
 def _ensure_codex_home_default_files(workspace_dir: str) -> None:
-    """Create missing Openbase Codex home instruction files."""
+    """Symlink Openbase Codex home instruction files to workspace defaults."""
     CODEX_HOME_DIR.mkdir(parents=True, exist_ok=True)
     defaults_dir = Path(workspace_dir) / CODEX_HOME_DEFAULT_SOURCE_DIR
 
+    ensure_openbase_agents_md(
+        workspace_dir,
+        codex_home_dir=CODEX_HOME_DIR,
+        report=click.echo,
+    )
+
     for resource_name, target_path in CODEX_HOME_DEFAULT_FILES:
-        if target_path.exists():
-            click.echo(f"Codex home default already exists at {target_path}")
+        if resource_name == "AGENTS.md":
             continue
 
         source_path = defaults_dir / resource_name
@@ -371,21 +439,45 @@ def _ensure_codex_home_default_files(workspace_dir: str) -> None:
             click.echo(f"Codex home default source not found at {source_path}")
             continue
 
+        if target_path.is_symlink():
+            if target_path.resolve() == source_path.resolve():
+                click.echo(f"Codex home default already linked at {target_path}")
+                continue
+            target_path.unlink()
+        elif target_path.exists():
+            if not target_path.is_file():
+                click.echo(
+                    f"Codex home default already exists at {target_path}; "
+                    "leaving it unchanged."
+                )
+                continue
+
+            try:
+                default_matches = target_path.read_bytes() == source_path.read_bytes()
+            except OSError:
+                default_matches = False
+            if not default_matches:
+                click.echo(
+                    f"Codex home default already exists at {target_path} and "
+                    "differs from the workspace default; leaving it unchanged."
+                )
+                continue
+            target_path.unlink()
+
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(
-            source_path.read_text(encoding="utf-8"),
-            encoding="utf-8",
-        )
-        click.echo(f"Created Codex home default at {target_path}")
+        target_path.symlink_to(source_path)
+        click.echo(f"Linked Codex home default {target_path} -> {source_path}")
 
 
 def _ensure_codex_home_dispatcher_config() -> None:
     """Create the missing Openbase dispatcher config."""
+    _migrate_legacy_codex_home_dispatcher_config()
     if CODEX_DISPATCHER_CONFIG_PATH.exists():
         click.echo(
-            f"Codex home dispatcher config already exists at "
+            f"Openbase dispatcher config already exists at "
             f"{CODEX_DISPATCHER_CONFIG_PATH}"
         )
+        _ensure_legacy_dispatcher_config_link()
         return
 
     CODEX_DISPATCHER_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -393,9 +485,39 @@ def _ensure_codex_home_dispatcher_config() -> None:
         json.dumps(CODEX_HOME_DEFAULT_DISPATCHER_CONFIG, indent=2) + "\n",
         encoding="utf-8",
     )
-    click.echo(
-        f"Created Codex home dispatcher config at {CODEX_DISPATCHER_CONFIG_PATH}"
-    )
+    click.echo(f"Created Openbase dispatcher config at {CODEX_DISPATCHER_CONFIG_PATH}")
+    _ensure_legacy_dispatcher_config_link()
+
+
+def _migrate_legacy_codex_home_dispatcher_config() -> None:
+    legacy_path = LEGACY_CODEX_DISPATCHER_CONFIG_PATH
+    canonical_path = CODEX_DISPATCHER_CONFIG_PATH
+    if canonical_path.exists() or not legacy_path.exists() or legacy_path.is_symlink():
+        return
+    if not legacy_path.is_file():
+        click.echo(
+            f"Legacy dispatcher config path exists but is not a file at {legacy_path}; "
+            "leaving it unchanged."
+        )
+        return
+    canonical_path.parent.mkdir(parents=True, exist_ok=True)
+    canonical_path.write_text(legacy_path.read_text(encoding="utf-8"), encoding="utf-8")
+    legacy_path.unlink()
+    click.echo(f"Migrated dispatcher config {legacy_path} -> {canonical_path}")
+
+
+def _ensure_legacy_dispatcher_config_link() -> None:
+    legacy_path = LEGACY_CODEX_DISPATCHER_CONFIG_PATH
+    canonical_path = CODEX_DISPATCHER_CONFIG_PATH
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    if legacy_path.is_symlink():
+        if legacy_path.resolve() == canonical_path.resolve():
+            return
+        legacy_path.unlink()
+    elif legacy_path.exists():
+        return
+    legacy_path.symlink_to(canonical_path)
+    click.echo(f"Linked legacy dispatcher config {legacy_path} -> {canonical_path}")
 
 
 def _symlink_codex_home_skills(workspace_dir: str) -> None:
@@ -427,10 +549,17 @@ def _symlink_codex_home_skills(workspace_dir: str) -> None:
         click.echo(f"Linked Codex home skill {target_path} → {source_path}")
 
 
-def _ensure_codex_home_config(workspace_dir: str) -> None:
+def _ensure_codex_home_config(
+    workspace_dir: str,
+    *,
+    link_codex_config: bool = False,
+) -> None:
     """Configure Openbase's service Codex home."""
     CODEX_HOME_DIR.mkdir(parents=True, exist_ok=True)
     config_path = CODEX_HOME_DIR / "config.toml"
+    if link_codex_config:
+        _symlink_codex_home_config()
+
     command_path, args = _super_agents_mcp_command(Path(workspace_dir))
     block = (
         f"[{SUPER_AGENTS_MCP_TABLE}]\n"
@@ -456,6 +585,43 @@ def _ensure_codex_home_config(workspace_dir: str) -> None:
 
     config_path.write_text(updated, encoding="utf-8")
     click.echo(f"Configured Codex home config at {config_path}")
+
+
+def _symlink_codex_home_config() -> None:
+    """Point the service CODEX_HOME config at the user's normal Codex config."""
+    service_config = CODEX_HOME_DIR / "config.toml"
+    normal_config = NORMAL_CODEX_CONFIG_PATH
+
+    CODEX_HOME_DIR.mkdir(parents=True, exist_ok=True)
+    normal_config.parent.mkdir(parents=True, exist_ok=True)
+
+    if normal_config.exists() and not normal_config.is_file():
+        raise click.ClickException(
+            f"Normal Codex config exists but is not a file: {normal_config}"
+        )
+
+    if service_config.is_symlink():
+        if service_config.resolve() == normal_config.resolve():
+            click.echo(f"Codex home config already linked to {normal_config}")
+            return
+        service_config.unlink()
+    elif service_config.exists():
+        if not service_config.is_file():
+            raise click.ClickException(
+                f"Codex home config exists but is not a file: {service_config}"
+            )
+        if not normal_config.exists():
+            normal_config.write_text(
+                service_config.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+        service_config.unlink()
+
+    if not normal_config.exists():
+        normal_config.write_text("", encoding="utf-8")
+
+    service_config.symlink_to(normal_config)
+    click.echo(f"Symlinked Codex home config -> {normal_config}")
 
 
 def _super_agents_mcp_command(workspace_dir: Path) -> tuple[Path, list[str]]:
@@ -646,13 +812,21 @@ def _ensure_env_file(
     *,
     assembly_ai_api_key: str,
     cartesia_api_key: str,
-    codex_backend: str | None = None,
+    coding_backend: str | None = None,
 ) -> None:
     path = Path(env_file)
     if path.is_file():
-        if codex_backend:
-            _upsert_env_file_values(path, {"OPENBASE_CODEX_BACKEND": codex_backend})
-            click.echo(f"Updated OPENBASE_CODEX_BACKEND in {path}.")
+        updates = _missing_livekit_client_credential_values(path)
+        if coding_backend:
+            updates[CODING_BACKEND_ENV_KEY] = coding_backend
+        if updates:
+            _upsert_env_file_values(path, updates)
+            if coding_backend:
+                click.echo(f"Updated {CODING_BACKEND_ENV_KEY} in {path}.")
+            if any(key.startswith("LIVEKIT_CLIENT_") for key in updates):
+                click.echo(
+                    f"Updated client-facing LiveKit token credentials in {path}."
+                )
             return
         click.echo(f".env already exists at {path}, leaving unchanged.")
         return
@@ -661,11 +835,17 @@ def _ensure_env_file(
     secret_key = secrets.token_urlsafe(50)
     livekit_api_key = "APIkey" + secrets.token_urlsafe(12)
     livekit_api_secret = secrets.token_urlsafe(32)
+    livekit_client_api_key = "APIkey" + secrets.token_urlsafe(12)
+    livekit_client_api_secret = secrets.token_urlsafe(32)
 
     lines = [
         f"OPENBASE_CODER_CLI_SECRET_KEY={secret_key}",
+        "# Local server/admin credentials. Do not return these in client API responses.",
         f"LIVEKIT_API_KEY={livekit_api_key}",
         f"LIVEKIT_API_SECRET={livekit_api_secret}",
+        "# Client-facing token issuer. LiveKit JWTs expose this key in the issuer claim.",
+        f"LIVEKIT_CLIENT_API_KEY={livekit_client_api_key}",
+        f"LIVEKIT_CLIENT_API_SECRET={livekit_client_api_secret}",
         "# Use tailscale for phone-to-computer voice calls; use local for loopback-only testing.",
         "LIVEKIT_NETWORK_MODE=tailscale",
         "LIVEKIT_URL=ws://localhost:7880",
@@ -690,13 +870,11 @@ def _ensure_env_file(
         "# OPENBASE_CODER_CLI_HOST=127.0.0.1",
         "# Allow localhost and Tailscale Serve hostnames.",
         "OPENBASE_CODER_CLI_ALLOWED_HOSTS=localhost,127.0.0.1,.ts.net",
-        "# Codex app-server defaults used by the managed service.",
-        "# Set OPENBASE_CODEX_BACKEND to codex, claude-code-proxy, or claude-tui.",
-        f"OPENBASE_CODEX_BACKEND={codex_backend or DEFAULT_CODEX_BACKEND}",
-        "# The managed service defaults to the packaged Super Agents proxy command.",
-        "# CODEX_CLAUDE_PROXY_COMMAND=super-agents-claude-proxy",
-        "# CODEX_CLAUDE_PROXY_BASE_URL=http://127.0.0.1:6066/v1",
-        "# CODEX_CLAUDE_MODEL_CATALOG_JSON is discovered from the proxy command when unset.",
+        "# Coding backend used by Super Agents and the managed service.",
+        f"# Set {CODING_BACKEND_ENV_KEY} to codex, claude-agent-sdk, or claude-tui.",
+        f"# {LEGACY_CODEX_BACKEND_ENV_KEY} is still read as a fallback for older installs.",
+        f"{CODING_BACKEND_ENV_KEY}={coding_backend or DEFAULT_CODING_BACKEND}",
+        "# Claude backends apply to Super Agents UI-driver sessions; the voice dispatcher still uses codex-app-server.",
         "# SUPER_AGENTS_CLAUDE_TUI_CMD=claude",
         "# SUPER_AGENTS_CLAUDE_TUI_ARGS=",
         "# SUPER_AGENTS_CLAUDE_TUI_MODEL=sonnet",
@@ -746,6 +924,41 @@ def _upsert_env_file_values(path: Path, values: dict[str, str]) -> None:
     path.write_text("\n".join(updated).rstrip() + "\n", encoding="utf-8")
 
 
+def _missing_livekit_client_credential_values(path: Path) -> dict[str, str]:
+    existing = _env_file_values(path)
+    updates: dict[str, str] = {}
+    if not existing.get("LIVEKIT_CLIENT_API_KEY") or existing.get(
+        "LIVEKIT_CLIENT_API_KEY"
+    ) == existing.get("LIVEKIT_API_KEY"):
+        updates["LIVEKIT_CLIENT_API_KEY"] = "APIkey" + secrets.token_urlsafe(12)
+    if not existing.get("LIVEKIT_CLIENT_API_SECRET") or existing.get(
+        "LIVEKIT_CLIENT_API_SECRET"
+    ) == existing.get("LIVEKIT_API_SECRET"):
+        updates["LIVEKIT_CLIENT_API_SECRET"] = secrets.token_urlsafe(32)
+    return updates
+
+
+def _env_file_values(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key = _active_env_key(line)
+        if key is None:
+            continue
+        _raw_key, raw_value = line.split("=", 1)
+        values[key] = _parse_env_value(raw_value.strip())
+    return values
+
+
+def _parse_env_value(value: str) -> str:
+    try:
+        parts = shlex.split(value, comments=False, posix=True)
+    except ValueError:
+        return value
+    return parts[0] if len(parts) == 1 else value
+
+
 def _active_env_key(line: str) -> str | None:
     stripped = line.strip()
     if not stripped or stripped.startswith("#") or "=" not in stripped:
@@ -756,6 +969,10 @@ def _active_env_key(line: str) -> str | None:
 
 
 def _format_env_value(value: str) -> str:
-    if not value or any(char.isspace() for char in value) or any(char in value for char in ['"', "'", "#"]):
+    if (
+        not value
+        or any(char.isspace() for char in value)
+        or any(char in value for char in ['"', "'", "#"])
+    ):
         return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return value
