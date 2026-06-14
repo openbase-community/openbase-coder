@@ -881,6 +881,38 @@ def test_ensure_env_file_can_select_backend(tmp_path) -> None:
     )
 
 
+def test_ensure_openbase_cloud_machine_token_uses_env_backend_url(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "OPENBASE_CODER_CLI_WEB_BACKEND_URL=https://backend.example\n",
+        encoding="utf-8",
+    )
+    calls = []
+
+    class FakeTokenManager:
+        def __init__(self, web_backend_url):
+            self.web_backend_url = web_backend_url
+            self.has_refresh_token = True
+
+    class FakeMachineTokenManager:
+        def __init__(self, web_backend_url, token_manager):
+            calls.append((web_backend_url, token_manager.web_backend_url))
+
+        def get_machine_token(self):
+            calls.append("minted")
+            return "obmt_token"
+
+    monkeypatch.setattr(setup_cli, "TokenManager", FakeTokenManager)
+    monkeypatch.setattr(setup_cli, "MachineTokenManager", FakeMachineTokenManager)
+
+    setup_cli._ensure_openbase_cloud_machine_token(env_file)
+
+    assert calls == [("https://backend.example", "https://backend.example"), "minted"]
+
+
 def test_ensure_env_file_updates_existing_backend_only_when_requested(tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("KEEP_ME=1\nOPENBASE_CODEX_BACKEND=codex\n", encoding="utf-8")

@@ -128,8 +128,8 @@ SERVICES: list[ServiceDefinition] = [
             'CODEX_SERVICE_TIER="${{CODEX_SERVICE_TIER:-fast}}"\n'
             'if [ "$OPENBASE_CODING_BACKEND" = "openbase_cloud" ] || [ "$OPENBASE_CODING_BACKEND" = "openbase-cloud" ]; then\n'
             '    if [ -z "${{OPENBASE_CLOUD_CODEX_API_KEY:-}}" ]; then\n'
-            '        if ! OPENBASE_CLOUD_CODEX_API_KEY="$({openbase_coder} auth print-access-token)"; then\n'
-            '            echo "Unable to get an Openbase Cloud access token. Run openbase-coder login, then restart services." >&2\n'
+            '        if ! OPENBASE_CLOUD_CODEX_API_KEY="$({openbase_coder} auth print-machine-token)"; then\n'
+            '            echo "Unable to get an Openbase Cloud machine token. Run openbase-coder login, then restart services." >&2\n'
             "            exit 1\n"
             "        fi\n"
             "        export OPENBASE_CLOUD_CODEX_API_KEY\n"

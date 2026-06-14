@@ -47,11 +47,14 @@ from openbase_coder_cli.brain_score import (
     brain_score_token_file,
     load_brain_score_token,
 )
+from openbase_coder_cli.config.machine_token_manager import (
+    MachineTokenError,
+    MachineTokenManager,
+)
 from openbase_coder_cli.config.token_manager import (
     DEFAULT_WEB_BACKEND_URL,
     AuthLoginRequiredError,
     AuthTransientError,
-    get_token_manager,
 )
 from openbase_coder_cli.dispatcher_config import (
     codex_service_tier,
@@ -119,7 +122,7 @@ OPENBASE_CLOUD_AUDIO_CARTESIA_VERSION = os.getenv(
 
 
 class OpenbaseCloudAudioAuthenticationError(RuntimeError):
-    """Openbase Cloud audio requires a valid Openbase access token."""
+    """Openbase Cloud audio requires a valid Openbase machine token."""
 
 
 ANNOUNCER_TOPIC = "openbase.announcer.say"
@@ -2794,18 +2797,18 @@ def _build_stt(vad_model=None):
 
 def _openbase_cloud_audio_token() -> str:
     try:
-        token = get_token_manager(WEB_BACKEND_URL).get_access_token()
-    except (AuthLoginRequiredError, AuthTransientError) as exc:
+        token = MachineTokenManager(WEB_BACKEND_URL).get_machine_token()
+    except (AuthLoginRequiredError, AuthTransientError, MachineTokenError) as exc:
         raise OpenbaseCloudAudioAuthenticationError(
             "Openbase Cloud audio is selected, but Openbase Coder could not get "
-            "a valid Openbase access token. Run `openbase-coder login` and "
+            "a valid Openbase machine token. Run `openbase-coder login` and "
             "restart the Openbase services, or choose direct provider keys or "
             "local audio in voice settings."
         ) from exc
     if not token:
         raise OpenbaseCloudAudioAuthenticationError(
             "Openbase Cloud audio is selected, but Openbase Coder received an "
-            "empty Openbase access token. Run `openbase-coder login` and restart "
+            "empty Openbase machine token. Run `openbase-coder login` and restart "
             "the Openbase services, or choose direct provider keys or local audio "
             "in voice settings."
         )

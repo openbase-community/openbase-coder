@@ -87,13 +87,16 @@ def test_parse_announcer_audio_packet_reads_path():
 
 
 def test_openbase_cloud_audio_token_fails_closed_when_login_missing(monkeypatch):
-    class MissingLoginManager:
-        def get_access_token(self):
+    class MissingMachineTokenManager:
+        def __init__(self, web_backend_url):
+            self.web_backend_url = web_backend_url
+
+        def get_machine_token(self):
             raise livekit.AuthLoginRequiredError("login required")
 
     monkeypatch.setattr(livekit, "WEB_BACKEND_URL", "https://app.openbase.cloud")
     monkeypatch.setattr(
-        livekit, "get_token_manager", lambda _url: MissingLoginManager()
+        livekit, "MachineTokenManager", MissingMachineTokenManager
     )
 
     with pytest.raises(livekit.OpenbaseCloudAudioAuthenticationError) as exc_info:
@@ -106,17 +109,20 @@ def test_openbase_cloud_audio_token_fails_closed_when_login_missing(monkeypatch)
 
 
 def test_openbase_cloud_audio_token_fails_closed_on_empty_token(monkeypatch):
-    class EmptyTokenManager:
-        def get_access_token(self):
+    class EmptyMachineTokenManager:
+        def __init__(self, web_backend_url):
+            self.web_backend_url = web_backend_url
+
+        def get_machine_token(self):
             return ""
 
     monkeypatch.setattr(livekit, "WEB_BACKEND_URL", "https://app.openbase.cloud")
-    monkeypatch.setattr(livekit, "get_token_manager", lambda _url: EmptyTokenManager())
+    monkeypatch.setattr(livekit, "MachineTokenManager", EmptyMachineTokenManager)
 
     with pytest.raises(livekit.OpenbaseCloudAudioAuthenticationError) as exc_info:
         livekit._openbase_cloud_audio_token()
 
-    assert "empty Openbase access token" in str(exc_info.value)
+    assert "empty Openbase machine token" in str(exc_info.value)
 
 
 def test_livekit_agent_capacity_uses_livekit_defaults_for_remote_models(monkeypatch):

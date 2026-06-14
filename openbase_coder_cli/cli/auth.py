@@ -12,6 +12,10 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 import click
 import httpx
 
+from openbase_coder_cli.config.machine_token_manager import (
+    MachineTokenError,
+    MachineTokenManager,
+)
 from openbase_coder_cli.config.token_manager import (
     DEFAULT_OAUTH_CLIENT_ID,
     DEFAULT_OAUTH_REDIRECT_URI,
@@ -21,7 +25,7 @@ from openbase_coder_cli.config.token_manager import (
     create_pkce_challenge,
     create_pkce_verifier,
 )
-from openbase_coder_cli.paths import AUTH_JSON_PATH
+from openbase_coder_cli.paths import AUTH_JSON_PATH, MACHINE_TOKEN_JSON_PATH
 
 DEFAULT_WEB_BACKEND_URL = "https://app.openbase.cloud"
 
@@ -230,6 +234,15 @@ def login() -> None:
         refresh_token=refresh_token,
         expires_in=expires_in,
     )
+    try:
+        MachineTokenManager(web_backend_url, mgr).get_machine_token(rotate=True)
+    except (AuthLoginRequiredError, AuthTransientError, MachineTokenError, httpx.HTTPError) as exc:
+        click.echo(
+            click.style(
+                f"Warning: logged in, but could not create an Openbase Cloud machine token: {exc}",
+                fg="yellow",
+            )
+        )
 
     click.echo(f"Logged in successfully. Tokens saved to {AUTH_JSON_PATH}")
 
@@ -239,6 +252,8 @@ def logout() -> None:
     """Log out and clear stored tokens."""
     if AUTH_JSON_PATH.is_file():
         AUTH_JSON_PATH.unlink()
+        if MACHINE_TOKEN_JSON_PATH.is_file():
+            MACHINE_TOKEN_JSON_PATH.unlink()
         click.echo("Logged out. Tokens removed.")
     else:
         click.echo("Not logged in (no stored tokens found).")
@@ -262,4 +277,31 @@ def print_access_token() -> None:
         raise click.ClickException(f"Unable to refresh Openbase token: {exc}") from exc
     if not token:
         raise click.ClickException("Openbase token refresh returned an empty token.")
+    click.echo(token)
+
+
+@auth.command("print-machine-token")
+@click.option(
+    "--rotate",
+    is_flag=True,
+    help="Mint a fresh machine token even if a cached token exists.",
+)
+def print_machine_token(rotate: bool) -> None:
+    """Print a stable Openbase Cloud proxy machine token."""
+    try:
+        token = MachineTokenManager(_get_web_backend_url()).get_machine_token(
+            rotate=rotate
+        )
+    except AuthLoginRequiredError as exc:
+        raise click.ClickException(
+            "Login required. Run `openbase-coder login` first."
+        ) from exc
+    except AuthTransientError as exc:
+        raise click.ClickException(
+            f"Unable to refresh Openbase login or mint machine token: {exc}"
+        ) from exc
+    except (MachineTokenError, httpx.HTTPError) as exc:
+        raise click.ClickException(f"Unable to mint Openbase machine token: {exc}") from exc
+    if not token:
+        raise click.ClickException("Openbase machine token command returned empty token.")
     click.echo(token)

@@ -17,6 +17,7 @@ from openbase_coder_cli.backend_config import (
     CODING_BACKEND_ENV_KEY,
     DEFAULT_CODING_BACKEND,
     LEGACY_CODEX_BACKEND_ENV_KEY,
+    OPENBASE_CLOUD_BACKEND,
     SUPPORTED_BACKENDS,
     normalize_backend,
 )
@@ -30,6 +31,16 @@ from openbase_coder_cli.codex_backend_config import apply_backend_to_codex_confi
 from openbase_coder_cli.codex_home_instructions import (
     ensure_openbase_agents_md,
     ensure_openbase_instruction_md,
+)
+from openbase_coder_cli.config.machine_token_manager import (
+    MachineTokenError,
+    MachineTokenManager,
+)
+from openbase_coder_cli.config.token_manager import (
+    DEFAULT_WEB_BACKEND_URL,
+    AuthLoginRequiredError,
+    AuthTransientError,
+    TokenManager,
 )
 from openbase_coder_cli.dispatcher_config import (
     DISPATCHER_VOICE_ID_KEY,
@@ -251,6 +262,8 @@ def setup(
         coding_backend=coding_backend,
     )
     selected_coding_backend = _selected_coding_backend(Path(env_file), coding_backend)
+    if selected_coding_backend == OPENBASE_CLOUD_BACKEND:
+        _ensure_openbase_cloud_machine_token(Path(env_file))
 
     # --- Symlink Codex auth into the service CODEX_HOME ---
     _symlink_codex_auth()
@@ -1334,6 +1347,36 @@ def _selected_coding_backend(env_file: Path, requested_backend: str | None) -> s
         return normalize_backend(raw_value)
     except ValueError:
         return DEFAULT_CODING_BACKEND
+
+
+def _ensure_openbase_cloud_machine_token(env_file: Path) -> None:
+    web_backend_url = _env_file_values(env_file).get(
+        "OPENBASE_CODER_CLI_WEB_BACKEND_URL",
+        DEFAULT_WEB_BACKEND_URL,
+    )
+    token_manager = TokenManager(web_backend_url)
+    if not token_manager.has_refresh_token:
+        click.echo(
+            "Openbase Cloud backend selected. Run `openbase-coder login` before "
+            "starting services so setup can create the cloud proxy machine token."
+        )
+        return
+    try:
+        MachineTokenManager(web_backend_url, token_manager).get_machine_token()
+    except AuthLoginRequiredError:
+        click.echo(
+            "Openbase Cloud backend selected, but your Openbase login needs to be "
+            "refreshed. Run `openbase-coder login` before starting services."
+        )
+    except (AuthTransientError, MachineTokenError) as exc:
+        click.echo(
+            click.style(
+                f"Warning: could not create Openbase Cloud machine token: {exc}",
+                fg="yellow",
+            )
+        )
+    else:
+        click.echo("Openbase Cloud machine token is configured.")
 
 
 def _upsert_env_file_values(path: Path, values: dict[str, str]) -> None:

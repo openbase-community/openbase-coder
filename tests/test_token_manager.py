@@ -7,7 +7,9 @@ from unittest import mock
 import httpx
 import pytest
 
+from openbase_coder_cli.config import machine_token_manager as mt_module
 from openbase_coder_cli.config import token_manager as tm_module
+from openbase_coder_cli.config.machine_token_manager import MachineTokenManager
 from openbase_coder_cli.config.token_manager import (
     AuthLoginRequiredError,
     AuthTransientError,
@@ -19,6 +21,13 @@ from openbase_coder_cli.config.token_manager import (
 def auth_path(tmp_path, monkeypatch):
     path = tmp_path / "auth.json"
     monkeypatch.setattr(tm_module, "AUTH_JSON_PATH", path)
+    return path
+
+
+@pytest.fixture
+def machine_token_path(tmp_path, monkeypatch):
+    path = tmp_path / "machine-token.json"
+    monkeypatch.setattr(mt_module, "MACHINE_TOKEN_JSON_PATH", path)
     return path
 
 
@@ -123,3 +132,52 @@ def test_concurrent_refresh_only_hits_backend_once(manager, auth_path):
     assert len(calls) == 1
     assert set(results) == {"at-1"}
     assert json.loads(auth_path.read_text())["refresh_token"] == "rt-1"
+
+
+def test_machine_token_manager_reuses_cached_token(machine_token_path):
+    machine_token_path.write_text(
+        json.dumps(
+            {
+                "web_backend_url": "https://backend.example.com",
+                "install_id": "install-1",
+                "token": "obmt_cached",
+                "scopes": ["llm_proxy", "audio_proxy"],
+            }
+        )
+    )
+
+    manager = MachineTokenManager("https://backend.example.com")
+    with mock.patch.object(httpx, "post") as post:
+        assert manager.get_machine_token(scopes=["llm_proxy"]) == "obmt_cached"
+        post.assert_not_called()
+
+
+def test_machine_token_manager_mints_and_persists_token(machine_token_path):
+    class FakeTokenManager:
+        def get_access_token(self):
+            return "jwt.token.value"
+
+    response = httpx.Response(
+        200,
+        json={
+            "token": "obmt_new",
+            "token_prefix": "obmt_new",
+            "scopes": ["llm_proxy"],
+        },
+        request=httpx.Request("POST", "https://backend.example.com"),
+    )
+    manager = MachineTokenManager(
+        "https://backend.example.com",
+        token_manager=FakeTokenManager(),
+    )
+
+    with mock.patch.object(httpx, "post", return_value=response) as post:
+        assert manager.get_machine_token(scopes=["llm_proxy"]) == "obmt_new"
+
+    request = post.call_args
+    assert request.args[0] == "https://backend.example.com/api/openbase/auth/machine-tokens/"
+    assert request.kwargs["headers"]["Authorization"] == "Bearer jwt.token.value"
+    assert request.kwargs["json"]["scopes"] == ["llm_proxy"]
+    saved = json.loads(machine_token_path.read_text())
+    assert saved["token"] == "obmt_new"
+    assert saved["install_id"].startswith("openbase-coder-")

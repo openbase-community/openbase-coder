@@ -49,6 +49,7 @@ PLIST_DIR = Path.home() / "Library" / "LaunchAgents"
 SYSTEMD_UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 LAUNCHD_DOMAIN = "com.openbase.coder"
 AUTH_JSON_PATH = OPENBASE_BASE_DIR / "auth.json"
+MACHINE_TOKEN_JSON_PATH = OPENBASE_BASE_DIR / "machine-token.json"
 CONSOLE_SETTINGS_JSON_PATH = OPENBASE_BASE_DIR / "console-settings.json"
 
 PLUGIN_BASE_DIR = OPENBASE_BASE_DIR / "plugins"
