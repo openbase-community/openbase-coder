@@ -622,7 +622,22 @@ class CodexAppServerSessionManager:
         *,
         developer_instructions: str | None | object = _USE_SUPER_AGENT_INSTRUCTIONS,
     ) -> None:
+        if developer_instructions is _USE_SUPER_AGENT_INSTRUCTIONS:
+            effective_developer_instructions = load_super_agent_developer_instructions()
+        elif isinstance(developer_instructions, str):
+            effective_developer_instructions = developer_instructions
+        else:
+            effective_developer_instructions = None
+
         if self._uses_backend_session_api():
+            if effective_developer_instructions is not None:
+                resume_by_label = getattr(self._client, "resume_by_label", None)
+                if callable(resume_by_label):
+                    await resume_by_label(
+                        LabelQueryInput(thread_id=thread_id, cwd=directory),
+                        developer_instructions=effective_developer_instructions,
+                    )
+                    return
             read_by_label = getattr(self._client, "read_by_label", None)
             if callable(read_by_label):
                 await read_by_label(
@@ -639,12 +654,6 @@ class CodexAppServerSessionManager:
             "sandbox": "danger-full-access",
             "config": await login_shell_config_override(),
         }
-        if developer_instructions is _USE_SUPER_AGENT_INSTRUCTIONS:
-            effective_developer_instructions = load_super_agent_developer_instructions()
-        elif isinstance(developer_instructions, str):
-            effective_developer_instructions = developer_instructions
-        else:
-            effective_developer_instructions = None
         if effective_developer_instructions is not None:
             params["developerInstructions"] = effective_developer_instructions
         await self._client.request("thread/resume", params)
@@ -778,12 +787,14 @@ class CodexAppServerSessionManager:
             name = Path(expanded_dir).name or f"thread-{uuid.uuid4().hex[:8]}"
             if any(session.name == name for session in existing_sessions):
                 name = f"{name}-{uuid.uuid4().hex[:8]}"
-            started = await self._client.start_thread(
-                {
-                    "name": name,
-                    "cwd": expanded_dir,
-                }
-            )
+            thread_input = {
+                "name": name,
+                "cwd": expanded_dir,
+            }
+            developer_instructions = load_super_agent_developer_instructions()
+            if developer_instructions is not None:
+                thread_input["developerInstructions"] = developer_instructions
+            started = await self._client.start_thread(thread_input)
             return self._session_from_thread(
                 _normalize_backend_thread_payload(started),
                 include_turns=False,

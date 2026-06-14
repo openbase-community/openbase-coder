@@ -259,9 +259,10 @@ async def prepare_target_thread_for_direct_livekit(
 ) -> None:
     from openbase_coder_cli.mcp.session_manager import get_session_manager
 
-    await get_session_manager().resume_thread_without_developer_instructions(
+    await get_session_manager().resume_thread_with_developer_instructions(
         thread_id,
         directory,
+        load_direct_livekit_developer_instructions(),
     )
 
 

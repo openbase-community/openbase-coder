@@ -92,12 +92,13 @@ class FakeSessionManager:
         self.fail = fail
         self.calls = []
 
-    async def resume_thread_without_developer_instructions(
+    async def resume_thread_with_developer_instructions(
         self,
         thread_id: str,
         directory: str,
+        developer_instructions: str,
     ) -> None:
-        self.calls.append((thread_id, directory))
+        self.calls.append((thread_id, directory, developer_instructions))
         if self.fail:
             raise RuntimeError("resume failed")
 
@@ -347,6 +348,8 @@ def test_direct_livekit_instruction_loader_priority(tmp_path: Path):
 
 def test_transfer_to_thread_prepares_then_publishes(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("OPENBASE_CODER_CLI_DATA_DIR", str(tmp_path))
+    voice_instructions_path = tmp_path / "VOICE_INSTRUCTIONS.md"
+    voice_instructions_path.write_text("direct voice instructions\n", encoding="utf-8")
     monkeypatch.setattr(
         voice_route,
         "selected_tts_provider_id",
@@ -355,7 +358,7 @@ def test_transfer_to_thread_prepares_then_publishes(tmp_path: Path, monkeypatch)
     monkeypatch.setattr(
         voice_route,
         "CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH",
-        tmp_path / "missing-direct-instructions.md",
+        voice_instructions_path,
     )
     monkeypatch.setattr(
         voice_route,
@@ -387,7 +390,7 @@ def test_transfer_to_thread_prepares_then_publishes(tmp_path: Path, monkeypatch)
     )
 
     assert result.state.active_target_thread_id == "target-1"
-    assert manager.calls == [("target-1", "/tmp/project")]
+    assert manager.calls == [("target-1", "/tmp/project", "direct voice instructions")]
     sent = client.room.sent[0]
     payload = json.loads(sent.data.decode("utf-8"))
     assert payload["action"] == "transfer_to_thread"

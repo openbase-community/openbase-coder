@@ -46,7 +46,7 @@ dependencies = [
     "livekit-plugins-noise-cancellation>=0.2.5",
     "aiohttp>=3.13.3",
     "multi-workspace>=3.2.2",
-    "super-agents[claude]>=0.1.2",
+    "super-agents[claude]>=0.1.4",
     "websockets>=16.0",
     "kokoro>=0.9.4",
     "huggingface-hub>=0.36.0",
@@ -86,6 +86,9 @@ source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["openbase_coder_cli"]
+artifacts = [
+    "openbase_coder_cli/resources/sounds/wilhelm.wav",
+]
 
 [tool.hatch.build.targets.sdist]
 include = [

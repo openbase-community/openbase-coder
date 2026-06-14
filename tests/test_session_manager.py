@@ -243,6 +243,28 @@ class FakeBackendSessionClient:
         )
         return self._pop("read_by_label")
 
+    async def start_thread(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("start_thread", input_data))
+        return self._pop("start_thread")
+
+    async def resume_by_label(
+        self,
+        input_data,
+        *,
+        developer_instructions: str | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "resume_by_label",
+                {
+                    "thread_id": input_data.thread_id,
+                    "cwd": input_data.cwd,
+                    "developer_instructions": developer_instructions,
+                },
+            )
+        )
+        return self._pop("resume_by_label")
+
     async def start_turn_by_label(
         self,
         input_data,
@@ -642,6 +664,49 @@ def test_resume_thread_without_developer_instructions_is_backend_session_noop(tm
     ]
 
 
+def test_resume_thread_with_developer_instructions_updates_backend_session(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    client = FakeBackendSessionClient(
+        {
+            "resume_by_label": [
+                {
+                    "threadId": "s_grace",
+                    "backend": "claude_code",
+                    "session": {
+                        "id": "s_grace",
+                        "name": "elon-musk-report",
+                        "agentName": "Grace",
+                        "cwd": str(project_dir),
+                        "status": "waiting",
+                    },
+                }
+            ]
+        }
+    )
+
+    asyncio.run(
+        _manager(client).resume_thread_with_developer_instructions(
+            "s_grace",
+            str(project_dir),
+            "direct voice instructions",
+        )
+    )
+
+    assert client.calls == [
+        (
+            "resume_by_label",
+            {
+                "thread_id": "s_grace",
+                "cwd": str(project_dir),
+                "developer_instructions": "direct voice instructions",
+            },
+        )
+    ]
+
+
 def test_read_thread_ignores_stale_claude_code_running_turns(
     tmp_path: Path,
 ) -> None:
@@ -733,6 +798,84 @@ def test_read_thread_uses_claude_code_active_turn_id(tmp_path: Path) -> None:
     assert thread.current_run is not None
     assert thread.current_run.run_id == "t_active"
     assert thread.current_run.message == "actual active prompt"
+
+
+def test_create_session_includes_super_agent_instructions_for_backend_sessions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    instructions_path = tmp_path / "SUPER_AGENT_INSTRUCTIONS.md"
+    instructions_path.write_text("super backend instructions\n", encoding="utf-8")
+    monkeypatch.setenv("CODEX_SUPER_AGENT_INSTRUCTIONS_PATH", str(instructions_path))
+    client = FakeBackendSessionClient(
+        {
+            "sessions": [[]],
+            "start_thread": [
+                {
+                    "id": "s_backend",
+                    "name": "project",
+                    "cwd": str(project_dir),
+                    "status": "waiting",
+                }
+            ],
+        }
+    )
+
+    thread = asyncio.run(_manager(client).create_session(str(project_dir)))
+
+    assert thread.session_id == "s_backend"
+    assert client.calls == [
+        ("sessions", {}),
+        (
+            "start_thread",
+            {
+                "name": "project",
+                "cwd": str(project_dir.resolve()),
+                "developerInstructions": "super backend instructions",
+            },
+        ),
+    ]
+
+
+def test_create_session_omits_missing_super_agent_instructions_for_backend_sessions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.setenv(
+        "CODEX_SUPER_AGENT_INSTRUCTIONS_PATH",
+        str(tmp_path / "missing" / "SUPER_AGENT_INSTRUCTIONS.md"),
+    )
+    client = FakeBackendSessionClient(
+        {
+            "sessions": [[]],
+            "start_thread": [
+                {
+                    "id": "s_backend",
+                    "name": "project",
+                    "cwd": str(project_dir),
+                    "status": "waiting",
+                }
+            ],
+        }
+    )
+
+    thread = asyncio.run(_manager(client).create_session(str(project_dir)))
+
+    assert thread.session_id == "s_backend"
+    assert client.calls == [
+        ("sessions", {}),
+        (
+            "start_thread",
+            {
+                "name": "project",
+                "cwd": str(project_dir.resolve()),
+            },
+        ),
+    ]
 
 
 def test_send_message_starts_claude_code_backend_turn(tmp_path: Path) -> None:
