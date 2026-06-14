@@ -47,6 +47,5 @@ features = [
   "navigation.expand",
   "navigation.path",
   "navigation.indexes",
-  "navigation.tabs",
   "content.code.copy"
 ]
