@@ -32,6 +32,7 @@ Then omit `uvx --python 3.13` from later commands.
 ## Documentation
 
 - [Getting Started](getting-started.md)
+- [Cloud DevSpace](cloud-devspace.md)
 - [Downloads](downloads.md)
 - [Manual Setup](manual-installation.md)
 - [Local-Only Mode](local-only.md)
