@@ -26,6 +26,18 @@ def _delete_report(project_path: Path, relative_path: str):
     return views.project_reports_file(request)
 
 
+def _patch_report(project_path: Path, relative_path: str, content):
+    factory = APIRequestFactory()
+    query = urlencode({"path": str(project_path), "file": relative_path})
+    request = factory.patch(
+        f"/api/projects/reports/file/?{query}",
+        {"content": content},
+        format="json",
+    )
+    force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+    return views.project_reports_file(request)
+
+
 def _download_report(project_path: Path, relative_path: str):
     factory = APIRequestFactory()
     query = urlencode({"path": str(project_path), "file": relative_path})
@@ -53,6 +65,13 @@ def _get_global_reports_projects():
     request = factory.get("/api/projects/reports/global/")
     force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
     return views.global_reports_projects(request)
+
+
+def _get_all_project_reports():
+    factory = APIRequestFactory()
+    request = factory.get("/api/projects/reports/all/")
+    force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+    return views.all_project_reports(request)
 
 
 def test_global_reports_projects_lists_untracked_report_sources(
@@ -113,6 +132,47 @@ def test_global_reports_projects_skips_missing_reports_dirs(
     ]
 
 
+def test_all_project_reports_lists_recent_and_global_reports(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    recent_project = tmp_path / "project"
+    global_project = tmp_path / "global"
+    duplicate_global_project = tmp_path / "duplicate"
+    for project, report_name in (
+        (recent_project, "recent.md"),
+        (global_project, "global.md"),
+        (duplicate_global_project, "duplicate.md"),
+    ):
+        reports = project / ".reports"
+        reports.mkdir(parents=True)
+        (reports / report_name).write_text("done", encoding="utf-8")
+
+    monkeypatch.setattr(
+        report_views,
+        "_get_recent_projects",
+        lambda: [
+            {"path": str(recent_project), "name": "Recent"},
+            {"path": str(duplicate_global_project), "name": "Duplicate"},
+        ],
+    )
+    monkeypatch.setattr(report_views, "CODEX_HOME_DIR", global_project)
+    monkeypatch.setattr(report_views, "NORMAL_CODEX_HOME_DIR", duplicate_global_project)
+    monkeypatch.setattr(report_views, "HOME_REPORTS_PROJECT_DIR", tmp_path / "missing")
+
+    response = _get_all_project_reports()
+
+    assert response.status_code == 200
+    items = response.data["items"]
+    item_paths = {(item["project"]["path"], item["file"]["path"]) for item in items}
+    assert item_paths == {
+        (str(global_project.resolve()), "global.md"),
+        (str(duplicate_global_project.resolve()), "duplicate.md"),
+        (str(recent_project.resolve()), "recent.md"),
+    }
+    assert all(item["id"] == f"{item['project']['path']}:{item['file']['path']}" for item in items)
+
+
 def test_project_reports_file_delete_removes_report_inside_reports_dir(
     tmp_path: Path,
 ) -> None:
@@ -164,6 +224,74 @@ def test_project_reports_file_delete_reports_missing_file(tmp_path: Path) -> Non
 
     assert response.status_code == 404
     assert response.data["error"] == "File not found: missing.md"
+
+
+def test_project_reports_file_patch_updates_markdown_report(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    reports = project / ".reports"
+    reports.mkdir(parents=True)
+    report = reports / "summary.md"
+    report.write_text("# Old", encoding="utf-8")
+
+    response = _patch_report(project, "summary.md", "# New\n\nUpdated.")
+
+    assert response.status_code == 200
+    assert response.data["file"]["path"] == "summary.md"
+    assert response.data["file"]["kind"] == "markdown"
+    assert response.data["content"] == "# New\n\nUpdated."
+    assert report.read_text(encoding="utf-8") == "# New\n\nUpdated."
+
+
+def test_project_reports_file_patch_rejects_path_traversal(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    (project / ".reports").mkdir(parents=True)
+    outside = project / "outside.md"
+    outside.write_text("keep", encoding="utf-8")
+
+    response = _patch_report(project, "../outside.md", "replace")
+
+    assert response.status_code == 400
+    assert response.data["error"] == "file must be inside .reports"
+    assert outside.read_text(encoding="utf-8") == "keep"
+
+
+def test_project_reports_file_patch_rejects_directory(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    nested = project / ".reports" / "nested"
+    nested.mkdir(parents=True)
+
+    response = _patch_report(project, "nested", "replace")
+
+    assert response.status_code == 400
+    assert response.data["error"] == "Report path must be a file"
+
+
+def test_project_reports_file_patch_rejects_image_report(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    reports = project / ".reports"
+    reports.mkdir(parents=True)
+    image = reports / "preview.png"
+    image.write_bytes(b"png")
+
+    response = _patch_report(project, "preview.png", "replace")
+
+    assert response.status_code == 415
+    assert response.data["error"] == "Only markdown and text reports can be edited."
+    assert image.read_bytes() == b"png"
+
+
+def test_project_reports_file_patch_requires_string_content(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    reports = project / ".reports"
+    reports.mkdir(parents=True)
+    report = reports / "summary.md"
+    report.write_text("# Old", encoding="utf-8")
+
+    response = _patch_report(project, "summary.md", 42)
+
+    assert response.status_code == 400
+    assert response.data["error"] == "content must be a string"
+    assert report.read_text(encoding="utf-8") == "# Old"
 
 
 def test_project_reports_download_returns_raw_report_file(tmp_path: Path) -> None:

@@ -20,6 +20,12 @@ Openbase CLI reads configuration from environment variables (usually loaded from
 | `CODEX_MODEL`                             | No       | `gpt-5.5`                                        | Codex app-server model                      |
 | `CODEX_MODEL_REASONING_EFFORT`            | No       | `high`                                           | Codex app-server reasoning effort           |
 | `CODEX_SERVICE_TIER`                      | No       | `fast`                                           | Codex app-server service tier               |
+| `OPENBASE_CODEX_BACKEND`                  | No       | `claude-code-proxy` from new setup env files     | `codex`, `claude-code-proxy`, or `claude-tui` backend |
+| `CODEX_CLAUDE_PROXY_COMMAND`              | No       | `super-agents-claude-proxy`                      | Claude proxy command                        |
+| `CODEX_CLAUDE_PROXY_PORT`                 | No       | `6066`                                           | Claude proxy port                           |
+| `SUPER_AGENTS_CLAUDE_TUI_CMD`             | No       | `claude`                                         | Claude Code TUI command for Super Agents    |
+| `SUPER_AGENTS_CLAUDE_TUI_ARGS`            | No       | none                                             | Extra Claude Code TUI arguments             |
+| `SUPER_AGENTS_CLAUDE_TUI_MODEL`           | No       | none                                             | Claude Code TUI model                       |
 
 ## Agent/Voice Variables
 

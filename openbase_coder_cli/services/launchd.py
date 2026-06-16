@@ -94,6 +94,10 @@ def _resolve_binaries(config: InstallationConfig) -> dict[str, str]:
             "openbase-coder",
             _workspace_binary_candidates(config, "openbase-coder"),
         ),
+        "super_agents_claude_proxy": _resolve_binary_with_preferred_paths(
+            "super-agents-claude-proxy",
+            _workspace_binary_candidates(config, "super-agents-claude-proxy"),
+        ),
     }
 
 

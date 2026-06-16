@@ -8,6 +8,7 @@ repo_url = "https://github.com/openbase-community/openbase-coder"
 nav = [
   { "Home" = "index.md" },
   { "Getting Started" = "getting-started.md" },
+  { "Manual Installation" = "manual-installation.md" },
   { "Commands" = [
     "commands/index.md",
     { "setup" = "commands/setup.md" },

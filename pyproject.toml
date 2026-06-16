@@ -48,6 +48,10 @@ dependencies = [
     "multi-workspace>=3.2.2",
     "super-agents>=0.1.0",
     "websockets>=16.0",
+    "kokoro>=0.9.4",
+    "huggingface-hub>=0.36.0",
+    "mlx-whisper>=0.4.3",
+    "numpy>=2.3.0",
 ]
 
 [project.urls]

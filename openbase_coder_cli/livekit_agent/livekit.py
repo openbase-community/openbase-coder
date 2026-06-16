@@ -39,7 +39,7 @@ from livekit.agents import (
 )
 from livekit.agents.llm.chat_context import ChatMessage
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN
-from livekit.plugins import assemblyai, cartesia, deepgram, silero
+from livekit.plugins import assemblyai, cartesia, deepgram, silero  # noqa: F401
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from openbase_coder_cli.brain_score import (
@@ -47,14 +47,33 @@ from openbase_coder_cli.brain_score import (
     brain_score_token_file,
     load_brain_score_token,
 )
-from openbase_coder_cli.cartesia_voice_catalog import (
-    DEFAULT_SUPER_AGENT_VOICE_IDS,
-    cartesia_voice_for_id,
+from openbase_coder_cli.config.token_manager import (
+    DEFAULT_WEB_BACKEND_URL,
+    AuthLoginRequiredError,
+    AuthTransientError,
+    get_token_manager,
 )
-from openbase_coder_cli.dispatcher_config import dispatcher_voice
+from openbase_coder_cli.dispatcher_config import (
+    dispatcher_voice,
+    selected_stt_provider_id,
+    selected_tts_provider_id,
+)
 from openbase_coder_cli.livekit_agent.codex_app_client import CodexAppServerClient
 from openbase_coder_cli.livekit_agent.speech_formatter import format_for_speech
 from openbase_coder_cli.paths import CODEX_DISPATCHER_INSTRUCTIONS_PATH
+from openbase_coder_cli.stt_providers import (
+    ASSEMBLYAI_STT_PROVIDER_ID,
+    DEEPGRAM_STT_PROVIDER_ID,
+    LOCAL_MLX_WHISPER_STT_PROVIDER_ID,
+    MLXWhisperSTT,
+)
+from openbase_coder_cli.tts_providers import (
+    CARTESIA_PROVIDER_ID,
+    DEFAULT_CARTESIA_ANNOUNCER_VOICE_ID,
+    DEFAULT_CARTESIA_TTS_VOLUME,
+    DEFAULT_CARTESIA_VOICE_ID,
+    get_tts_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +90,25 @@ ASSEMBLY_AI_API_KEY = os.getenv("ASSEMBLY_AI_API_KEY") or os.getenv(
 )
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY")
-DEFAULT_CARTESIA_VOICE_ID = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
-DEFAULT_CARTESIA_ANNOUNCER_VOICE_ID = "f786b574-daa5-4673-aa0c-cbe3e8534c02"
-DEFAULT_CARTESIA_TTS_VOLUME = 0.8
 CARTESIA_VOICE_ID = os.getenv("CARTESIA_VOICE_ID", DEFAULT_CARTESIA_VOICE_ID)
 CARTESIA_ANNOUNCER_VOICE_ID = os.getenv(
     "CARTESIA_ANNOUNCER_VOICE_ID", DEFAULT_CARTESIA_ANNOUNCER_VOICE_ID
+)
+WEB_BACKEND_URL = os.getenv(
+    "OPENBASE_CODER_CLI_WEB_BACKEND_URL",
+    DEFAULT_WEB_BACKEND_URL,
+).rstrip("/")
+OPENBASE_AUDIO_PROXY_ENABLED = os.getenv(
+    "OPENBASE_AUDIO_PROXY_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no"}
+OPENBASE_AUDIO_PROXY_BASE_URL = os.getenv(
+    "OPENBASE_AUDIO_PROXY_BASE_URL",
+    f"{WEB_BACKEND_URL}/api/openbase/audio",
+).rstrip("/")
+OPENBASE_AUDIO_PROXY_CARTESIA_VERSION = os.getenv(
+    "OPENBASE_AUDIO_PROXY_CARTESIA_VERSION",
+    "2026-03-01",
 )
 ANNOUNCER_TOPIC = "openbase.announcer.say"
 VOICE_ROUTE_TOPIC = "openbase.voice.route"
@@ -150,7 +182,9 @@ EXIT_TO_DISPATCH_PHRASES = {
     "to dispatch",
     "two dispatch",
 }
-BRAIN_SCORE_ENABLED = os.getenv("OPENBASE_BRAIN_SCORE_ENABLED", "1").strip().lower() in {
+BRAIN_SCORE_ENABLED = os.getenv(
+    "OPENBASE_BRAIN_SCORE_ENABLED", "1"
+).strip().lower() in {
     "1",
     "true",
     "yes",
@@ -184,6 +218,7 @@ BRAIN_SCORE_LONGITUDE = os.getenv("OPENBASE_BRAIN_SCORE_LONGITUDE", "").strip()
 class CartesiaVoice:
     voice_id: str
     name: str
+    provider: str = CARTESIA_PROVIDER_ID
 
 
 def dispatcher_voice_config(
@@ -193,30 +228,48 @@ def dispatcher_voice_config(
     configured = dispatcher_voice(
         Path(config_path or LIVEKIT_DISPATCHER_CONFIG_PATH).expanduser()
     )
-    return CartesiaVoice(voice_id=configured["id"], name=configured["name"])
+    return CartesiaVoice(
+        voice_id=configured["id"],
+        name=configured["name"],
+        provider=configured.get("provider", CARTESIA_PROVIDER_ID),
+    )
 
 
 def _voices_from_ids(voice_ids) -> tuple[CartesiaVoice, ...]:
+    provider = get_tts_provider(CARTESIA_PROVIDER_ID)
     return tuple(
         CartesiaVoice(
             voice_id=voice_id,
-            name=cartesia_voice_for_id(voice_id).name
-            if cartesia_voice_for_id(voice_id)
+            name=provider.voice_for_id(voice_id).name
+            if provider.voice_for_id(voice_id)
             else f"Voice {index + 1}",
         )
         for index, voice_id in enumerate(voice_ids)
     )
 
 
-SUPER_AGENT_VOICE_IDS = DEFAULT_SUPER_AGENT_VOICE_IDS
+SUPER_AGENT_VOICE_IDS = tuple(
+    voice.id for voice in get_tts_provider(CARTESIA_PROVIDER_ID).super_agent_voices()
+)
 SUPER_AGENT_VOICES = _voices_from_ids(SUPER_AGENT_VOICE_IDS)
 
 
 def _current_super_agent_voices() -> tuple[CartesiaVoice, ...]:
+    provider = get_tts_provider(selected_tts_provider_id())
+    if provider.provider_id != CARTESIA_PROVIDER_ID:
+        return tuple(
+            CartesiaVoice(
+                voice_id=voice.id, name=voice.name, provider=provider.provider_id
+            )
+            for voice in provider.super_agent_voices()
+        )
     voice_ids = tuple(voice.voice_id for voice in SUPER_AGENT_VOICES)
     if voice_ids == tuple(SUPER_AGENT_VOICE_IDS):
         return SUPER_AGENT_VOICES
-    return _voices_from_ids(SUPER_AGENT_VOICE_IDS)
+    return tuple(
+        CartesiaVoice(voice_id=voice.id, name=voice.name, provider=provider.provider_id)
+        for voice in provider.super_agent_voices()
+    )
 
 
 def _normalize_spoken_command(text: str) -> str:
@@ -446,13 +499,10 @@ LIVEKIT_AUDIO_FRAME_LOG_EVERY = int(os.getenv("LIVEKIT_AUDIO_FRAME_LOG_EVERY", "
 
 
 def _should_log_audio_frame(frame_count: int) -> bool:
-    return (
-        LIVEKIT_VERBOSE_LOGGING
-        and (
-            frame_count <= LIVEKIT_AUDIO_FRAME_LOG_FIRST
-            or LIVEKIT_AUDIO_FRAME_LOG_EVERY <= 1
-            or frame_count % LIVEKIT_AUDIO_FRAME_LOG_EVERY == 0
-        )
+    return LIVEKIT_VERBOSE_LOGGING and (
+        frame_count <= LIVEKIT_AUDIO_FRAME_LOG_FIRST
+        or LIVEKIT_AUDIO_FRAME_LOG_EVERY <= 1
+        or frame_count % LIVEKIT_AUDIO_FRAME_LOG_EVERY == 0
     )
 
 
@@ -631,12 +681,8 @@ class BrainScoreAudioScorer:
         if sample_rate <= 0 or num_channels <= 0 or samples_per_channel <= 0:
             return
 
-        if (
-            self._frames
-            and (
-                sample_rate != self._sample_rate
-                or num_channels != self._num_channels
-            )
+        if self._frames and (
+            sample_rate != self._sample_rate or num_channels != self._num_channels
         ):
             self._schedule_current_chunk(reason="format_change")
 
@@ -818,7 +864,10 @@ async def _upload_brain_score_chunk(
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 endpoint,
-                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json",
+                },
                 data=form,
                 timeout=aiohttp.ClientTimeout(total=120),
             ) as response:
@@ -828,15 +877,23 @@ async def _upload_brain_score_chunk(
             response_payload = json.loads(response_text)
         except json.JSONDecodeError:
             response_payload = {}
-        data = response_payload.get("data") if isinstance(response_payload, dict) else {}
+        data = (
+            response_payload.get("data") if isinstance(response_payload, dict) else {}
+        )
         scores = data.get("scores") if isinstance(data, dict) else {}
-        brain_readiness = scores.get("brain_readiness") if isinstance(scores, dict) else {}
+        brain_readiness = (
+            scores.get("brain_readiness") if isinstance(scores, dict) else {}
+        )
         brs = brain_readiness.get("brs") if isinstance(brain_readiness, dict) else None
         response_status_code = (
-            response_payload.get("statusCode") if isinstance(response_payload, dict) else None
+            response_payload.get("statusCode")
+            if isinstance(response_payload, dict)
+            else None
         )
         response_message = (
-            response_payload.get("message") if isinstance(response_payload, dict) else None
+            response_payload.get("message")
+            if isinstance(response_payload, dict)
+            else None
         )
         if response_status >= 400 or brs is None:
             logger.warning(
@@ -984,7 +1041,9 @@ class LoggingSTT(livekit_stt.STT):
             language=language,
             conn_options=conn_options,
         )
-        _log_stt_event("stt_recognize_result", event, provider=self.provider, model=self.model)
+        _log_stt_event(
+            "stt_recognize_result", event, provider=self.provider, model=self.model
+        )
         return event
 
     def stream(
@@ -1013,7 +1072,9 @@ class LoggingSTT(livekit_stt.STT):
 
     def prewarm(self) -> None:
         logger.info(
-            "dispatch_timing stage=stt_prewarm provider=%s model=%s", self.provider, self.model
+            "dispatch_timing stage=stt_prewarm provider=%s model=%s",
+            self.provider,
+            self.model,
         )
         self._wrapped.prewarm()
 
@@ -1059,7 +1120,9 @@ class LoggingRecognizeStream:
         self._sample_count += getattr(frame, "samples_per_channel", 0) or 0
         if _should_log_audio_frame(self._frame_count):
             sample_rate = getattr(frame, "sample_rate", 0) or 0
-            total_audio_ms = int(self._sample_count / sample_rate * 1000) if sample_rate else 0
+            total_audio_ms = (
+                int(self._sample_count / sample_rate * 1000) if sample_rate else 0
+            )
             logger.info(
                 "dispatch_timing stage=stt_audio_frame stream_id=%s provider=%s "
                 "model=%s frame_count=%d sample_rate=%s num_channels=%s "
@@ -1256,7 +1319,9 @@ class LoggingVADStream:
         self._sample_count += getattr(frame, "samples_per_channel", 0) or 0
         if _should_log_audio_frame(self._frame_count):
             sample_rate = getattr(frame, "sample_rate", 0) or 0
-            total_audio_ms = int(self._sample_count / sample_rate * 1000) if sample_rate else 0
+            total_audio_ms = (
+                int(self._sample_count / sample_rate * 1000) if sample_rate else 0
+            )
             logger.info(
                 "dispatch_timing stage=vad_audio_frame stream_id=%s provider=%s "
                 "model=%s frame_count=%d sample_rate=%s num_channels=%s "
@@ -1408,7 +1473,7 @@ def stable_super_agent_voice(
     return voices[index]
 
 
-class VoiceSelectingCartesiaTTS(livekit_tts.TTS):
+class VoiceSelectingTTS(livekit_tts.TTS):
     def __init__(
         self,
         *,
@@ -1416,15 +1481,21 @@ class VoiceSelectingCartesiaTTS(livekit_tts.TTS):
         default_voice_name: str | None = None,
         active_voice_id,
         active_voice_name=None,
-        api_key: str | None,
+        api_key: str | None = None,
+        provider=None,
         role: str = "direct",
         model: str = "sonic-3",
         volume: float = DEFAULT_CARTESIA_TTS_VOLUME,
+        base_url: str | None = None,
+        api_version: str | None = None,
     ) -> None:
-        default_tts = cartesia.TTS(
-            model=model,
-            voice=default_voice_id,
+        self._provider = provider or get_tts_provider(CARTESIA_PROVIDER_ID)
+        default_tts = self._provider.create_livekit_tts(
+            voice_id=default_voice_id,
             api_key=api_key,
+            base_url=base_url,
+            api_version=api_version,
+            model=model,
             volume=volume,
         )
         super().__init__(
@@ -1440,12 +1511,17 @@ class VoiceSelectingCartesiaTTS(livekit_tts.TTS):
         self._role = role
         self._model = model
         self._volume = volume
-        self._tts_by_voice_id: dict[str, cartesia.TTS] = {default_voice_id: default_tts}
+        self._base_url = base_url
+        self._api_version = api_version
+        self._tts_by_voice_id: dict[str, livekit_tts.TTS] = {
+            default_voice_id: default_tts
+        }
         logger.info(
-            "dispatch_timing stage=tts_initialized role=%s model=%s "
+            "dispatch_timing stage=tts_initialized role=%s provider=%s model=%s "
             "default_voice_id=%s default_voice_name=%s api_key_configured=%s "
             "volume=%s sample_rate=%s num_channels=%s",
             self._role,
+            self._provider.provider_id,
             self._model,
             self._default_voice_id,
             self._default_voice_name or "",
@@ -1461,7 +1537,7 @@ class VoiceSelectingCartesiaTTS(livekit_tts.TTS):
 
     @property
     def provider(self) -> str:
-        return "Cartesia"
+        return self._provider.display_name
 
     def synthesize(
         self,
@@ -1538,23 +1614,26 @@ class VoiceSelectingCartesiaTTS(livekit_tts.TTS):
     def resolve_voice_name(self, voice_id: str | None) -> str | None:
         return self._voice_name_for_id(self.resolve_voice_id(voice_id))
 
-    def _tts_for_voice(self, voice_id: str | None) -> cartesia.TTS:
+    def _tts_for_voice(self, voice_id: str | None) -> livekit_tts.TTS:
         resolved_voice_id = self.resolve_voice_id(voice_id)
         tts = self._tts_by_voice_id.get(resolved_voice_id)
         if tts is None:
             logger.info(
                 "dispatch_timing stage=tts_voice_client_create role=%s "
-                "voice_id=%s voice_name=%s model=%s volume=%s",
+                "provider=%s voice_id=%s voice_name=%s model=%s volume=%s",
                 self._role,
+                self._provider.provider_id,
                 resolved_voice_id,
                 self._voice_name_for_id(resolved_voice_id) or "",
                 self._model,
                 self._volume,
             )
-            tts = cartesia.TTS(
-                model=self._model,
-                voice=resolved_voice_id,
+            tts = self._provider.create_livekit_tts(
+                voice_id=resolved_voice_id,
                 api_key=self._api_key,
+                base_url=self._base_url,
+                api_version=self._api_version,
+                model=self._model,
                 volume=self._volume,
             )
             self._tts_by_voice_id[resolved_voice_id] = tts
@@ -1599,6 +1678,9 @@ class VoiceSelectingCartesiaTTS(livekit_tts.TTS):
         for tts in self._tts_by_voice_id.values():
             await tts.aclose()
         logger.info("dispatch_timing stage=tts_close_end role=%s", self._role)
+
+
+VoiceSelectingCartesiaTTS = VoiceSelectingTTS
 
 
 class SpeechFormattingSynthesizeStream:
@@ -1842,7 +1924,7 @@ class AnnouncerSpeechQueue:
         self,
         *,
         session: AgentSession,
-        announcer_tts: VoiceSelectingCartesiaTTS,
+        announcer_tts: VoiceSelectingTTS,
         max_queue_size: int = ANNOUNCER_MAX_QUEUE_SIZE,
     ) -> None:
         self._session = session
@@ -2508,19 +2590,56 @@ def _build_codex_client(*, persist_thread: bool) -> CodexAppServerClient:
 _shared_codex_client = _build_codex_client(persist_thread=True)
 
 
-def _build_stt():
-    if LIVEKIT_STT_PROVIDER == "deepgram":
+def _build_stt(vad_model=None):
+    stt_provider = selected_stt_provider_id()
+    if stt_provider == DEEPGRAM_STT_PROVIDER_ID:
         logger.info("Using Deepgram STT")
         stt = deepgram.STT(api_key=DEEPGRAM_API_KEY)
         stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
         return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
-    if LIVEKIT_STT_PROVIDER == "assemblyai":
+    if stt_provider == ASSEMBLYAI_STT_PROVIDER_ID:
         logger.info("Using AssemblyAI STT")
-        stt = assemblyai.STT(api_key=ASSEMBLY_AI_API_KEY)
+        proxy_token = _openbase_audio_proxy_token()
+        if proxy_token:
+            stt = assemblyai.STT(
+                api_key=proxy_token,
+                base_url=_openbase_audio_proxy_ws_base_url("assemblyai"),
+            )
+        else:
+            stt = assemblyai.STT(api_key=ASSEMBLY_AI_API_KEY)
+        stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
+        return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
+    if stt_provider == LOCAL_MLX_WHISPER_STT_PROVIDER_ID:
+        logger.info("Using local MLX Whisper STT")
+        vad = vad_model or silero.VAD.load()
+        stt = livekit_stt.StreamAdapter(stt=MLXWhisperSTT(), vad=vad)
         stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
         return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
 
-    raise ValueError(f"Unsupported LIVEKIT_STT_PROVIDER={LIVEKIT_STT_PROVIDER!r}")
+    raise ValueError(f"Unsupported STT provider={stt_provider!r}")
+
+
+def _openbase_audio_proxy_token() -> str:
+    if not OPENBASE_AUDIO_PROXY_ENABLED:
+        return ""
+    try:
+        return get_token_manager(WEB_BACKEND_URL).get_access_token()
+    except (AuthLoginRequiredError, AuthTransientError) as exc:
+        logger.warning("Openbase audio proxy unavailable: %s", exc)
+        return ""
+
+
+def _openbase_audio_proxy_http_base_url(provider: str) -> str:
+    return f"{OPENBASE_AUDIO_PROXY_BASE_URL}/{provider}"
+
+
+def _openbase_audio_proxy_ws_base_url(provider: str) -> str:
+    base_url = _openbase_audio_proxy_http_base_url(provider)
+    if base_url.startswith("https://"):
+        return f"wss://{base_url.removeprefix('https://')}"
+    if base_url.startswith("http://"):
+        return f"ws://{base_url.removeprefix('http://')}"
+    return base_url
 
 
 def _diagnostic_vad(vad_model):
@@ -2591,33 +2710,59 @@ async def livekit_agent(ctx: JobContext):
     )
 
     dispatcher_voice = dispatcher_voice_config()
-    direct_tts = VoiceSelectingCartesiaTTS(
+    tts_provider = get_tts_provider(dispatcher_voice.provider)
+    announcer_voice = (
+        tts_provider.voice_for_id(CARTESIA_ANNOUNCER_VOICE_ID)
+        if tts_provider.provider_id == CARTESIA_PROVIDER_ID
+        else None
+    ) or tts_provider.default_announcer_voice()
+    cartesia_proxy_token = (
+        _openbase_audio_proxy_token()
+        if tts_provider.provider_id == CARTESIA_PROVIDER_ID
+        else ""
+    )
+    cartesia_api_key = cartesia_proxy_token or CARTESIA_API_KEY
+    cartesia_base_url = (
+        _openbase_audio_proxy_http_base_url("cartesia") if cartesia_proxy_token else None
+    )
+    cartesia_api_version = (
+        OPENBASE_AUDIO_PROXY_CARTESIA_VERSION if cartesia_proxy_token else None
+    )
+    direct_tts = VoiceSelectingTTS(
         default_voice_id=dispatcher_voice.voice_id,
         default_voice_name=dispatcher_voice.name,
         active_voice_id=lambda: voice_router.active_target_voice_id,
         active_voice_name=lambda: voice_router.active_target_voice_name,
-        api_key=CARTESIA_API_KEY,
+        api_key=cartesia_api_key,
+        provider=tts_provider,
         role="direct",
+        base_url=cartesia_base_url,
+        api_version=cartesia_api_version,
     )
-    announcer_tts = VoiceSelectingCartesiaTTS(
-        default_voice_id=CARTESIA_ANNOUNCER_VOICE_ID,
-        default_voice_name="Announcer",
+    announcer_tts = VoiceSelectingTTS(
+        default_voice_id=announcer_voice.id,
+        default_voice_name=announcer_voice.name,
         active_voice_id=lambda: voice_router.active_target_voice_id,
         active_voice_name=lambda: voice_router.active_target_voice_name,
-        api_key=CARTESIA_API_KEY,
+        api_key=cartesia_api_key,
+        provider=tts_provider,
         role="announcer",
+        base_url=cartesia_base_url,
+        api_version=cartesia_api_version,
     )
+
+    session_vad = _diagnostic_vad(ctx.proc.userdata["vad"])
 
     # Set up a voice AI pipeline
     session = AgentSession(
-        stt=_build_stt(),
+        stt=_build_stt(session_vad),
         llm=CodexLiveKitLLM(voice_router),
         tts=direct_tts,
         turn_handling={
             "turn_detection": MultilingualModel(),
             "interruption": {"mode": "vad"},
         },
-        vad=_diagnostic_vad(ctx.proc.userdata["vad"]),
+        vad=session_vad,
         preemptive_generation=False,
     )
     session_diagnostic_handlers = (
@@ -2633,7 +2778,7 @@ async def livekit_agent(ctx: JobContext):
         "dispatch_timing stage=agent_session_start_complete room_name=%s "
         "stt_provider=%s tts_role=direct",
         ctx.room.name,
-        LIVEKIT_STT_PROVIDER,
+        selected_stt_provider_id(),
     )
 
     announcer_queue = AnnouncerSpeechQueue(

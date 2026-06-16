@@ -4,6 +4,8 @@ import importlib
 import json
 import subprocess
 
+from click.testing import CliRunner
+
 setup_cli = importlib.import_module("openbase_coder_cli.cli.setup")
 
 
@@ -386,6 +388,127 @@ def test_ensure_codex_home_config_falls_back_to_resolved_uv(
         f"command = {json.dumps(str(uv_bin))}\n"
         f"args = {json.dumps(['--directory', str(cli_dir), 'run', 'super-agents-mcp'])}\n"
     )
+
+
+def test_ensure_env_file_documents_claude_code_backend(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+
+    setup_cli._ensure_env_file(
+        str(env_file),
+        assembly_ai_api_key="",
+        cartesia_api_key="",
+    )
+
+    content = env_file.read_text(encoding="utf-8")
+    assert "OPENBASE_CODEX_BACKEND=claude-code-proxy" in content
+    assert "# CODEX_CLAUDE_PROXY_COMMAND=super-agents-claude-proxy" in content
+    assert "# CODEX_CLAUDE_PROXY_BASE_URL=http://127.0.0.1:6066/v1" in content
+    assert "# CODEX_CLAUDE_MODEL_CATALOG_JSON is discovered from the proxy command when unset." in content
+    assert "# SUPER_AGENTS_CLAUDE_TUI_CMD=claude" in content
+    assert "CODEX_MODEL=gpt-5.5" in content
+
+
+def test_ensure_env_file_can_select_backend(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+
+    setup_cli._ensure_env_file(
+        str(env_file),
+        assembly_ai_api_key="",
+        cartesia_api_key="",
+        codex_backend="claude-tui",
+    )
+
+    assert "OPENBASE_CODEX_BACKEND=claude-tui" in env_file.read_text(encoding="utf-8")
+
+
+def test_ensure_env_file_updates_existing_backend_only_when_requested(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("KEEP_ME=1\nOPENBASE_CODEX_BACKEND=codex\n", encoding="utf-8")
+
+    setup_cli._ensure_env_file(
+        str(env_file),
+        assembly_ai_api_key="",
+        cartesia_api_key="",
+    )
+    assert "OPENBASE_CODEX_BACKEND=codex" in env_file.read_text(encoding="utf-8")
+
+    setup_cli._ensure_env_file(
+        str(env_file),
+        assembly_ai_api_key="",
+        cartesia_api_key="",
+        codex_backend="claude-code-proxy",
+    )
+
+    content = env_file.read_text(encoding="utf-8")
+    assert "KEEP_ME=1" in content
+    assert "OPENBASE_CODEX_BACKEND=claude-code-proxy" in content
+
+
+def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
+    calls = []
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    env_file = tmp_path / ".env"
+
+    monkeypatch.setattr(setup_cli, "_clone_workspace", lambda _workspace_dir: None)
+    monkeypatch.setattr(setup_cli, "_ensure_env_file", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_cli, "_symlink_codex_auth", lambda: None)
+    monkeypatch.setattr(
+        setup_cli,
+        "_ensure_codex_home_default_files",
+        lambda _workspace_dir: None,
+    )
+    monkeypatch.setattr(setup_cli, "_ensure_codex_home_dispatcher_config", lambda: None)
+    monkeypatch.setattr(setup_cli, "_symlink_codex_home_skills", lambda _workspace_dir: None)
+    monkeypatch.setattr(setup_cli, "_init_cli_workspace", lambda _workspace_dir: None)
+    monkeypatch.setattr(setup_cli, "_ensure_codex_home_config", lambda _workspace_dir: None)
+    monkeypatch.setattr(setup_cli, "_install_cli_shim", lambda _workspace_dir: None)
+    monkeypatch.setattr(setup_cli, "_build_console", lambda _workspace_dir: None)
+    monkeypatch.setattr(setup_cli, "install_all_services", lambda _config: None)
+    monkeypatch.setattr(
+        setup_cli.InstallationConfig,
+        "save",
+        lambda self: None,
+    )
+
+    def fake_configure_tailscale_serve():
+        calls.append("configure")
+
+    monkeypatch.setattr(
+        setup_cli,
+        "configure_tailscale_serve",
+        fake_configure_tailscale_serve,
+    )
+    monkeypatch.setattr(
+        setup_cli,
+        "tailscale_serve_health",
+        lambda: type(
+            "Health",
+            (),
+            {
+                "healthy": True,
+                "openbase_url": "http://mac.tailnet.ts.net:18080",
+                "error": None,
+            },
+        )(),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        setup_cli.setup,
+        [
+            "--workspace-dir",
+            str(workspace),
+            "--env-file",
+            str(env_file),
+            "--backend",
+            "claude-tui",
+            "--skip-clone",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == ["configure"]
 
 
 def test_workspace_skill_sources_supports_direct_skill_dirs(tmp_path) -> None:

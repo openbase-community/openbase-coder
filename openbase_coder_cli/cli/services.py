@@ -19,6 +19,7 @@ from openbase_coder_cli.services.registry import (
     require_installation,
     target_services,
 )
+from openbase_coder_cli.services.tailscale_serve import tailscale_serve_health
 from openbase_coder_cli.services.voice_warning import (
     any_service_action_interrupts_voice,
     warn_before_voice_interruption,
@@ -74,6 +75,7 @@ def stop(name: str | None) -> None:
 def status() -> None:
     """Show status of all services."""
     require_installation()
+    has_failure = False
     click.echo("Service Status:")
     click.echo()
     for svc in SERVICES:
@@ -81,12 +83,61 @@ def status() -> None:
         name_col = f"  {svc.name:<20}"
         if not info["installed"]:
             click.echo(f"{name_col} not installed")
+            has_failure = True
         elif info["pid"]:
             click.echo(f"{name_col} running (pid {info['pid']})")
         else:
             exit_code = info.get("last_exit_code", "unknown")
             click.echo(f"{name_col} loaded (not running, last exit: {exit_code})")
+            has_failure = True
+
+    serve_health = tailscale_serve_health()
     click.echo()
+    click.echo("Tailscale Serve:")
+    if serve_health.healthy:
+        click.echo(f"  {'openbase-api':<20} reachable at {serve_health.openbase_url}")
+        click.echo("  livekit-server      tcp :7880 -> 127.0.0.1:7880")
+    else:
+        has_failure = True
+        if not serve_health.tailscale_available:
+            click.echo("  tailscale           not found on PATH")
+        elif not serve_health.tailscale_running:
+            click.echo(
+                "  tailscale           "
+                f"not running ({serve_health.error or 'unknown error'})"
+            )
+        else:
+            click.echo(
+                f"  tailscale           running for "
+                f"{serve_health.host or 'unknown host'}"
+            )
+            click.echo(
+                "  openbase-api        "
+                + (
+                    f"configured at {serve_health.openbase_url}"
+                    if serve_health.openbase_configured
+                    else "missing :18080 -> 127.0.0.1:7999"
+                )
+            )
+            click.echo(
+                "  livekit-server      "
+                + (
+                    "configured tcp :7880 -> 127.0.0.1:7880"
+                    if serve_health.livekit_configured
+                    else "missing tcp :7880 -> 127.0.0.1:7880"
+                )
+            )
+            click.echo(
+                "  external-health     "
+                + (
+                    "passed"
+                    if serve_health.openbase_reachable
+                    else f"failed ({serve_health.error or 'unknown error'})"
+                )
+            )
+    click.echo()
+    if has_failure:
+        raise click.ClickException("One or more Openbase services are unhealthy.")
 
 
 @services.command()

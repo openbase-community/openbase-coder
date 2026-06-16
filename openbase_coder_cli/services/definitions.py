@@ -90,6 +90,25 @@ SERVICES: list[ServiceDefinition] = [
         cleanup_command_substrings=("livekit-server",),
     ),
     ServiceDefinition(
+        name="codex-claude-proxy",
+        description="Codex Claude Proxy",
+        command_template=(
+            'CODEX_CLAUDE_PROXY_COMMAND="${{CODEX_CLAUDE_PROXY_COMMAND:-{super_agents_claude_proxy}}}"\n'
+            'CODEX_CLAUDE_PROXY_PORT="${{CODEX_CLAUDE_PROXY_PORT:-6066}}"\n'
+            'if [ -x "$CODEX_CLAUDE_PROXY_COMMAND" ]; then\n'
+            '    CODEX_CLAUDE_PROXY_RESOLVED="$CODEX_CLAUDE_PROXY_COMMAND"\n'
+            'elif ! CODEX_CLAUDE_PROXY_RESOLVED="$(command -v "$CODEX_CLAUDE_PROXY_COMMAND")"; then\n'
+            '    echo "Claude Code proxy command not found on PATH: $CODEX_CLAUDE_PROXY_COMMAND" >&2\n'
+            "    exit 1\n"
+            "fi\n"
+            'exec "$CODEX_CLAUDE_PROXY_RESOLVED" --port "$CODEX_CLAUDE_PROXY_PORT" --debug'
+        ),
+        workdir_template="{workspace}",
+        port=6066,
+        cleanup_ports=(6066,),
+        cleanup_command_substrings=("super-agents-claude-proxy",),
+    ),
+    ServiceDefinition(
         name="codex-app-server",
         description="Codex App Server",
         command_template=(
@@ -99,44 +118,37 @@ SERVICES: list[ServiceDefinition] = [
             'CODEX_SERVICE_TIER="${{CODEX_SERVICE_TIER:-fast}}"\n'
             'OPENBASE_CODEX_BACKEND="${{OPENBASE_CODEX_BACKEND:-codex}}"\n'
             'case "$OPENBASE_CODEX_BACKEND" in\n'
-            "    claude|claude-code)\n"
+            "    claude|claude-code|claude-code-proxy|claude-proxy)\n"
             '        CODEX_CLAUDE_MODEL="${{CODEX_CLAUDE_MODEL:-claude-code}}"\n'
             '        CODEX_CLAUDE_PROXY_PORT="${{CODEX_CLAUDE_PROXY_PORT:-6066}}"\n'
             '        CODEX_CLAUDE_PROXY_BASE_URL="${{CODEX_CLAUDE_PROXY_BASE_URL:-http://127.0.0.1:$CODEX_CLAUDE_PROXY_PORT/v1}}"\n'
             '        CODEX_CLAUDE_PROXY_HEALTH_URL="${{CODEX_CLAUDE_PROXY_HEALTH_URL:-http://127.0.0.1:$CODEX_CLAUDE_PROXY_PORT/health}}"\n'
-            '        CODEX_CLAUDE_PROXY_COMMAND="${{CODEX_CLAUDE_PROXY_COMMAND:-{workspace}/codex-claude-proxy/proxy.mjs}}"\n'
-            '        CODEX_CLAUDE_MODEL_CATALOG_JSON="${{CODEX_CLAUDE_MODEL_CATALOG_JSON:-{workspace}/codex-claude-proxy/model-catalog.json}}"\n'
+            '        CODEX_CLAUDE_PROXY_COMMAND="${{CODEX_CLAUDE_PROXY_COMMAND:-{super_agents_claude_proxy}}}"\n'
+            '        if [ -x "$CODEX_CLAUDE_PROXY_COMMAND" ]; then\n'
+            '            CODEX_CLAUDE_PROXY_RESOLVED="$CODEX_CLAUDE_PROXY_COMMAND"\n'
+            '        elif ! CODEX_CLAUDE_PROXY_RESOLVED="$(command -v "$CODEX_CLAUDE_PROXY_COMMAND")"; then\n'
+            '            echo "Claude Code proxy command not found on PATH: $CODEX_CLAUDE_PROXY_COMMAND" >&2\n'
+            "            exit 1\n"
+            "        fi\n"
+            '        if [ -z "${{CODEX_CLAUDE_MODEL_CATALOG_JSON:-}}" ]; then\n'
+            '            CODEX_CLAUDE_MODEL_CATALOG_JSON="$("$CODEX_CLAUDE_PROXY_RESOLVED" --print-model-catalog-path)"\n'
+            "        fi\n"
             '        CODEX_MODEL_REASONING_SUMMARY="${{CODEX_MODEL_REASONING_SUMMARY:-concise}}"\n'
             '        CODEX_WEB_SEARCH="${{CODEX_WEB_SEARCH:-live}}"\n'
             '        if [ ! -f "$CODEX_CLAUDE_MODEL_CATALOG_JSON" ]; then\n'
             '            echo "Claude Code model catalog not found at $CODEX_CLAUDE_MODEL_CATALOG_JSON" >&2\n'
             "            exit 1\n"
             "        fi\n"
-            '        CODEX_CLAUDE_PROXY_PID=""\n'
-            '        if ! curl -fsS "$CODEX_CLAUDE_PROXY_HEALTH_URL" >/dev/null 2>&1; then\n'
-            '            if [ ! -x "$CODEX_CLAUDE_PROXY_COMMAND" ]; then\n'
-            '                echo "Claude Code proxy command not executable at $CODEX_CLAUDE_PROXY_COMMAND" >&2\n'
-            "                exit 1\n"
+            "        for _openbase_codex_proxy_wait in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do\n"
+            '            if curl -fsS "$CODEX_CLAUDE_PROXY_HEALTH_URL" >/dev/null 2>&1; then\n'
+            "                break\n"
             "            fi\n"
-            '            "$CODEX_CLAUDE_PROXY_COMMAND" --port "$CODEX_CLAUDE_PROXY_PORT" --debug &\n'
-            '            CODEX_CLAUDE_PROXY_PID="$!"\n'
-            "            for _openbase_codex_proxy_wait in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do\n"
-            '                if curl -fsS "$CODEX_CLAUDE_PROXY_HEALTH_URL" >/dev/null 2>&1; then\n'
-            "                    break\n"
-            "                fi\n"
-            "                sleep 0.25\n"
-            "            done\n"
-            "        fi\n"
+            "            sleep 0.25\n"
+            "        done\n"
             '        if ! curl -fsS "$CODEX_CLAUDE_PROXY_HEALTH_URL" >/dev/null 2>&1; then\n'
             '            echo "Claude Code proxy did not become ready at $CODEX_CLAUDE_PROXY_HEALTH_URL" >&2\n'
             "            exit 1\n"
             "        fi\n"
-            "        cleanup_claude_proxy() {{\n"
-            '            if [ -n "$CODEX_CLAUDE_PROXY_PID" ]; then\n'
-            '                kill "$CODEX_CLAUDE_PROXY_PID" >/dev/null 2>&1 || true\n'
-            "            fi\n"
-            "        }}\n"
-            "        trap cleanup_claude_proxy EXIT INT TERM\n"
             "        {codex} app-server "
             "-c \"model_providers.claude-code-proxy={{ name = 'Claude Proxy', base_url = '$CODEX_CLAUDE_PROXY_BASE_URL', wire_api = 'responses', requires_openai_auth = false }}\" "
             '-c "model_provider=\\"claude-code-proxy\\"" '
@@ -145,6 +157,10 @@ SERVICES: list[ServiceDefinition] = [
             '-c "model_reasoning_summary=\\"$CODEX_MODEL_REASONING_SUMMARY\\"" '
             '-c "web_search=\\"$CODEX_WEB_SEARCH\\"" '
             "--listen ws://127.0.0.1:4500\n"
+            "        ;;\n"
+            "    claude-tui|claude-code-tui)\n"
+            '        echo "OPENBASE_CODEX_BACKEND=$OPENBASE_CODEX_BACKEND bypasses codex-app-server; Super Agents uses the Claude TUI backend directly."\n'
+            "        exec sleep 86400\n"
             "        ;;\n"
             '    codex|openai|"")\n'
             '        CODEX_MODEL="${{CODEX_MODEL:-gpt-5.5}}"\n'
@@ -170,6 +186,17 @@ SERVICES: list[ServiceDefinition] = [
             'CODEX_THREAD_SYNC_INTERVAL="${{CODEX_THREAD_SYNC_INTERVAL:-60}}"\n'
             'CODEX_THREAD_SYNC_MAX_AGE_DAYS="${{CODEX_THREAD_SYNC_MAX_AGE_DAYS:-15}}"\n'
             'exec {openbase_coder} codex-sync run --interval "$CODEX_THREAD_SYNC_INTERVAL" --max-age-days "$CODEX_THREAD_SYNC_MAX_AGE_DAYS"'
+        ),
+        workdir_template="{data_dir}",
+    ),
+    ServiceDefinition(
+        name="codex-thread-device-sync",
+        description="Codex Thread Device Sync",
+        command_template=(
+            'CODEX_THREAD_DEVICE_SYNC_INTERVAL="${{CODEX_THREAD_DEVICE_SYNC_INTERVAL:-60}}"\n'
+            'CODEX_THREAD_DEVICE_SYNC_MAX_AGE_DAYS="${{CODEX_THREAD_DEVICE_SYNC_MAX_AGE_DAYS:-15}}"\n'
+            'CODEX_THREAD_DEVICE_SYNC_EXCHANGE_DIR="${{CODEX_THREAD_DEVICE_SYNC_EXCHANGE_DIR:-{data_dir}/thread-sync}}"\n'
+            'exec {openbase_coder} codex-sync devices run --interval "$CODEX_THREAD_DEVICE_SYNC_INTERVAL" --max-age-days "$CODEX_THREAD_DEVICE_SYNC_MAX_AGE_DAYS" --exchange-dir "$CODEX_THREAD_DEVICE_SYNC_EXCHANGE_DIR"'
         ),
         workdir_template="{data_dir}",
     ),

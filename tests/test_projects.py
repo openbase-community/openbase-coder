@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -334,4 +335,53 @@ def test_project_status_returns_fresh_metadata(monkeypatch) -> None:
             "stack": "python",
             "reports_count": 0,
         },
+    ]
+
+
+def test_git_status_reports_missing_directory(monkeypatch) -> None:
+    os.environ.setdefault("OPENBASE_CODER_CLI_SECRET_KEY", "test-secret")
+    os.environ.setdefault(
+        "DJANGO_SETTINGS_MODULE", "openbase_coder_cli.config.settings"
+    )
+
+    import django
+
+    django.setup()
+
+    from openbase_coder_cli.openbase_coder_cli_app import projects as project_views
+
+    monkeypatch.setattr(project_views.Path, "is_dir", lambda self: False)
+
+    assert project_views._git_status("/tmp/missing-project") == "missing"
+
+
+def test_git_status_reports_out_of_sync_for_ahead_or_behind(monkeypatch) -> None:
+    os.environ.setdefault("OPENBASE_CODER_CLI_SECRET_KEY", "test-secret")
+    os.environ.setdefault(
+        "DJANGO_SETTINGS_MODULE", "openbase_coder_cli.config.settings"
+    )
+
+    import django
+
+    django.setup()
+
+    from openbase_coder_cli.openbase_coder_cli_app import projects as project_views
+
+    calls: list[list[str]] = []
+
+    def fake_run(args, **_kwargs):
+        calls.append(args)
+        if args[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if args[:2] == ["git", "rev-list"]:
+            return subprocess.CompletedProcess(args, 0, stdout="1\t0\n", stderr="")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(project_views.Path, "is_dir", lambda self: True)
+    monkeypatch.setattr(project_views.subprocess, "run", fake_run)
+
+    assert project_views._git_status("/tmp/project") == "out-of-sync"
+    assert calls == [
+        ["git", "status", "--porcelain"],
+        ["git", "rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
     ]

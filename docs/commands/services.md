@@ -23,7 +23,10 @@ openbase-coder services COMMAND [ARGS]
 ## Managed Service Names
 
 - `livekit-server` (port `7880`)
+- `codex-claude-proxy` (port `6066`)
 - `codex-app-server` (port `4500`)
+- `codex-thread-sync`
+- `openbase-routines`
 - `livekit-agent`
 - `django-cli` (port `7999`)
 

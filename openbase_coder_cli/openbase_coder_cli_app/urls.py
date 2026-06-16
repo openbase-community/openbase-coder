@@ -9,6 +9,7 @@ from rest_framework.routers import DefaultRouter
 
 from openbase_coder_cli.openbase_coder_cli_app.views import (
     agents_md,
+    all_project_reports,
     approval_request_detail,
     approval_requests,
     auth_logout,
@@ -24,6 +25,7 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     global_reports_projects,
     health_check,
     ios_logs_upload,
+    kokoro_tts_download,
     launchctl_ignored_settings,
     launchctl_service_action,
     launchctl_services_list,
@@ -32,6 +34,7 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     livekit_voice_route,
     livekit_voice_route_exit,
     livekit_voice_route_transfer,
+    local_stt_download,
     openbase_restart,
     openbase_service_action,
     openbase_services_list,
@@ -51,13 +54,16 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     skill_detail,
     skills_list,
     skills_symlink,
+    stt_settings,
     tag_options,
     thread_detail,
+    thread_device_sync_status,
     thread_favorite,
     thread_interrupt,
     thread_list,
     thread_start_turn,
     thread_tags,
+    tts_settings,
     user_play,
     user_say,
     uv_tool_detail,
@@ -109,6 +115,7 @@ urlpatterns = [
     path("projects/status/", project_status, name="project-status"),
     path("tags/", tag_options, name="tag-options"),
     path("projects/reports/", project_reports, name="project-reports"),
+    path("projects/reports/all/", all_project_reports, name="all-project-reports"),
     path(
         "projects/reports/global/",
         global_reports_projects,
@@ -159,6 +166,11 @@ urlpatterns = [
         name="openbase-services-list",
     ),
     path(
+        "settings/thread-device-sync/",
+        thread_device_sync_status,
+        name="thread-device-sync-status",
+    ),
+    path(
         "settings/restart/",
         openbase_restart,
         name="openbase-restart",
@@ -172,6 +184,26 @@ urlpatterns = [
         "settings/cartesia-voices/",
         cartesia_voice_settings,
         name="cartesia-voices",
+    ),
+    path(
+        "settings/tts/",
+        tts_settings,
+        name="tts-settings",
+    ),
+    path(
+        "settings/tts/kokoro/download/",
+        kokoro_tts_download,
+        name="kokoro-tts-download",
+    ),
+    path(
+        "settings/stt/",
+        stt_settings,
+        name="stt-settings",
+    ),
+    path(
+        "settings/stt/local/download/",
+        local_stt_download,
+        name="local-stt-download",
     ),
     path(
         "settings/dispatcher-voice/",

@@ -25,6 +25,10 @@ from openbase_coder_cli.paths import (
 )
 from openbase_coder_cli.services.installation import InstallationConfig
 from openbase_coder_cli.services.launchd import install_all_services
+from openbase_coder_cli.services.tailscale_serve import (
+    configure_tailscale_serve,
+    tailscale_serve_health,
+)
 
 WORKSPACE_REPO = "https://github.com/openbase-community/openbase-coder-workspace.git"
 WORKSPACE_INSTALL_SET = "default"
@@ -51,6 +55,8 @@ CODEX_HOME_DEFAULT_DISPATCHER_CONFIG = {
     "dispatcher_reasoning_effort": "low",
     "super_agents_reasoning_effort": "high",
 }
+DEFAULT_CODEX_BACKEND = "claude-code-proxy"
+CODEX_BACKEND_OPTIONS = ("codex", "claude-code-proxy", "claude-tui")
 
 
 @click.command()
@@ -90,6 +96,16 @@ CODEX_HOME_DEFAULT_DISPATCHER_CONFIG = {
     is_flag=True,
     help="Skip background service installation.",
 )
+@click.option(
+    "--backend",
+    "codex_backend",
+    type=click.Choice(CODEX_BACKEND_OPTIONS),
+    default=None,
+    help=(
+        "Default coding backend. New env files use claude-code-proxy when omitted; "
+        "existing env files are only changed when this option is provided."
+    ),
+)
 def setup(
     workspace_dir: str,
     env_file: str,
@@ -97,6 +113,7 @@ def setup(
     cartesia_api_key: str,
     skip_clone: bool,
     skip_services: bool,
+    codex_backend: str | None,
 ) -> None:
     """Full install flow for Openbase Coder."""
     if platform.system() not in ("Darwin", "Linux"):
@@ -121,6 +138,7 @@ def setup(
         env_file,
         assembly_ai_api_key=assembly_ai_api_key,
         cartesia_api_key=cartesia_api_key,
+        codex_backend=codex_backend,
     )
 
     # --- Symlink Codex auth into the service CODEX_HOME ---
@@ -149,6 +167,32 @@ def setup(
         install_all_services(config)
     else:
         click.echo("Skipped service installation (--skip-services).")
+
+    click.echo()
+    click.echo("Configuring Tailscale Serve routes...")
+    try:
+        configure_tailscale_serve()
+    except Exception as exc:
+        click.echo(click.style(f"  WARN  {exc}", fg="yellow"))
+        click.echo(
+            "  Run these manually after Tailscale is installed and connected:\n"
+            "    tailscale serve --bg --http=18080 http://127.0.0.1:7999\n"
+            "    tailscale serve --bg --tcp=7880 tcp://127.0.0.1:7880"
+        )
+    else:
+        health = tailscale_serve_health()
+        if health.healthy:
+            click.echo(f"  OK    Openbase is reachable at {health.openbase_url}")
+        else:
+            click.echo(
+                click.style(
+                    "  WARN  Tailscale Serve was configured, but the external "
+                    "Openbase health check is not passing.",
+                    fg="yellow",
+                )
+            )
+            if health.error:
+                click.echo(f"        {health.error}")
 
     click.echo()
     click.echo("Setup complete.")
@@ -602,9 +646,14 @@ def _ensure_env_file(
     *,
     assembly_ai_api_key: str,
     cartesia_api_key: str,
+    codex_backend: str | None = None,
 ) -> None:
     path = Path(env_file)
     if path.is_file():
+        if codex_backend:
+            _upsert_env_file_values(path, {"OPENBASE_CODEX_BACKEND": codex_backend})
+            click.echo(f"Updated OPENBASE_CODEX_BACKEND in {path}.")
+            return
         click.echo(f".env already exists at {path}, leaving unchanged.")
         return
 
@@ -642,12 +691,15 @@ def _ensure_env_file(
         "# Allow localhost and Tailscale Serve hostnames.",
         "OPENBASE_CODER_CLI_ALLOWED_HOSTS=localhost,127.0.0.1,.ts.net",
         "# Codex app-server defaults used by the managed service.",
-        "# Set OPENBASE_CODEX_BACKEND=claude-code to run Openbase Coder and Super Agents through codex-claude-proxy.",
-        "# OPENBASE_CODEX_BACKEND=claude-code",
-        "# The managed service defaults to the workspace codex-claude-proxy checkout.",
-        "# CODEX_CLAUDE_PROXY_COMMAND=/path/to/openbase-coder-workspace/codex-claude-proxy/proxy.mjs",
+        "# Set OPENBASE_CODEX_BACKEND to codex, claude-code-proxy, or claude-tui.",
+        f"OPENBASE_CODEX_BACKEND={codex_backend or DEFAULT_CODEX_BACKEND}",
+        "# The managed service defaults to the packaged Super Agents proxy command.",
+        "# CODEX_CLAUDE_PROXY_COMMAND=super-agents-claude-proxy",
         "# CODEX_CLAUDE_PROXY_BASE_URL=http://127.0.0.1:6066/v1",
-        "# CODEX_CLAUDE_MODEL_CATALOG_JSON=/path/to/openbase-coder-workspace/codex-claude-proxy/model-catalog.json",
+        "# CODEX_CLAUDE_MODEL_CATALOG_JSON is discovered from the proxy command when unset.",
+        "# SUPER_AGENTS_CLAUDE_TUI_CMD=claude",
+        "# SUPER_AGENTS_CLAUDE_TUI_ARGS=",
+        "# SUPER_AGENTS_CLAUDE_TUI_MODEL=sonnet",
         "CODEX_MODEL=gpt-5.5",
         "CODEX_MODEL_REASONING_EFFORT=high",
         "CODEX_SERVICE_TIER=fast",
@@ -675,3 +727,35 @@ def _ensure_env_file(
 
     path.write_text("\n".join(lines) + "\n")
     click.echo(f"Generated .env at {path}")
+
+
+def _upsert_env_file_values(path: Path, values: dict[str, str]) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    remaining = dict(values)
+    updated: list[str] = []
+    for line in lines:
+        key = _active_env_key(line)
+        if key in remaining:
+            updated.append(f"{key}={_format_env_value(remaining.pop(key))}")
+        else:
+            updated.append(line)
+    if updated and updated[-1].strip():
+        updated.append("")
+    for key, value in remaining.items():
+        updated.append(f"{key}={_format_env_value(value)}")
+    path.write_text("\n".join(updated).rstrip() + "\n", encoding="utf-8")
+
+
+def _active_env_key(line: str) -> str | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in stripped:
+        return None
+    key, _value = stripped.split("=", 1)
+    key = key.strip()
+    return key if key else None
+
+
+def _format_env_value(value: str) -> str:
+    if not value or any(char.isspace() for char in value) or any(char in value for char in ['"', "'", "#"]):
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return value

@@ -394,12 +394,12 @@ def git_diff(request):
 def _git_status(directory: str) -> str:
     """Return the git status of a directory.
 
-    Returns one of: 'clean', 'dirty', 'unpushed', or 'no_git'.
+    Returns one of: 'clean', 'dirty', 'out-of-sync', 'no_git', 'missing', or 'unknown'.
     """
     logger.debug("git_status start directory=%s", directory)
     if not Path(directory).is_dir():
         logger.warning("git_status directory_missing directory=%s", directory)
-        return "no_git"
+        return "missing"
     try:
         # Check for uncommitted changes (includes staged, unstaged, untracked)
         st = subprocess.run(
@@ -420,26 +420,34 @@ def _git_status(directory: str) -> str:
         if st.stdout.strip():
             logger.debug("git_status result=dirty directory=%s", directory)
             return "dirty"
-        # Check for unpushed commits
-        ahead = subprocess.run(
-            ["git", "rev-list", "--count", "@{upstream}..HEAD"],
+        sync = subprocess.run(
+            ["git", "rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
             cwd=directory,
             capture_output=True,
             text=True,
             timeout=5,
         )
-        if ahead.returncode == 0 and int(ahead.stdout.strip() or "0") > 0:
+        if sync.returncode != 0:
             logger.debug(
-                "git_status result=unpushed directory=%s ahead=%s",
+                "git_status result=out-of-sync no_upstream directory=%s stderr=%s",
                 directory,
-                ahead.stdout.strip(),
+                sync.stderr.strip(),
             )
-            return "unpushed"
+            return "out-of-sync"
+        ahead, behind = [int(part) for part in sync.stdout.strip().split()]
+        if ahead > 0 or behind > 0:
+            logger.debug(
+                "git_status result=out-of-sync directory=%s ahead=%s behind=%s",
+                directory,
+                ahead,
+                behind,
+            )
+            return "out-of-sync"
         logger.debug("git_status result=clean directory=%s", directory)
         return "clean"
     except (OSError, subprocess.TimeoutExpired, ValueError):
         logger.exception("git_status failed directory=%s", directory)
-        return "no_git"
+        return "unknown"
 
 
 def _get_subrepos(directory: str) -> list[dict]:

@@ -260,7 +260,10 @@ async def test_brain_score_audio_scorer_logs_schedule_failure_without_raising(
 
     scorer.push_frame(rtc.AudioFrame.create(48000, 1, 480))
 
-    assert any("brain_score stage=schedule_failed" in record.message for record in caplog.records)
+    assert any(
+        "brain_score stage=schedule_failed" in record.message
+        for record in caplog.records
+    )
 
 
 @pytest.mark.asyncio
@@ -281,7 +284,9 @@ async def test_upload_brain_score_chunk_logs_missing_score_without_writing(
             return None
 
         async def text(self):
-            return json.dumps({"statusCode": 200, "message": "No score yet", "data": {}})
+            return json.dumps(
+                {"statusCode": 200, "message": "No score yet", "data": {}}
+            )
 
     class FakeSession:
         async def __aenter__(self):
@@ -315,7 +320,9 @@ async def test_upload_brain_score_chunk_logs_missing_score_without_writing(
 
     assert writes == []
     assert not wav_path.exists()
-    assert any("brain_score stage=score_failed" in record.message for record in caplog.records)
+    assert any(
+        "brain_score stage=score_failed" in record.message for record in caplog.records
+    )
 
 
 @pytest.mark.parametrize(
@@ -382,9 +389,7 @@ def test_super_agent_voices_use_builtin_catalog_pool():
     voices = livekit._current_super_agent_voices()
 
     assert len(voices) > 1
-    assert livekit.DEFAULT_CARTESIA_VOICE_ID not in {
-        voice.voice_id for voice in voices
-    }
+    assert livekit.DEFAULT_CARTESIA_VOICE_ID not in {voice.voice_id for voice in voices}
     assert any(voice.name == "Katie" for voice in voices)
 
 
@@ -628,7 +633,7 @@ async def test_announcer_queue_waits_and_excludes_chat_context(caplog):
 
     assert session.current.waited is True
     assert session.say_handle.waited is True
-    assert session.say_calls[0][0] == "Item: Update read me dot M D. Item: Run U V."
+    assert session.say_calls[0][0] == "Update read me dot M D. Run U V."
     assert session.say_calls[0][1]["allow_interruptions"] is False
     assert session.say_calls[0][1]["add_to_chat_ctx"] is False
     assert session.say_calls[0][1]["audio"] is not None

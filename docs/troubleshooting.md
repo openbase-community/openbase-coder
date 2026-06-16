@@ -1,5 +1,31 @@
 # Troubleshooting
 
+## iPhone Stays On Connecting
+
+The iOS app reaches the Mac through Tailscale Serve, not directly through the
+local Django port. The expected routes are:
+
+```bash
+tailscale serve --bg --http=18080 http://127.0.0.1:7999
+tailscale serve --bg --tcp=7880 tcp://127.0.0.1:7880
+```
+
+Check the configured routes:
+
+```bash
+tailscale serve status
+```
+
+Then check local service health:
+
+```bash
+openbase-coder doctor
+openbase-coder services status
+```
+
+Both commands should fail if either Serve route is missing or the Openbase API
+health check cannot be reached through the machine's tailnet `:18080` address.
+
 ## iPhone LiveKit Call Times Out Over Tailscale
 
 Symptoms:

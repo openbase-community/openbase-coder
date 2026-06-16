@@ -10,6 +10,7 @@ This guide sets up Openbase locally using the `openbase-coder` CLI.
 - `uv` (recommended)
 - `npm` (for console build during setup)
 - `livekit-server` on your `PATH` (for voice services)
+- Tailscale, signed in and connected, for iOS app access to the local CLI
 
 Optional but recommended:
 
@@ -72,6 +73,13 @@ What setup does:
 7. Writes Codex app-server defaults such as `CODEX_MODEL=gpt-5.5`, `CODEX_MODEL_REASONING_EFFORT=high`, `CODEX_SERVICE_TIER=fast`, `CODEX_APP_SERVER_URL`, and `LIVEKIT_CODEX_THREAD_CWD`.
 8. Builds `console`.
 9. Installs background services — launchd on macOS, systemd user units on Linux (unless `--skip-services`).
+10. Configures Tailscale Serve routes for iOS access to the local CLI API and LiveKit:
+    - `tailscale serve --bg --http=18080 http://127.0.0.1:7999`
+    - `tailscale serve --bg --tcp=7880 tcp://127.0.0.1:7880`
+
+If you do not want the Electron app to run setup commands for you, follow the
+[Manual Installation](manual-installation.md) page and run the same CLI setup,
+auth, service, and health-check steps from your own terminal.
 
 ## Start the Server
 

@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 DISPATCH_TIMING_LOG = "dispatch_timing"
 
 DEFAULT_CODEX_MODEL = "gpt-5.5"
+CLAUDE_CODE_MODEL = "claude-code"
 _SANDBOX_POLICY_TYPES = {
     "read-only": "readOnly",
     "workspace-write": "workspaceWrite",
@@ -57,6 +58,12 @@ _speech_excerpt = _turn_speech_excerpt
 
 
 def _default_model_name() -> str:
+    backend = os.getenv("OPENBASE_CODEX_BACKEND", "").strip().lower()
+    if backend in {"claude", "claude-code", "claude-code-proxy", "claude-proxy"}:
+        return (
+            os.getenv("CODEX_CLAUDE_MODEL", CLAUDE_CODE_MODEL).strip()
+            or CLAUDE_CODE_MODEL
+        )
     return os.getenv("CODEX_MODEL", DEFAULT_CODEX_MODEL).strip() or DEFAULT_CODEX_MODEL
 
 

@@ -5,12 +5,14 @@ from __future__ import annotations
 import base64
 import mimetypes
 from pathlib import Path
+from typing import Any
 
 from django.http import FileResponse
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from openbase_coder_cli.mcp.projects import get_recent_projects as _get_recent_projects
 from openbase_coder_cli.openbase_coder_cli_app.item_tags import (
     report_tags,
     report_tags_payload,
@@ -110,6 +112,38 @@ def _global_reports_projects() -> list[dict]:
     return projects
 
 
+def _all_reports_items() -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    seen: set[Path] = set()
+
+    projects = _global_reports_projects() + _get_recent_projects()
+    for project in projects:
+        project_path = str(project.get("path", "")).strip()
+        if not project_path:
+            continue
+        try:
+            resolved = Path(project_path).expanduser().resolve()
+        except OSError:
+            continue
+        if resolved in seen or not resolved.is_dir():
+            continue
+        seen.add(resolved)
+
+        project_payload = dict(project)
+        project_payload["path"] = str(resolved)
+        for file_payload in _list_reports_files(str(resolved)):
+            items.append(
+                {
+                    "id": f"{resolved}:{file_payload['path']}",
+                    "project": project_payload,
+                    "file": file_payload,
+                    "updated_at": file_payload["updated_at"],
+                }
+            )
+
+    return sorted(items, key=lambda item: item["updated_at"], reverse=True)
+
+
 def _resolve_reports_path(project_path: str, relative_path: str) -> tuple[Path, Path]:
     if not relative_path:
         raise ValueError("file is required")
@@ -162,9 +196,15 @@ def global_reports_projects(request):
     return Response({"projects": _global_reports_projects()})
 
 
-@api_view(["GET", "DELETE"])
+@api_view(["GET"])
+def all_project_reports(request):
+    """List all report artifacts across recent and global report sources."""
+    return Response({"items": _all_reports_items()})
+
+
+@api_view(["GET", "DELETE", "PATCH"])
 def project_reports_file(request):
-    """Return or delete a renderable developer communication file."""
+    """Return, update, or delete a renderable developer communication file."""
     project_path = request.query_params.get("path", "").strip()
     relative_path = request.query_params.get("file", "").strip()
     if not project_path:
@@ -207,6 +247,57 @@ def project_reports_file(request):
             )
 
         return Response({"deleted": True, "file": file_payload})
+
+    if request.method == "PATCH":
+        try:
+            file_path, reports_dir = _resolve_reports_path(str(resolved), relative_path)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not file_path.exists():
+            return Response(
+                {"error": f"File not found: {relative_path}"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not file_path.is_file():
+            return Response(
+                {"error": "Report path must be a file"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        kind = _reports_kind(file_path)
+        if kind not in {"markdown", "text"}:
+            return Response(
+                {"error": "Only markdown and text reports can be edited."},
+                status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            )
+
+        content = request.data.get("content")
+        if not isinstance(content, str):
+            return Response(
+                {"error": "content must be a string"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(content.encode("utf-8")) > REPORTS_MAX_TEXT_BYTES:
+            return Response(
+                {"error": "File is too large to save as text"},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+
+        try:
+            file_path.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            return Response(
+                {"error": f"Unable to save report: {exc.strerror or exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(
+            {
+                "file": _reports_file_payload(file_path, reports_dir),
+                "content": content,
+            }
+        )
 
     try:
         file_path = _resolve_reports_file(str(resolved), relative_path)

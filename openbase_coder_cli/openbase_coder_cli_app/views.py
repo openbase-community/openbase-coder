@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from django.views.decorators.csrf import csrf_exempt
 
-from openbase_coder_cli.dispatcher_config import dispatcher_voice, set_dispatcher_voice
+from openbase_coder_cli.dispatcher_config import (
+    dispatcher_voice,
+    set_dispatcher_voice,
+    set_stt_provider,
+    set_tts_provider_and_dispatcher_voice,
+)
 from openbase_coder_cli.livekit_announcer import (
     _build_livekit_client,
     _resolve_target_room,
@@ -55,6 +60,7 @@ from openbase_coder_cli.openbase_coder_cli_app.projects import (
     recent_projects,
 )
 from openbase_coder_cli.openbase_coder_cli_app.reports import (
+    all_project_reports,
     global_reports_projects,
     project_reports,
     project_reports_download,
@@ -74,6 +80,7 @@ from openbase_coder_cli.openbase_coder_cli_app.services_views import (
     openbase_service_action,
     openbase_services_list,
     service_status,
+    thread_device_sync_status,
 )
 from openbase_coder_cli.openbase_coder_cli_app.skills import _home_skills_dir
 from openbase_coder_cli.openbase_coder_cli_app.tags import tag_options
@@ -112,6 +119,10 @@ def _sync_agents_md_compat_globals() -> None:
 def _sync_livekit_compat_globals() -> None:
     _livekit.dispatcher_voice = dispatcher_voice
     _livekit.set_dispatcher_voice = set_dispatcher_voice
+    _livekit.set_tts_provider_and_dispatcher_voice = (
+        set_tts_provider_and_dispatcher_voice
+    )
+    _livekit.set_stt_provider = set_stt_provider
     _livekit.publish_announcer_message = publish_announcer_message
     _livekit.publish_announcer_audio_file = publish_announcer_audio_file
     _livekit._build_livekit_client = _build_livekit_client
@@ -154,6 +165,30 @@ def cartesia_voice_settings(request):
 
 
 @csrf_exempt
+def tts_settings(request):
+    _sync_livekit_compat_globals()
+    return _livekit.tts_settings(request)
+
+
+@csrf_exempt
+def kokoro_tts_download(request):
+    _sync_livekit_compat_globals()
+    return _livekit.kokoro_tts_download(request)
+
+
+@csrf_exempt
+def stt_settings(request):
+    _sync_livekit_compat_globals()
+    return _livekit.stt_settings(request)
+
+
+@csrf_exempt
+def local_stt_download(request):
+    _sync_livekit_compat_globals()
+    return _livekit.local_stt_download(request)
+
+
+@csrf_exempt
 def dispatcher_voice_settings(request):
     _sync_livekit_compat_globals()
     return _livekit.dispatcher_voice_settings(request)
@@ -185,6 +220,7 @@ def skill_detail(request, skill_name):
 
 __all__ = [
     "agents_md",
+    "all_project_reports",
     "approval_request_detail",
     "approval_requests",
     "auth_logout",
@@ -202,6 +238,7 @@ __all__ = [
     "health_check",
     "_home_skills_dir",
     "ios_logs_upload",
+    "kokoro_tts_download",
     "launchctl_ignored_settings",
     "launchctl_service_action",
     "launchctl_services_list",
@@ -210,6 +247,7 @@ __all__ = [
     "livekit_voice_route",
     "livekit_voice_route_exit",
     "livekit_voice_route_transfer",
+    "local_stt_download",
     "openbase_restart",
     "openbase_service_action",
     "openbase_services_list",
@@ -226,11 +264,14 @@ __all__ = [
     "routines_list",
     "routines_run_due",
     "service_status",
+    "thread_device_sync_status",
     "set_dispatcher_voice",
     "skill_detail",
     "skills_list",
     "skills_symlink",
     "tag_options",
+    "stt_settings",
+    "tts_settings",
     "thread_detail",
     "thread_favorite",
     "thread_interrupt",

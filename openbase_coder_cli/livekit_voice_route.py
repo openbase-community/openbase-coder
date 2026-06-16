@@ -11,13 +11,11 @@ from pathlib import Path
 
 import livekit.api as livekit_api
 
-from openbase_coder_cli.cartesia_voice_catalog import (
-    DEFAULT_SUPER_AGENT_VOICE_IDS,
-    cartesia_voice_for_id,
-    cartesia_voice_for_name,
-)
 from openbase_coder_cli.cli.utils import get_data_dir
-from openbase_coder_cli.dispatcher_config import dispatcher_voice
+from openbase_coder_cli.dispatcher_config import (
+    dispatcher_voice,
+    selected_tts_provider_id,
+)
 from openbase_coder_cli.livekit_agent.codex_thread_state import thread_state_file_lock
 from openbase_coder_cli.livekit_announcer import (
     AnnouncerError,
@@ -32,11 +30,16 @@ from openbase_coder_cli.paths import (
     CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
     CODEX_DISPATCHER_INSTRUCTIONS_PATH,
 )
+from openbase_coder_cli.tts_providers import (
+    CARTESIA_PROVIDER_ID,
+    DEFAULT_CARTESIA_ANNOUNCER_VOICE_ID,
+    DEFAULT_CARTESIA_VOICE_ID,
+    get_tts_provider,
+    voice_name_for_id,
+)
 
 VOICE_ROUTE_TOPIC = "openbase.voice.route"
 VOICE_ROUTE_STATE_FILE = "livekit-voice-route.json"
-DEFAULT_CARTESIA_VOICE_ID = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
-DEFAULT_CARTESIA_ANNOUNCER_VOICE_ID = "f786b574-daa5-4673-aa0c-cbe3e8534c02"
 CARTESIA_VOICE_ID = os.getenv("CARTESIA_VOICE_ID", DEFAULT_CARTESIA_VOICE_ID)
 CARTESIA_ANNOUNCER_VOICE_ID = os.getenv(
     "CARTESIA_ANNOUNCER_VOICE_ID", DEFAULT_CARTESIA_ANNOUNCER_VOICE_ID
@@ -121,26 +124,38 @@ def instruction_override_supported() -> bool:
 
 
 def _voices_from_ids(voice_ids) -> tuple[CartesiaVoice, ...]:
+    provider = get_tts_provider(CARTESIA_PROVIDER_ID)
     return tuple(
         CartesiaVoice(
             voice_id=voice_id,
-            name=cartesia_voice_for_id(voice_id).name
-            if cartesia_voice_for_id(voice_id)
+            name=provider.voice_for_id(voice_id).name
+            if provider.voice_for_id(voice_id)
             else f"Voice {index + 1}",
         )
         for index, voice_id in enumerate(voice_ids)
     )
 
 
-SUPER_AGENT_VOICE_IDS = DEFAULT_SUPER_AGENT_VOICE_IDS
+SUPER_AGENT_VOICE_IDS = tuple(
+    voice.id for voice in get_tts_provider(CARTESIA_PROVIDER_ID).super_agent_voices()
+)
 SUPER_AGENT_VOICES = _voices_from_ids(SUPER_AGENT_VOICE_IDS)
 
 
 def _current_super_agent_voices() -> tuple[CartesiaVoice, ...]:
+    provider = get_tts_provider(selected_tts_provider_id())
+    if provider.provider_id != CARTESIA_PROVIDER_ID:
+        return tuple(
+            CartesiaVoice(voice_id=voice.id, name=voice.name)
+            for voice in provider.super_agent_voices()
+        )
     voice_ids = tuple(voice.voice_id for voice in SUPER_AGENT_VOICES)
     if voice_ids == tuple(SUPER_AGENT_VOICE_IDS):
         return SUPER_AGENT_VOICES
-    return _voices_from_ids(SUPER_AGENT_VOICE_IDS)
+    return tuple(
+        CartesiaVoice(voice_id=voice.id, name=voice.name)
+        for voice in provider.super_agent_voices()
+    )
 
 
 def stable_super_agent_voice(
@@ -175,8 +190,11 @@ def super_agent_voice_for_agent_name(agent_name: str | None) -> CartesiaVoice | 
         if _normalize_voice_name(voice.name) == normalized:
             return voice
 
-    if catalog_voice := cartesia_voice_for_name(agent_name or ""):
-        return CartesiaVoice(voice_id=catalog_voice.id, name=catalog_voice.name)
+    provider_voice = get_tts_provider(selected_tts_provider_id()).voice_for_name(
+        agent_name
+    )
+    if provider_voice:
+        return CartesiaVoice(voice_id=provider_voice.id, name=provider_voice.name)
     return None
 
 
@@ -574,7 +592,7 @@ def _state_from_payload(payload: dict) -> VoiceRouteState:
         else None,
         dispatcher_voice_id=dispatcher_voice_id,
         dispatcher_voice_name=_optional_str(payload.get("dispatcher_voice_name"))
-        or _cartesia_voice_name(dispatcher_voice_id)
+        or _configured_voice_name(dispatcher_voice_id)
         or current_dispatcher_voice["name"],
         active_target_thread_id=active_target_thread_id
         if isinstance(active_target_thread_id, str)
@@ -583,7 +601,7 @@ def _state_from_payload(payload: dict) -> VoiceRouteState:
         active_target_label=_optional_str(payload.get("active_target_label")),
         active_target_voice_id=active_target_voice_id,
         active_target_voice_name=_optional_str(payload.get("active_target_voice_name"))
-        or _cartesia_voice_name(active_target_voice_id),
+        or _configured_voice_name(active_target_voice_id),
         updated_at=payload.get("updated_at")
         if isinstance(payload.get("updated_at"), (int, float))
         else None,
@@ -591,11 +609,8 @@ def _state_from_payload(payload: dict) -> VoiceRouteState:
     )
 
 
-def _cartesia_voice_name(voice_id: str | None) -> str | None:
-    if not voice_id:
-        return None
-    voice = cartesia_voice_for_id(voice_id)
-    return voice.name if voice else None
+def _configured_voice_name(voice_id: str | None) -> str | None:
+    return voice_name_for_id(selected_tts_provider_id(), voice_id)
 
 
 def _optional_str(value) -> str | None:

@@ -12,6 +12,7 @@ from openbase_coder_cli.paths import DEFAULT_ENV_FILE_PATH
 from openbase_coder_cli.services.definitions import SERVICES
 from openbase_coder_cli.services.installation import InstallationConfig
 from openbase_coder_cli.services.launchd import launchctl_status
+from openbase_coder_cli.services.tailscale_serve import tailscale_serve_health
 
 # Services that have authentication and may safely bind to 0.0.0.0
 _AUTHENTICATED_PORTS: dict[int, str] = {
@@ -165,6 +166,39 @@ def doctor() -> None:
                     ok(f"port {port} ({label}): bound to {host} (auth enabled)")
                 else:
                     ok(f"port {port} ({label}): bound to {host}")
+
+    # --- Tailscale Serve ---
+    click.echo()
+    click.echo(click.style("Tailscale Serve", bold=True))
+    serve_health = tailscale_serve_health()
+    if not serve_health.tailscale_available:
+        fail("tailscale: not found on PATH")
+    elif not serve_health.tailscale_running:
+        fail(f"tailscale: not running ({serve_health.error or 'unknown error'})")
+    else:
+        ok(f"tailscale: running for {serve_health.host or 'unknown host'}")
+
+    if serve_health.openbase_configured:
+        ok("Openbase API Serve route: :18080 -> http://127.0.0.1:7999")
+    else:
+        fail(
+            "Openbase API Serve route missing: run "
+            "tailscale serve --bg --http=18080 http://127.0.0.1:7999"
+        )
+
+    if serve_health.livekit_configured:
+        ok("LiveKit Serve route: :7880 -> tcp://127.0.0.1:7880")
+    else:
+        fail(
+            "LiveKit Serve route missing: run "
+            "tailscale serve --bg --tcp=7880 tcp://127.0.0.1:7880"
+        )
+
+    if serve_health.openbase_reachable:
+        ok(f"external Openbase health check passed at {serve_health.openbase_url}")
+    else:
+        detail = f": {serve_health.error}" if serve_health.error else ""
+        fail(f"external Openbase health check failed{detail}")
 
     # --- Credentials ---
     click.echo()

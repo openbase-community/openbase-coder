@@ -17,11 +17,14 @@ from rest_framework import serializers, status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from openbase_coder_cli.cartesia_voice_catalog import (
-    cartesia_voice_catalog_payload,
-    cartesia_voice_for_name,
+from openbase_coder_cli.dispatcher_config import (
+    dispatcher_voice,
+    selected_stt_provider_id,
+    selected_tts_provider_id,
+    set_dispatcher_voice,
+    set_stt_provider,
+    set_tts_provider_and_dispatcher_voice,
 )
-from openbase_coder_cli.dispatcher_config import dispatcher_voice, set_dispatcher_voice
 from openbase_coder_cli.livekit_announcer import (
     MAX_ANNOUNCER_TEXT_LENGTH,
     SUPPORTED_AUDIO_EXTENSIONS,
@@ -49,6 +52,17 @@ from openbase_coder_cli.livekit_voice_route import (
 )
 from openbase_coder_cli.mcp.session_manager import get_session_manager
 from openbase_coder_cli.openbase_coder_cli_app.common import _request_identity
+from openbase_coder_cli.stt_providers import (
+    LOCAL_MLX_WHISPER_STT_PROVIDER_ID,
+    download_local_mlx_whisper,
+    local_mlx_whisper_readiness,
+    stt_provider_options_payload,
+)
+from openbase_coder_cli.tts_providers import (
+    KOKORO_PROVIDER_ID,
+    all_tts_providers,
+    get_tts_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +157,20 @@ class DispatcherVoiceSerializer(serializers.Serializer):
     )
 
 
+class TTSSettingsSerializer(DispatcherVoiceSerializer):
+    provider = serializers.CharField(
+        trim_whitespace=True,
+        max_length=32,
+    )
+
+
+class STTSettingsSerializer(serializers.Serializer):
+    provider = serializers.CharField(
+        trim_whitespace=True,
+        max_length=32,
+    )
+
+
 @api_view(["POST"])
 def user_say(request):
     """Publish an announcer message into the active LiveKit voice room."""
@@ -175,7 +203,9 @@ def user_say(request):
             voice_id=voice_entry.voice_id,
         )
     except UnknownAgentVoiceError as exc:
-        catalog_voice = cartesia_voice_for_name(agent_name)
+        catalog_voice = get_tts_provider(selected_tts_provider_id()).voice_for_name(
+            agent_name
+        )
         logger.warning(
             "dispatch_timing stage=user_say_voice_unknown agent_name=%s "
             "catalog_voice_id=%s catalog_voice_name=%s history=%s",
@@ -266,11 +296,106 @@ def user_play(request):
 
 @api_view(["GET"])
 def cartesia_voice_settings(request):
-    """Return the supported Cartesia voice catalog and dispatcher selection."""
+    """Compatibility alias for the generic TTS settings response."""
+    return Response(_tts_settings_payload(), status=status.HTTP_200_OK)
+
+
+@api_view(["GET", "PUT"])
+def tts_settings(request):
+    """Return or persist the configured TTS provider and dispatcher voice."""
+    if request.method == "GET":
+        return Response(_tts_settings_payload(), status=status.HTTP_200_OK)
+
+    input_serializer = TTSSettingsSerializer(data=request.data)
+    input_serializer.is_valid(raise_exception=True)
+    try:
+        selected_voice = set_tts_provider_and_dispatcher_voice(
+            provider_id=input_serializer.validated_data["provider"],
+            voice_id=input_serializer.validated_data["voice_id"],
+        )
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
     return Response(
         {
-            "voices": cartesia_voice_catalog_payload(),
-            "dispatcher_voice": dispatcher_voice(),
+            **_tts_settings_payload(),
+            "dispatcher_voice": selected_voice,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+def kokoro_tts_download(request):
+    """Download/cache the local Kokoro model and every supported voice file."""
+    provider = get_tts_provider(KOKORO_PROVIDER_ID)
+    try:
+        download = provider.download_all_voices()
+    except Exception as exc:
+        return Response(
+            {
+                "local_download": {
+                    "provider": KOKORO_PROVIDER_ID,
+                    "ready": False,
+                    "required_files": 0,
+                    "cached_files": 0,
+                    "detail": str(exc),
+                }
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return Response(
+        {
+            **_tts_settings_payload(),
+            "local_download": download.payload(),
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET", "PUT"])
+def stt_settings(request):
+    """Return or persist the configured speech-to-text provider."""
+    if request.method == "GET":
+        return Response(_stt_settings_payload(), status=status.HTTP_200_OK)
+
+    input_serializer = STTSettingsSerializer(data=request.data)
+    input_serializer.is_valid(raise_exception=True)
+    try:
+        selected = set_stt_provider(input_serializer.validated_data["provider"])
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response(
+        {
+            **_stt_settings_payload(),
+            **selected,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+def local_stt_download(request):
+    """Download/cache the local MLX Whisper STT model."""
+    try:
+        download = download_local_mlx_whisper()
+    except Exception as exc:
+        return Response(
+            {
+                "local_download": {
+                    "provider": LOCAL_MLX_WHISPER_STT_PROVIDER_ID,
+                    "ready": False,
+                    "model": "",
+                    "detail": str(exc),
+                }
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return Response(
+        {
+            **_stt_settings_payload(),
+            "local_download": download.payload(),
         },
         status=status.HTTP_200_OK,
     )
@@ -278,7 +403,7 @@ def cartesia_voice_settings(request):
 
 @api_view(["PUT"])
 def dispatcher_voice_settings(request):
-    """Persist the dispatcher voice selected from the Cartesia catalog."""
+    """Persist the dispatcher voice selected from the current TTS provider catalog."""
     input_serializer = DispatcherVoiceSerializer(data=request.data)
     input_serializer.is_valid(raise_exception=True)
     try:
@@ -294,6 +419,37 @@ def dispatcher_voice_settings(request):
         },
         status=status.HTTP_200_OK,
     )
+
+
+def _tts_settings_payload() -> dict:
+    provider_id = selected_tts_provider_id()
+    provider = get_tts_provider(provider_id)
+    return {
+        "provider": provider_id,
+        "providers": [
+            {
+                "id": candidate.provider_id,
+                "name": candidate.display_name,
+                "local": candidate.provider_id == KOKORO_PROVIDER_ID,
+            }
+            for candidate in all_tts_providers()
+        ],
+        "voices": provider.catalog_payload(),
+        "voices_by_provider": {
+            candidate.provider_id: candidate.catalog_payload()
+            for candidate in all_tts_providers()
+        },
+        "dispatcher_voice": dispatcher_voice(),
+        "local_download": get_tts_provider(KOKORO_PROVIDER_ID).readiness().payload(),
+    }
+
+
+def _stt_settings_payload() -> dict:
+    return {
+        "provider": selected_stt_provider_id(),
+        "providers": stt_provider_options_payload(),
+        "local_download": local_mlx_whisper_readiness().payload(),
+    }
 
 
 @api_view(["GET"])

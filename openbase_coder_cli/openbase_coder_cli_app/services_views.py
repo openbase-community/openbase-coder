@@ -13,6 +13,7 @@ from rest_framework import serializers, status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from openbase_coder_cli.mcp.thread_exchange import thread_snapshot_status
 from openbase_coder_cli.openbase_coder_cli_app.common import _auth_debug_value
 from openbase_coder_cli.services.console_settings import (
     get_ignored_launchctl_labels,
@@ -30,8 +31,10 @@ from openbase_coder_cli.services.openbase_services import (
     schedule_openbase_restart_payload,
 )
 from openbase_coder_cli.services.restart import restart_target_names
+from openbase_coder_cli.services.tailscale_serve import tailscale_serve_health
 
 logger = logging.getLogger(__name__)
+
 
 class LaunchctlActionSerializer(serializers.Serializer):
     action = serializers.ChoiceField(choices=["start", "stop", "restart"])
@@ -98,6 +101,12 @@ def launchctl_service_action(request, label):
 def openbase_services_list(request):
     """List Openbase-managed launchd services."""
     return Response(list_openbase_services_payload())
+
+
+@api_view(["GET"])
+def thread_device_sync_status(request):
+    """Show cross-device Codex thread snapshot sync status."""
+    return Response(thread_snapshot_status())
 
 
 @api_view(["POST"])
@@ -194,7 +203,11 @@ def service_status(request):
         },
         "tailscale": {"name": "Tailscale", "port": None},
     }
-    for service_name in ("codex-thread-sync", "openbase-routines"):
+    for service_name in (
+        "codex-thread-sync",
+        "codex-thread-device-sync",
+        "openbase-routines",
+    ):
         service = next((svc for svc in SERVICES if svc.name == service_name), None)
         if not service:
             continue
@@ -220,5 +233,23 @@ def service_status(request):
             svc["running"],
             svc.get("port"),
         )
+    serve_health = tailscale_serve_health()
+    services["tailscale_serve"] = {
+        "name": "Tailscale Serve",
+        "port": 18080,
+        "running": serve_health.healthy,
+        "host": serve_health.host,
+        "url": serve_health.openbase_url,
+        "openbase_configured": serve_health.openbase_configured,
+        "livekit_configured": serve_health.livekit_configured,
+        "openbase_reachable": serve_health.openbase_reachable,
+        "error": serve_health.error,
+    }
+    logger.info(
+        "service_status probe service=tailscale_serve running=%s url=%s error=%s",
+        serve_health.healthy,
+        serve_health.openbase_url,
+        serve_health.error,
+    )
     logger.info("service_status complete")
     return Response({"services": services})

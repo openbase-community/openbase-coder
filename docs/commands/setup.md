@@ -8,6 +8,26 @@ Run the full Openbase local installation flow.
 openbase-coder setup [OPTIONS]
 ```
 
+## Backend Selection
+
+Setup can choose the default coding backend:
+
+```bash
+openbase-coder setup --backend claude-code-proxy
+openbase-coder setup --backend claude-tui
+openbase-coder setup --backend codex
+```
+
+New env files default to `claude-code-proxy` when `--backend` is omitted.
+Existing env files are left unchanged unless `--backend` is passed.
+
+- `claude-code-proxy`: recommended for most Claude onboarding. It keeps the
+  Codex app-server/Openbase service flow and uses the managed Claude proxy
+  sidecar. It requires an Anthropic API key.
+- `claude-tui`: uses the local Claude Code CLI/TUI login directly, does not
+  require an Anthropic API key, and bypasses `codex-app-server`.
+- `codex`: native Codex app-server with OpenAI models.
+
 For first-time setup without installing the CLI first, prefer `uvx`:
 
 ```bash
@@ -42,7 +62,12 @@ uvx --python 3.13 openbase-coder setup
 11. Configures `~/.openbase/codex_home/config.toml` with full Codex local access (`sandbox_mode = "danger-full-access"`), disabled permission prompts, and the Super Agents MCP server. The MCP command prefers the workspace venv executable and falls back to the resolved local `uv` path.
 12. Writes Codex app-server defaults like `CODEX_MODEL=gpt-5.5`, `CODEX_MODEL_REASONING_EFFORT=high`, `CODEX_SERVICE_TIER=fast`, `CODEX_APP_SERVER_URL`, and `LIVEKIT_CODEX_THREAD_CWD` into the shared `.env`.
 13. Builds `console`.
-14. Installs background services (launchd on macOS, systemd user units on Linux) unless skipped.
+14. Installs background services (launchd on macOS, systemd user units on Linux) unless skipped, including the packaged `codex-claude-proxy` service on port `6066`.
+15. Configures Tailscale Serve routes for the iOS app:
+    - `tailscale serve --bg --http=18080 http://127.0.0.1:7999`
+    - `tailscale serve --bg --tcp=7880 tcp://127.0.0.1:7880`
+
+The generated env file records the selected backend as `OPENBASE_CODEX_BACKEND`.
 
 ## Example
 
@@ -60,3 +85,7 @@ uvx --python 3.13 openbase-coder setup \
 - Existing skill symlinks in `~/.openbase/codex_home/skills` are updated to the workspace source. Real skill directories or files are left unchanged.
 - Existing `~/.openbase/codex_home/config.toml` content is preserved, except setup enforces the root permission keys and creates or replaces the `[mcp_servers.super-agents]` table.
 - If `npm`, `uv`, or `multi` are missing, related steps are skipped with messages.
+- If Tailscale is missing or disconnected, setup prints the manual Serve
+  commands and continues. `openbase-coder doctor` and `openbase-coder services
+  status` fail until the Tailscale Serve routes and external Openbase health
+  check pass.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from openbase_coder_cli.cartesia_voice_catalog import cartesia_voice_for_id
+from openbase_coder_cli.dispatcher_config import selected_tts_provider_id
 from openbase_coder_cli.livekit_voice_history import (
     VoiceHistoryEntry,
     get_voice_history_entry,
@@ -13,6 +13,7 @@ from openbase_coder_cli.livekit_voice_route import (
 )
 from openbase_coder_cli.openbase_coder_cli_app.item_tags import thread_tags
 from openbase_coder_cli.openbase_coder_cli_app.thread_favorites import favorite_payload
+from openbase_coder_cli.tts_providers import voice_name_for_id
 
 VoiceRouteRole = Literal["none", "dispatcher", "active_target"]
 
@@ -63,11 +64,11 @@ def annotate_thread_payload(
         )
     elif is_active_target:
         active_agent_name = route_state.active_target_voice_name or agent_name
-        catalog_voice = cartesia_voice_for_id(route_state.active_target_voice_id or "")
         voice_name = (
-            catalog_voice.name
-            if catalog_voice is not None
-            else route_state.active_target_voice_name
+            voice_name_for_id(
+                selected_tts_provider_id(), route_state.active_target_voice_id
+            )
+            or route_state.active_target_voice_name
         )
         assignment = _voice_assignment_payload(
             thread_id=resolved_thread_id,
