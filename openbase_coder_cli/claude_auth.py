@@ -111,11 +111,7 @@ def run_claude_login(
     email: str | None = None,
 ) -> int:
     command = claude_command or shutil.which("claude") or "claude"
-    args = [command, "auth", "login", "--claudeai"]
-    if sso:
-        args.append("--sso")
-    if email:
-        args.extend(["--email", email])
+    args = [command, "setup-token"]
     return subprocess.call(args, env=claude_env(config_dir))
 
 
