@@ -623,6 +623,34 @@ def test_read_thread_reads_claude_code_backend_turns(tmp_path: Path) -> None:
     ]
 
 
+def test_read_thread_treats_invalid_backend_thread_id_as_missing() -> None:
+    client = FakeBackendSessionClient(
+        {
+            "read_by_label": [
+                RuntimeError(
+                    '{"code": -32600, "message": '
+                    '"invalid thread id: invalid character"}'
+                )
+            ]
+        }
+    )
+
+    thread = asyncio.run(_manager(client).get_thread_state("s_stale"))
+
+    assert thread is None
+    assert client.calls == [
+        (
+            "read_by_label",
+            {
+                "thread_id": "s_stale",
+                "cwd": None,
+                "include_turns": True,
+                "max_items": 25,
+            },
+        )
+    ]
+
+
 def test_resume_thread_without_developer_instructions_is_backend_session_noop(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -965,6 +993,29 @@ def test_read_thread_treats_in_progress_turn_as_current_run(tmp_path: Path) -> N
     assert thread.current_run is not None
     assert thread.current_run.run_id == "turn-1"
     assert thread.current_run.status == "running"
+
+
+def test_read_thread_treats_invalid_app_server_thread_id_as_missing() -> None:
+    client = FakeSuperAgentsClient(
+        {
+            "read_thread": [
+                RuntimeError(
+                    '{"code": -32600, "message": '
+                    '"invalid thread id: invalid character"}'
+                )
+            ]
+        }
+    )
+
+    thread = asyncio.run(_manager(client).get_thread_state("s_stale"))
+
+    assert thread is None
+    assert client.calls == [
+        (
+            "read_thread",
+            {"thread_id": "s_stale", "include_turns": True},
+        )
+    ]
 
 
 def test_read_thread_truncates_completed_turn_history(

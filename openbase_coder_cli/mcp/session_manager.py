@@ -217,6 +217,22 @@ def _is_payload_too_large_error(exc: Exception) -> bool:
     )
 
 
+def _runtime_error_message(exc: RuntimeError) -> str:
+    raw = str(exc)
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return raw
+    if isinstance(payload, dict) and isinstance(payload.get("message"), str):
+        return payload["message"]
+    return raw
+
+
+def _is_thread_unavailable_error(exc: RuntimeError) -> bool:
+    message = _runtime_error_message(exc).lower()
+    return "not found" in message or "invalid thread id" in message
+
+
 RUNNING_STATUSES = {"active", "inProgress", "in_progress", "running", "pending"}
 COMPLETED_STATUSES = {"completed", "success"}
 ERROR_STATUSES = {"failed", "error", "cancelled", "canceled", "interrupted"}
@@ -829,7 +845,7 @@ class CodexAppServerSessionManager:
             await self._client.ensure_connected()
             await self._client.request("thread/archive", {"threadId": session_id})
         except RuntimeError as exc:
-            if "not found" in str(exc).lower():
+            if _is_thread_unavailable_error(exc):
                 return False
             raise
         async with self._state_lock:
@@ -876,7 +892,7 @@ class CodexAppServerSessionManager:
         try:
             started = await self._client.start_turn(turn_input)
         except RuntimeError as exc:
-            if "not found" not in str(exc).lower():
+            if not _is_thread_unavailable_error(exc):
                 raise
             await self._resume_thread(session_id, thread.directory)
             started = await self._client.start_turn(turn_input)
@@ -941,7 +957,8 @@ class CodexAppServerSessionManager:
                     LabelQueryInput(thread_id=session_id)
                 )
             except RuntimeError as exc:
-                if "not found" in str(exc).lower() or "no active" in str(exc).lower():
+                message = _runtime_error_message(exc).lower()
+                if _is_thread_unavailable_error(exc) or "no active" in message:
                     return False
                 raise
             return bool(result.get("cancelled", True))
@@ -952,7 +969,8 @@ class CodexAppServerSessionManager:
         try:
             await self._client.cancel_turn(session_id, turn_id)
         except RuntimeError as exc:
-            if "not found" in str(exc).lower() or "no active" in str(exc).lower():
+            message = _runtime_error_message(exc).lower()
+            if _is_thread_unavailable_error(exc) or "no active" in message:
                 return False
             raise
         return True
@@ -1033,7 +1051,7 @@ class CodexAppServerSessionManager:
                     include_turns=include_turns,
                 )
             except RuntimeError as exc:
-                if "not found" in str(exc).lower():
+                if _is_thread_unavailable_error(exc):
                     return None
                 raise
             thread = _thread_payload(_normalize_backend_thread_payload(result))
@@ -1043,8 +1061,8 @@ class CodexAppServerSessionManager:
         try:
             result = await self._client.read_thread(session_id, include_turns)
         except RuntimeError as exc:
-            message = str(exc).lower()
-            if "not found" in message:
+            message = _runtime_error_message(exc).lower()
+            if _is_thread_unavailable_error(exc):
                 return None
             if include_turns and "includeturns is unavailable" in message:
                 result = await self._client.read_thread(session_id, False)
