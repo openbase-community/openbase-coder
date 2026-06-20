@@ -76,3 +76,13 @@ def test_auth_print_machine_token_can_rotate(monkeypatch):
 
     assert result.exit_code == 0
     assert result.output == "obmt_rotated\n"
+
+
+def test_oauth_success_page_announces_success_and_returns_to_desktop():
+    html = auth_cli._oauth_success_html().decode("utf-8")
+
+    assert "Logged in successfully" in html
+    assert "Open the Mac app" in html
+    assert "openbase-coder://open?source=cli-auth&amp;intent=login-complete" in html
+    assert '"openbase-coder://open?source=cli-auth&intent=login-complete"' in html
+    assert "window.location.href" in html
