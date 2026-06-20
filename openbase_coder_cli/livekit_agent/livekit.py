@@ -2193,12 +2193,22 @@ class AnnouncerSpeechQueue:
         *,
         voice_id: str | None,
     ) -> AsyncIterator[rtc.AudioFrame]:
-        async with self._announcer_tts.synthesize_with_voice(
-            text,
-            voice_id=voice_id,
-        ) as stream:
-            async for event in stream:
+        # Use streaming synthesis (WebSocket) instead of non-streaming
+        # synthesize() (HTTP POST to /tts/bytes) because the Openbase Cloud
+        # audio proxy only supports the WebSocket path.
+        resolved_voice_id = self._announcer_tts.resolve_voice_id(voice_id)
+        tts_stream = self._announcer_tts._tts_for_voice(resolved_voice_id).stream()
+        spoken_text = format_for_speech(text)
+        if not spoken_text:
+            spoken_text = "Technical output omitted, shown on screen."
+        tts_stream.push_text(spoken_text)
+        tts_stream.flush()
+        tts_stream.end_input()
+        try:
+            async for event in tts_stream:
                 yield event.frame
+        finally:
+            await tts_stream.aclose()
 
     async def _play_audio(self, message: AnnouncerAudioMessage) -> None:
         started = time.monotonic()
