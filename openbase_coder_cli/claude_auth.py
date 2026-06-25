@@ -111,7 +111,7 @@ def run_claude_login(
     email: str | None = None,
 ) -> int:
     command = claude_command or shutil.which("claude") or "claude"
-    args = [command, "auth", "login", "--claudeai"]
+    args = [command, "auth", "login"]
     if sso:
         args.append("--sso")
     if email:
