@@ -13,11 +13,21 @@ from pathlib import Path
 
 import livekit.api as livekit_api
 from asgiref.sync import async_to_sync
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from openbase_coder_cli.config.cloud_audio import (
+    OpenbaseCloudAudioSubscriptionError,
+    ensure_openbase_cloud_audio_subscription,
+)
+from openbase_coder_cli.config.token_manager import (
+    DEFAULT_WEB_BACKEND_URL,
+    AuthLoginRequiredError,
+    AuthTransientError,
+)
 from openbase_coder_cli.dispatcher_config import (
     dispatcher_voice,
     selected_stt_provider_id,
@@ -734,6 +744,23 @@ def livekit_room_token(request):
             {
                 "detail": "A JWT-authenticated caller is required to start a LiveKit session."
             }
+        )
+
+    try:
+        ensure_openbase_cloud_audio_subscription(
+            tts_provider_id=selected_tts_provider_id(),
+            stt_provider_id=selected_stt_provider_id(),
+            web_backend_url=(
+                getattr(settings, "WEB_BACKEND_URL", "") or DEFAULT_WEB_BACKEND_URL
+            ).rstrip("/"),
+        )
+    except AuthLoginRequiredError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
+    except OpenbaseCloudAudioSubscriptionError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_402_PAYMENT_REQUIRED)
+    except AuthTransientError as exc:
+        return Response(
+            {"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
     room_name = input_serializer.validated_data.get("room_name")

@@ -59,6 +59,7 @@ def test_service_tier_settings_persists_config_and_env(monkeypatch, tmp_path: Pa
     env_file = tmp_path / ".env"
     env_file.write_text("KEEP_ME=1\nCODEX_SERVICE_TIER=fast\n", encoding="utf-8")
     monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
+    monkeypatch.setattr(dispatcher_config, "DEFAULT_ENV_FILE_PATH", env_file)
     monkeypatch.setattr(service_tier_settings, "DEFAULT_ENV_FILE_PATH", env_file)
 
     response = service_tier_settings.service_tier_settings(

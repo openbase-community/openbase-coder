@@ -125,7 +125,7 @@ SERVICES: list[ServiceDefinition] = [
             'mkdir -p "$CODEX_HOME"\n'
             'OPENBASE_CODING_BACKEND="${{OPENBASE_CODING_BACKEND:-codex}}"\n'
             'CODEX_MODEL_REASONING_EFFORT="${{CODEX_MODEL_REASONING_EFFORT:-high}}"\n'
-            'CODEX_SERVICE_TIER="${{CODEX_SERVICE_TIER:-fast}}"\n'
+            'CODEX_SERVICE_TIER="${{CODEX_SERVICE_TIER:-standard}}"\n'
             'if [ "$OPENBASE_CODING_BACKEND" = "openbase_cloud" ] || [ "$OPENBASE_CODING_BACKEND" = "openbase-cloud" ]; then\n'
             '    if [ -z "${{OPENBASE_CLOUD_CODEX_API_KEY:-}}" ]; then\n'
             '        if ! OPENBASE_CLOUD_CODEX_API_KEY="$({openbase_coder} auth print-machine-token)"; then\n'

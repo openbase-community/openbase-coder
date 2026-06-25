@@ -58,7 +58,7 @@ def test_codex_app_server_service_sets_model_defaults():
         'CODEX_MODEL_REASONING_EFFORT="${CODEX_MODEL_REASONING_EFFORT:-high}"'
         in command
     )
-    assert 'CODEX_SERVICE_TIER="${CODEX_SERVICE_TIER:-fast}"' in command
+    assert 'CODEX_SERVICE_TIER="${CODEX_SERVICE_TIER:-standard}"' in command
     assert '-c "model=\\"$CODEX_MODEL\\""' not in command
     assert '-c "model_reasoning_effort=\\"$CODEX_MODEL_REASONING_EFFORT\\""' in command
     assert '-c "service_tier=\\"$CODEX_SERVICE_TIER\\""' in command

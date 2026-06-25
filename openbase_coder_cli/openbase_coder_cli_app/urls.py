@@ -45,6 +45,8 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     plugin_console_registry,
     plugin_detail,
     plugins_list,
+    printing_press_catalog,
+    printing_press_install,
     project_reports,
     project_reports_action,
     project_reports_download,
@@ -153,6 +155,16 @@ urlpatterns = [
     ),
     path("skills/", skills_list, name="skills-list"),
     path("skills/symlink/", skills_symlink, name="skills-symlink"),
+    path(
+        "skills/printing-press/catalog/",
+        printing_press_catalog,
+        name="printing-press-catalog",
+    ),
+    path(
+        "skills/printing-press/install/",
+        printing_press_install,
+        name="printing-press-install",
+    ),
     path("skills/<path:skill_name>/", skill_detail, name="skill-detail"),
     path("plugins/", plugins_list, name="plugins-list"),
     path(

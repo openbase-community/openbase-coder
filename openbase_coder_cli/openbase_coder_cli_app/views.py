@@ -238,6 +238,18 @@ def skills_symlink(request):
 
 
 @csrf_exempt
+def printing_press_catalog(request):
+    _sync_skills_compat_globals()
+    return _skills.printing_press_catalog(request)
+
+
+@csrf_exempt
+def printing_press_install(request):
+    _sync_skills_compat_globals()
+    return _skills.printing_press_install(request)
+
+
+@csrf_exempt
 def skill_detail(request, skill_name):
     _sync_skills_compat_globals()
     return _skills.skill_detail(request, skill_name)
@@ -282,6 +294,8 @@ __all__ = [
     "plugin_console_registry",
     "plugin_detail",
     "plugins_list",
+    "printing_press_catalog",
+    "printing_press_install",
     "project_reports",
     "project_reports_action",
     "project_reports_download",

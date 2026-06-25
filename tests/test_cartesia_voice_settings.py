@@ -14,6 +14,9 @@ from rest_framework.test import APIRequestFactory, force_authenticate  # noqa: E
 django.setup()
 
 from openbase_coder_cli import dispatcher_config  # noqa: E402
+from openbase_coder_cli.config.cloud_audio import (  # noqa: E402
+    OpenbaseCloudAudioSubscriptionError,
+)
 from openbase_coder_cli.openbase_coder_cli_app import views  # noqa: E402
 from openbase_coder_cli.tts_providers import (  # noqa: E402
     KOKORO_PROVIDER_ID,
@@ -31,6 +34,24 @@ def _authenticated_request(method: str, path: str, data: dict | None = None):
     }[method]
     request = request_factory(path, data=data or {}, format="json")
     force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+    return request
+
+
+def _jwt_authenticated_request(method: str, path: str, data: dict | None = None):
+    factory = APIRequestFactory()
+    request_factory = {
+        "GET": factory.get,
+        "PUT": factory.put,
+        "POST": factory.post,
+    }[method]
+    request = request_factory(path, data=data or {}, format="json")
+    user = SimpleNamespace(
+        is_authenticated=True,
+        email="gabe@example.com",
+        pk=1,
+        get_full_name=lambda: "Gabe",
+    )
+    force_authenticate(request, user=user, token={"email": "gabe@example.com"})
     return request
 
 
@@ -351,3 +372,47 @@ def test_stt_settings_persists_openbase_cloud(monkeypatch, tmp_path: Path) -> No
     assert response.data["provider"] == "openbase_cloud"
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     assert payload["stt_provider"] == "openbase_cloud"
+
+
+def test_livekit_room_token_blocks_openbase_cloud_audio_without_subscription(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        views._livekit,
+        "_livekit_client_token_credentials",
+        lambda: ("livekit-client-key", "livekit-client-secret"),
+    )
+    monkeypatch.setattr(
+        views._livekit,
+        "selected_tts_provider_id",
+        lambda: "openbase_cloud",
+    )
+    monkeypatch.setattr(
+        views._livekit,
+        "selected_stt_provider_id",
+        lambda: "openbase_cloud",
+    )
+
+    def raise_subscription_error(**_kwargs):
+        raise OpenbaseCloudAudioSubscriptionError(
+            "Subscribe in Openbase Cloud to use managed audio."
+        )
+
+    monkeypatch.setattr(
+        views._livekit,
+        "ensure_openbase_cloud_audio_subscription",
+        raise_subscription_error,
+    )
+
+    response = views.livekit_room_token(
+        _jwt_authenticated_request(
+            "POST",
+            "/api/livekit-room-token/",
+            {"livekit_dispatch_agent_name": "livekit-agent"},
+        )
+    )
+
+    assert response.status_code == 402
+    assert (
+        response.data["detail"] == "Subscribe in Openbase Cloud to use managed audio."
+    )

@@ -78,6 +78,14 @@ def test_codex_service_tier_uses_config_before_env(tmp_path: Path, monkeypatch) 
     assert dispatcher_config.codex_service_tier(config_path) == "standard"
 
 
+def test_codex_service_tier_defaults_to_standard(tmp_path: Path, monkeypatch) -> None:
+    env_file = tmp_path / ".env"
+    monkeypatch.delenv("CODEX_SERVICE_TIER", raising=False)
+    monkeypatch.setattr(dispatcher_config, "DEFAULT_ENV_FILE_PATH", env_file)
+
+    assert dispatcher_config.codex_service_tier(tmp_path / "missing.json") == "standard"
+
+
 def test_set_codex_service_tier_persists_config(tmp_path: Path) -> None:
     config_path = tmp_path / "dispatcher-config.json"
 

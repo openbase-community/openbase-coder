@@ -194,6 +194,17 @@ def test_formatter_still_omits_structured_tool_and_json_output():
     )
 
 
+def test_formatter_omits_tool_failure_lines_before_safe_prose():
+    text = """setsummary failed because the command was unavailable.
+
+The current working directory is /Users/example."""
+
+    assert (
+        format_for_speech(text)
+        == "The current working directory is example in users. Technical output omitted, shown on screen."
+    )
+
+
 def test_formatter_truncates_after_speech_formatting():
     text = "- First API item.\n- Second TTS item.\n- Third STT item."
 

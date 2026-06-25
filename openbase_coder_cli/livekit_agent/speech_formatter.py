@@ -65,6 +65,10 @@ _TECHNICAL_OUTPUT_MARKER_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_TECHNICAL_OUTPUT_FAILURE_RE = re.compile(
+    r"\b(?:failed|unavailable|error|exception|timed out|not found)\b",
+    re.IGNORECASE,
+)
 _STRUCTURED_OUTPUT_RE = re.compile(r"[:={}\[\]<>]|(?:\b\w+_\w+\b)")
 
 
@@ -333,7 +337,11 @@ def _looks_like_technical_marker_line(line: str) -> bool:
         return False
     stripped = line.strip()
     words = len(stripped.split())
-    return words <= 4 or bool(_STRUCTURED_OUTPUT_RE.search(stripped))
+    return (
+        words <= 4
+        or bool(_STRUCTURED_OUTPUT_RE.search(stripped))
+        or bool(_TECHNICAL_OUTPUT_FAILURE_RE.search(stripped))
+    )
 
 
 def _humanize_inline(text: str) -> str:

@@ -151,7 +151,7 @@ def test_duplicate_prompt_joins_cancelled_pending_turn_start():
 
         async def _send_request(self, method, params):
             assert method == "turn/start"
-            assert params["serviceTier"] == "fast"
+            assert params["serviceTier"] == "standard"
             self.start_requests += 1
             self.started_event.set()
             await asyncio.sleep(0.01)
@@ -191,7 +191,7 @@ def test_run_turn_emits_dispatch_timing_logs(tmp_path: Path, caplog):
 
         async def _send_request(self, method, params):
             assert method == "turn/start"
-            assert params["serviceTier"] == "fast"
+            assert params["serviceTier"] == "standard"
             return {"turn": {"id": "turn-1"}}
 
     async def check():
@@ -226,7 +226,7 @@ def test_run_turn_emits_dispatch_timing_logs(tmp_path: Path, caplog):
         "reasoning_effort=app-server-default" in message for message in turn_start_logs
     )
     assert any("model=gpt-5.5" in message for message in turn_start_logs)
-    assert any("service_tier=fast" in message for message in turn_start_logs)
+    assert any("service_tier=standard" in message for message in turn_start_logs)
 
 
 def test_dispatcher_reasoning_config_applies_to_new_turns_without_restart(

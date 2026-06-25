@@ -54,7 +54,7 @@ What setup does:
 4. Maintains editable `~/.openbase/codex_home/AGENTS.md` and `~/.openbase/claude_config/CLAUDE.md` files, and links shared instruction files into `~/.openbase/instructions`.
 5. Symlinks bundled or workspace skills into both Openbase Codex and Claude config skill homes.
 6. Initializes the CLI workspace and LiveKit model downloads in dev-workspace mode.
-7. Writes Codex app-server defaults such as `CODEX_MODEL=gpt-5.5`, `CODEX_MODEL_REASONING_EFFORT=high`, `CODEX_SERVICE_TIER=fast`, `CODEX_APP_SERVER_URL`, and `LIVEKIT_CODEX_THREAD_CWD`.
+7. Writes Codex app-server defaults such as `CODEX_MODEL=gpt-5.5`, `CODEX_MODEL_REASONING_EFFORT=high`, `CODEX_SERVICE_TIER=standard`, `CODEX_APP_SERVER_URL`, and `LIVEKIT_CODEX_THREAD_CWD`.
 8. Uses the bundled console build, or builds `console` in dev-workspace mode.
 9. Installs background services — launchd on macOS, systemd user units on Linux (unless `--skip-services`).
 10. Configures Tailscale Serve routes for iOS access to the local CLI API and LiveKit:

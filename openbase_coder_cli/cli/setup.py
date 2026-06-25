@@ -1475,7 +1475,7 @@ def _ensure_env_file(
         f"CLAUDE_CONFIG_DIR={OPENBASE_CLAUDE_CONFIG_DIR}",
         f"SUPER_AGENTS_DEFAULT_CONFIG_PATH={CODEX_DISPATCHER_CONFIG_PATH}",
         "CODEX_MODEL_REASONING_EFFORT=high",
-        "CODEX_SERVICE_TIER=fast",
+        "CODEX_SERVICE_TIER=standard",
         "CODEX_APP_SERVER_URL=ws://127.0.0.1:4500",
         "LIVEKIT_CODEX_THREAD_CWD=~",
         "# Cartesia voice used by the LiveKit agent TTS.",

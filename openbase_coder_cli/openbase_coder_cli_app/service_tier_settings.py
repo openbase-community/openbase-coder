@@ -1,4 +1,4 @@
-"""Codex service tier settings API views."""
+"""Agent service tier settings API views."""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ SERVICE_TIER_OPTIONS = ("fast", "standard")
 SERVICE_TIER_DETAILS = {
     "fast": {
         "label": "Fast",
-        "summary": "Use the faster Codex service tier.",
+        "summary": "Use the faster service tier for Codex and the lower-effort lane for Claude.",
     },
     "standard": {
         "label": "Standard",
-        "summary": "Use the standard Codex service tier.",
+        "summary": "Use the standard Codex service tier and the higher-effort lane for Claude.",
     },
 }
 
@@ -47,7 +47,7 @@ def _service_tier_payload(*, changed: bool = False) -> dict:
 
 @api_view(["GET", "PUT"])
 def service_tier_settings(request):
-    """Read or update the Codex service tier used for new turns."""
+    """Read or update the agent service tier used for new turns."""
     if request.method == "GET":
         return Response(_service_tier_payload(), status=status.HTTP_200_OK)
 

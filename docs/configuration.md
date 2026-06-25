@@ -19,7 +19,7 @@ Openbase CLI reads configuration from environment variables (usually loaded from
 | `OPENBASE_CODER_CLI_CONSOLE_BUILD_DIR`    | No       | inferred from install config                     | Console dist directory                      |
 | `CODEX_MODEL`                             | No       | `gpt-5.5`                                        | Codex app-server model                      |
 | `CODEX_MODEL_REASONING_EFFORT`            | No       | `high`                                           | Codex app-server reasoning effort           |
-| `CODEX_SERVICE_TIER`                      | No       | `fast`                                           | Codex app-server service tier               |
+| `CODEX_SERVICE_TIER`                      | No       | `standard`                                       | Codex app-server service tier               |
 | `OPENBASE_CODING_BACKEND`                 | No       | `codex` from new setup env files                 | `codex`, `openbase_cloud`, or `claude_code` backend |
 | `OPENBASE_CODEX_BACKEND`                  | No       | none                                             | Legacy fallback for `OPENBASE_CODING_BACKEND` |
 | `OPENBASE_CLOUD_LLM_BASE_URL`             | No       | `<WEB_BACKEND_URL>/api/openbase/llm/openai/v1`   | Openbase Cloud Responses-compatible proxy base URL |

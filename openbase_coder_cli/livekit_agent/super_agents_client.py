@@ -67,7 +67,7 @@ class SuperAgentsLiveKitClient:
         approval_policy: str = "never",
         sandbox: str = "danger-full-access",
         model_name: str | None = None,
-        service_tier: str = "fast",
+        service_tier: str = "standard",
         dispatcher_config_path: str | Path | None = None,
         persist_thread: bool = True,
         initial_thread_id: str | None = None,
