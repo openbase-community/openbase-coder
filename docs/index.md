@@ -44,3 +44,4 @@ uvx --python 3.13 openbase-coder setup --dev-workspace
 - [iOS App](ios-tabs.md)
 - [Release](release.md)
 - [Troubleshooting](troubleshooting.md)
+- [Codebase Companion](codebase-companion/INDEX.md) — ramp-up guides, architecture notes, and learning path

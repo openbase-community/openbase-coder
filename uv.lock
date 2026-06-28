@@ -3170,7 +3170,7 @@ wheels = [
 
 [[package]]
 name = "super-agents"
-version = "0.1.2"
+version = "0.1.0"
 source = { editable = "../super-agents" }
 dependencies = [
     { name = "mcp" },

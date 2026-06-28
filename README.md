@@ -133,9 +133,20 @@ For source development without a persistent install, prefix commands with
 From this repository:
 
 ```bash
-uv sync --extra dev
+# One-shot: clone ../super-agents if needed, sync with Python 3.13
+./scripts/dev-sync.sh
+
 uv run openbase-coder --version
 uv run pytest
+```
+
+**Requirements:** Python **3.13** (not 3.14). Some dependencies (e.g. `spacy` via `kokoro`) only publish `cp313` wheels. The repo pins `requires-python = ">=3.13,<3.14"` and includes a `.python-version` file for `uv` and `pyenv`.
+
+Clone [super-agents](https://github.com/montaguegabe/super-agents) as a sibling repo (`../super-agents`) if you prefer manual setup:
+
+```bash
+git clone https://github.com/montaguegabe/super-agents.git ../super-agents
+uv sync --extra dev --python 3.13
 ```
 
 The CLI is part of the larger Openbase Coder multi-workspace. The public setup

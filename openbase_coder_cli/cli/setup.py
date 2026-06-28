@@ -1344,7 +1344,9 @@ def _init_cli_workspace(workspace_dir: str) -> None:
 
     # Create venv and install dependencies
     click.echo("  Running uv sync...")
-    subprocess.run([uv_bin, "sync"], cwd=str(cli_dir), check=True)
+    subprocess.run(
+        [uv_bin, "sync", "--python", "3.13"], cwd=str(cli_dir), check=True
+    )
 
     # Download LiveKit model files (STT, VAD, etc.)
     click.echo("  Downloading LiveKit model files...")
@@ -1352,6 +1354,8 @@ def _init_cli_workspace(workspace_dir: str) -> None:
         [
             uv_bin,
             "run",
+            "--python",
+            "3.13",
             "python",
             "-m",
             "openbase_coder_cli.livekit_agent.livekit",
