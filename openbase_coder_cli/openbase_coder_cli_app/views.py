@@ -27,6 +27,9 @@ from openbase_coder_cli.openbase_coder_cli_app import skills as _skills
 from openbase_coder_cli.openbase_coder_cli_app.approvals import (
     approval_request_detail,
     approval_requests,
+    skill_approval_request_consume,  # noqa: F401
+    skill_approval_request_detail,  # noqa: F401
+    skill_approval_requests,  # noqa: F401
 )
 from openbase_coder_cli.openbase_coder_cli_app.auth import (
     auth_logout,

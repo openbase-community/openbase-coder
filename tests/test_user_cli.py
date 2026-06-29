@@ -78,6 +78,102 @@ def test_user_say_posts_explicit_room(monkeypatch):
     ]
 
 
+def test_user_approval_request_waits_for_accept(monkeypatch):
+    calls = []
+    request_id = "skill-request-1"
+
+    def fake_request(method, url, **kwargs):
+        calls.append((method, url, kwargs.get("json")))
+        if url.endswith("/api/skill-approval-requests/"):
+            return httpx.Response(201, json={"request": {"id": request_id}})
+        if url.endswith(f"/api/skill-approval-requests/{request_id}/"):
+            return httpx.Response(
+                200,
+                json={"request": None, "decision": {"decision": "accept"}},
+            )
+        if url.endswith(f"/api/skill-approval-requests/{request_id}/consume/"):
+            return httpx.Response(
+                200,
+                json={"decision": {"decision": "accept", "accepted": True}},
+            )
+        raise AssertionError(f"unexpected URL: {url}")
+
+    patch_local_server_request(monkeypatch, fake_request)
+
+    result = CliRunner().invoke(
+        user_cli.user,
+        [
+            "approval",
+            "request",
+            "--skill",
+            "whatsapp-cli",
+            "--action",
+            "send-message",
+            "--description",
+            "Queue a WhatsApp message",
+            "--command",
+            "whatsapp-local send contact hello",
+            "--detail",
+            "contact=contact",
+            "--timeout",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Approval accepted." in result.output
+    assert calls[0] == (
+        "POST",
+        "http://127.0.0.1:7999/api/skill-approval-requests/",
+        {
+            "skill": "whatsapp-cli",
+            "action": "send-message",
+            "description": "Queue a WhatsApp message",
+            "details": {"contact": "contact"},
+            "timeout_seconds": 1.0,
+            "command": "whatsapp-local send contact hello",
+        },
+    )
+
+
+def test_user_approval_request_decline_exits_nonzero(monkeypatch):
+    request_id = "skill-request-1"
+
+    def fake_request(method, url, **kwargs):
+        if url.endswith("/api/skill-approval-requests/"):
+            return httpx.Response(201, json={"request": {"id": request_id}})
+        if url.endswith(f"/api/skill-approval-requests/{request_id}/"):
+            return httpx.Response(
+                200,
+                json={"request": None, "decision": {"decision": "decline"}},
+            )
+        if url.endswith(f"/api/skill-approval-requests/{request_id}/consume/"):
+            return httpx.Response(
+                200,
+                json={"decision": {"decision": "decline", "accepted": False}},
+            )
+        raise AssertionError(f"unexpected URL: {url}")
+
+    patch_local_server_request(monkeypatch, fake_request)
+
+    result = CliRunner().invoke(
+        user_cli.user,
+        [
+            "approval",
+            "request",
+            "--skill",
+            "whatsapp-cli",
+            "--action",
+            "send-message",
+            "--description",
+            "Queue a WhatsApp message",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Approval decline." in result.output
+
+
 def test_user_say_accepts_explicit_dispatcher(monkeypatch):
     calls = []
 

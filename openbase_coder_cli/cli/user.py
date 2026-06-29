@@ -19,6 +19,7 @@ from openbase_coder_cli.livekit_announcer import (
     SUPPORTED_AUDIO_EXTENSIONS,
 )
 from openbase_coder_cli.paths import OPENBASE_SOUNDS_DIR
+from openbase_coder_cli.skill_approvals import request_approval
 
 
 @click.group()
@@ -90,6 +91,66 @@ def play(sound_or_path: str, room_name: str) -> None:
     data = response.json()
     target_room = data.get("room_name") or "active room"
     click.echo(f"Audio playback sent to {target_room}.")
+
+
+@user.group("approval")
+def approval() -> None:
+    """Request and answer user approvals."""
+
+
+@approval.command("request")
+@click.option("--skill", required=True, help="Skill name requesting approval.")
+@click.option("--action", required=True, help="Action that needs approval.")
+@click.option("--description", required=True, help="Human-readable approval prompt.")
+@click.option("--command", "command_text", default="", help="Command being gated.")
+@click.option(
+    "--detail",
+    "detail_items",
+    multiple=True,
+    help="Additional context as KEY=VALUE. May be repeated.",
+)
+@click.option("--timeout", "timeout_seconds", default=300.0, show_default=True)
+@click.option("--poll-interval", default=1.0, show_default=True)
+def approval_request(
+    skill: str,
+    action: str,
+    description: str,
+    command_text: str,
+    detail_items: tuple[str, ...],
+    timeout_seconds: float,
+    poll_interval: float,
+) -> None:
+    """Ask Gabe to approve a skill action and wait for the answer."""
+    details = _parse_approval_details(detail_items)
+    decision = request_approval(
+        skill=skill,
+        action=action,
+        description=description,
+        details=details,
+        command=command_text.strip() or None,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval,
+    )
+    decision_value = decision.get("decision")
+    if decision.get("accepted"):
+        click.echo("Approval accepted.")
+        return
+    if decision_value == "timeout":
+        raise click.ClickException("Approval timed out.")
+    raise click.ClickException(f"Approval {decision_value}.")
+
+
+def _parse_approval_details(detail_items: tuple[str, ...]) -> dict[str, str]:
+    details: dict[str, str] = {}
+    for item in detail_items:
+        if "=" not in item:
+            raise click.ClickException("--detail values must use KEY=VALUE.")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise click.ClickException("--detail keys cannot be blank.")
+        details[key] = value.strip()
+    return details
 
 
 def resolve_sound_path(sound_or_path: str) -> Path:
