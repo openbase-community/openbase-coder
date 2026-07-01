@@ -42,5 +42,6 @@ uvx --python 3.13 openbase-coder setup --dev-workspace
 - [Configuration](configuration.md)
 - [Files and Paths](files-and-paths.md)
 - [iOS App](ios-tabs.md)
+- [Voice Routing](voice-routing.md)
 - [Release](release.md)
 - [Troubleshooting](troubleshooting.md)

@@ -38,6 +38,9 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Syncthing conflict copies
+*.sync-conflict-*
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

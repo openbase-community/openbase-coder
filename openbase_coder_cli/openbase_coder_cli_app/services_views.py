@@ -13,6 +13,9 @@ from rest_framework import serializers, status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from openbase_coder_cli.codex_home_instructions import (
+    refresh_openbase_instruction_files_from_installation,
+)
 from openbase_coder_cli.mcp.thread_exchange import (
     ThreadConflictResolutionError,
     resolve_thread_snapshot_conflict,
@@ -21,7 +24,10 @@ from openbase_coder_cli.mcp.thread_exchange import (
 )
 from openbase_coder_cli.openbase_coder_cli_app.common import _auth_debug_value
 from openbase_coder_cli.services.console_settings import (
+    DEFAULT_DANGEROUS_CONFIRMATION_PHRASE,
+    get_dangerous_confirmation_phrase,
     get_ignored_launchctl_labels,
+    set_dangerous_confirmation_phrase,
     set_ignored_launchctl_labels,
 )
 from openbase_coder_cli.services.definitions import SERVICES
@@ -71,6 +77,21 @@ class IgnoredLaunchctlLabelsSerializer(serializers.Serializer):
     )
 
 
+class DangerousConfirmationSettingsSerializer(serializers.Serializer):
+    dangerous_confirmation_phrase = serializers.CharField(
+        allow_blank=False,
+        trim_whitespace=True,
+    )
+
+
+def _dangerous_confirmation_settings_payload(*, refreshed: bool = False) -> dict:
+    return {
+        "dangerous_confirmation_phrase": get_dangerous_confirmation_phrase(),
+        "default_dangerous_confirmation_phrase": DEFAULT_DANGEROUS_CONFIRMATION_PHRASE,
+        "refreshed": refreshed,
+    }
+
+
 @api_view(["GET"])
 def launchctl_services_list(request):
     """List user LaunchAgents with current launchctl runtime state."""
@@ -89,6 +110,26 @@ def launchctl_ignored_settings(request):
         serializer.validated_data["ignored_labels"]
     )
     return Response({"ignored_labels": ignored_labels})
+
+
+@api_view(["GET", "PATCH"])
+def dangerous_confirmation_settings(request):
+    """Read or update the exact phrase required for risky operations."""
+    if request.method == "GET":
+        return Response(_dangerous_confirmation_settings_payload())
+
+    serializer = DangerousConfirmationSettingsSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    phrase = set_dangerous_confirmation_phrase(
+        serializer.validated_data["dangerous_confirmation_phrase"]
+    )
+    refreshed = refresh_openbase_instruction_files_from_installation()
+    return Response(
+        {
+            **_dangerous_confirmation_settings_payload(refreshed=refreshed),
+            "dangerous_confirmation_phrase": phrase,
+        }
+    )
 
 
 @api_view(["POST"])

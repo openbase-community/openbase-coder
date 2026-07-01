@@ -47,6 +47,7 @@ from openbase_coder_cli.openbase_coder_cli_app.diagnostics import (
 from openbase_coder_cli.openbase_coder_cli_app.env_settings import env_settings
 from openbase_coder_cli.openbase_coder_cli_app.ios_app_control import ios_app_control
 from openbase_coder_cli.openbase_coder_cli_app.livekit import (
+    apple_music_playback_entitlement,
     livekit_room_token,
     livekit_voice_route,
     livekit_voice_route_exit,

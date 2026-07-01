@@ -289,10 +289,82 @@ def test_recent_projects_get_returns_paginated_lazy_metadata(monkeypatch) -> Non
     assert response.data["next"] == "/api/projects/recent/?page_size=2&page=2"
     assert response.data["previous"] is None
     assert response.data["projects"] == [
-        {"path": "/tmp/project-1", "git_status": "unknown", "stack": None},
-        {"path": "/tmp/project-2", "git_status": "unknown", "stack": None},
+        {
+            "path": "/tmp/project-1",
+            "git_status": "unknown",
+            "stack": None,
+            "worktrees": [],
+        },
+        {
+            "path": "/tmp/project-2",
+            "git_status": "unknown",
+            "stack": None,
+            "worktrees": [],
+        },
     ]
     assert scheduled == [["/tmp/project-1", "/tmp/project-2"]]
+
+
+def test_recent_projects_get_derives_multi_worktree_children(
+    tmp_path: Path, monkeypatch
+) -> None:
+    os.environ.setdefault("OPENBASE_CODER_CLI_SECRET_KEY", "test-secret")
+    os.environ.setdefault(
+        "DJANGO_SETTINGS_MODULE", "openbase_coder_cli.config.settings"
+    )
+
+    import django
+    from rest_framework.test import APIRequestFactory, force_authenticate
+
+    django.setup()
+
+    from openbase_coder_cli.openbase_coder_cli_app import projects as project_views
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "multi.json").write_text("{}", encoding="utf-8")
+    worktrees = tmp_path / "workspace-worktrees"
+    worktree = worktrees / "feature-a"
+    worktree.mkdir(parents=True)
+    (worktree / "multi.json").write_text("{}", encoding="utf-8")
+    ignored = worktrees / "notes"
+    ignored.mkdir()
+
+    scheduled: list[list[str]] = []
+    monkeypatch.setattr(
+        project_views,
+        "_get_cached_recent_projects",
+        lambda: [{"path": str(workspace)}],
+    )
+    monkeypatch.setattr(
+        project_views,
+        "_schedule_project_metadata_refresh",
+        lambda paths: scheduled.append(paths),
+    )
+    monkeypatch.setattr(project_views, "_cached_metadata", lambda _: None)
+
+    factory = APIRequestFactory()
+    request = factory.get("/api/projects/recent/")
+    force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+    response = project_views.recent_projects(request)
+
+    assert response.status_code == 200
+    assert response.data["projects"] == [
+        {
+            "path": str(workspace),
+            "git_status": "unknown",
+            "stack": None,
+            "worktrees": [
+                {
+                    "path": str(worktree.resolve()),
+                    "source": "worktree",
+                    "git_status": "unknown",
+                    "stack": None,
+                }
+            ],
+        }
+    ]
+    assert scheduled == [[str(workspace), str(worktree.resolve())]]
 
 
 def test_project_status_returns_fresh_metadata(monkeypatch) -> None:

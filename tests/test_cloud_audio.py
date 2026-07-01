@@ -63,6 +63,46 @@ def test_openbase_cloud_audio_check_requires_active_subscription(monkeypatch):
     assert "Subscribe in Openbase Cloud" in message
 
 
+def test_openbase_cloud_subscription_entitlement_allows_paid_feature(monkeypatch):
+    monkeypatch.setattr(
+        cloud_audio,
+        "get_token_manager",
+        lambda web_backend_url: FakeTokenManager(),
+    )
+    response = usage_response(
+        monthly_limit_cents=100,
+        cartesia_remaining_cents=100,
+        assemblyai_remaining_cents=100,
+    )
+
+    with mock.patch.object(httpx, "get", return_value=response):
+        entitlement = cloud_audio.openbase_cloud_subscription_entitlement(
+            web_backend_url="https://backend.example",
+        )
+
+    assert entitlement == {
+        "has_active_subscription": True,
+        "detail": "",
+    }
+
+
+def test_openbase_cloud_subscription_entitlement_locks_without_subscription(monkeypatch):
+    monkeypatch.setattr(
+        cloud_audio,
+        "get_token_manager",
+        lambda web_backend_url: FakeTokenManager(),
+    )
+    response = usage_response(monthly_limit_cents=0)
+
+    with mock.patch.object(httpx, "get", return_value=response):
+        entitlement = cloud_audio.openbase_cloud_subscription_entitlement(
+            web_backend_url="https://backend.example",
+        )
+
+    assert entitlement["has_active_subscription"] is False
+    assert "Apple Music playback requires" in entitlement["detail"]
+
+
 def test_openbase_cloud_audio_check_rejects_exhausted_selected_provider(monkeypatch):
     monkeypatch.setattr(
         cloud_audio,

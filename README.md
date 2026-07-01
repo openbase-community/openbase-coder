@@ -126,6 +126,7 @@ For source development without a persistent install, prefix commands with
 - [Configuration](docs/configuration.md)
 - [Files and Paths](docs/files-and-paths.md)
 - [iOS App](docs/ios-tabs.md)
+- [Voice Routing](docs/voice-routing.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
 ## Development

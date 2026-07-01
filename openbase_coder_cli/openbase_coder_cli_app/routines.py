@@ -24,6 +24,14 @@ class RoutineSerializer(serializers.Serializer):
         trim_whitespace=True,
         max_length=5,
     )
+    scheduleType = serializers.ChoiceField(
+        choices=["daily", "interval"],
+        required=False,
+    )
+    intervalSeconds = serializers.IntegerField(
+        required=False,
+        min_value=5,
+    )
     timezone = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -43,6 +51,7 @@ class RoutineSerializer(serializers.Serializer):
         trim_whitespace=True,
         max_length=256,
     )
+    freshThreadPerRun = serializers.BooleanField(required=False)
     cwd = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -96,14 +105,30 @@ class RoutineSerializer(serializers.Serializer):
             raise serializers.ValidationError("Use HH:MM in 24-hour time.")
         return f"{hour:02d}:{minute:02d}"
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs.get("intervalSeconds") is not None and attrs.get("scheduleType") is None:
+            attrs["scheduleType"] = "interval"
+        return attrs
+
 
 class RoutineCreateSerializer(RoutineSerializer):
     prompt = serializers.CharField(allow_blank=False, trim_whitespace=False)
     time = serializers.CharField(
+        required=False,
         allow_blank=False,
         trim_whitespace=True,
         max_length=5,
     )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        schedule_type = attrs.get("scheduleType") or "daily"
+        if schedule_type == "daily" and not attrs.get("time"):
+            raise serializers.ValidationError({"time": "Daily routines require a time."})
+        if schedule_type == "interval":
+            attrs.setdefault("intervalSeconds", 60)
+        return attrs
 
 
 class RoutinesRunDueSerializer(serializers.Serializer):

@@ -22,6 +22,7 @@ from rest_framework.response import Response
 from openbase_coder_cli.config.cloud_audio import (
     OpenbaseCloudAudioSubscriptionError,
     ensure_openbase_cloud_audio_subscription,
+    openbase_cloud_subscription_entitlement,
 )
 from openbase_coder_cli.config.token_manager import (
     DEFAULT_WEB_BACKEND_URL,
@@ -812,6 +813,41 @@ def livekit_room_token(request):
     )
 
     return Response({"token": token, "room_name": room_name})
+
+
+@api_view(["GET"])
+def apple_music_playback_entitlement(request):
+    """Return whether the caller can use paid Apple Music playback."""
+    try:
+        entitlement = openbase_cloud_subscription_entitlement(
+            web_backend_url=(
+                getattr(settings, "WEB_BACKEND_URL", "") or DEFAULT_WEB_BACKEND_URL
+            ).rstrip("/"),
+        )
+    except AuthLoginRequiredError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
+    except OpenbaseCloudAudioSubscriptionError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_402_PAYMENT_REQUIRED)
+    except AuthTransientError as exc:
+        return Response(
+            {"detail": str(exc)},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    status_code = (
+        status.HTTP_200_OK
+        if entitlement["has_active_subscription"]
+        else status.HTTP_402_PAYMENT_REQUIRED
+    )
+    return Response(
+        {
+            "feature": "apple_music_playback",
+            "available": bool(entitlement["has_active_subscription"]),
+            "requires_subscription": True,
+            "detail": entitlement["detail"],
+        },
+        status=status_code,
+    )
 
 
 async def _resolve_companion_target_room(room_name: str | None):

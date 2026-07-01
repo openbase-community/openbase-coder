@@ -24,6 +24,14 @@ PRINTING_PRESS_SKILL_URL_TEMPLATE = (
     "cli-skills/pp-{name}/SKILL.md"
 )
 PRINTING_PRESS_TARGET_SCOPES = {"home", "voice_coder", "claude"}
+GLOBAL_SKILL_SCOPES = {
+    "home",
+    "normal_codex",
+    "voice_coder",
+    "openbase_codex",
+    "claude",
+    "openbase_claude",
+}
 PRINTING_PRESS_SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 PRINTING_PRESS_REGISTRY_CACHE_SECONDS = 300
 _PRINTING_PRESS_REGISTRY_CACHE: dict | None = None
@@ -418,8 +426,7 @@ def skills_symlink(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    allowed_scopes = {"home", "normal_codex", "voice_coder", "openbase_codex"}
-    if source_scope not in allowed_scopes or target_scope not in allowed_scopes:
+    if source_scope not in GLOBAL_SKILL_SCOPES or target_scope not in GLOBAL_SKILL_SCOPES:
         return Response(
             {"error": "invalid skill scope"},
             status=status.HTTP_400_BAD_REQUEST,

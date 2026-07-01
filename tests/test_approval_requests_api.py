@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ os.environ.setdefault("OPENBASE_CODER_CLI_SECRET_KEY", "test-secret")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "openbase_coder_cli.config.settings")
 
 import django  # noqa: E402
+from django.test import Client  # noqa: E402
 from rest_framework.test import APIRequestFactory, force_authenticate  # noqa: E402
 
 django.setup()
@@ -92,3 +94,58 @@ def test_answer_request_falls_back_to_codex_manager(monkeypatch):
 
     assert response.status_code == 200
     assert manager.answered == [("codex-1", "accept")]
+
+
+def test_skill_approval_request_api_allows_authenticated_local_post_without_csrf_token(
+    monkeypatch,
+):
+    captured = {}
+
+    def fake_authenticate(self, request):
+        return (SimpleNamespace(is_authenticated=True), {"sub": "user-1"})
+
+    def fake_create_skill_approval_request(**kwargs):
+        captured.update(kwargs)
+        return {
+            "id": "skill-approval-1",
+            "method": APPROVAL_METHOD,
+            "params": {
+                "source": "skill",
+                "skill": kwargs["skill"],
+                "action": kwargs["action"],
+                "description": kwargs["description"],
+            },
+            "received_at": "2026-01-01T00:00:00Z",
+        }
+
+    monkeypatch.setattr(
+        "openbase_coder_cli.config.authentication.JWTAuthentication.authenticate",
+        fake_authenticate,
+    )
+    monkeypatch.setattr(
+        approvals,
+        "create_skill_approval_request",
+        fake_create_skill_approval_request,
+    )
+
+    client = Client(enforce_csrf_checks=True)
+    response = client.post(
+        "/api/skill-approval-requests/",
+        data=json.dumps(
+            {
+                "skill": "whatsapp-cli",
+                "action": "approve-contact",
+                "description": "Approve WhatsApp contact",
+                "details": {"contact_id": "207829222858962@lid"},
+                "timeout_seconds": 300,
+            }
+        ),
+        content_type="application/json",
+        HTTP_AUTHORIZATION="Bearer jwt.token.value",
+        HTTP_HOST="localhost",
+    )
+
+    assert response.status_code == 201
+    assert response.json()["request"]["id"] == "skill-approval-1"
+    assert captured["skill"] == "whatsapp-cli"
+    assert captured["details"] == {"contact_id": "207829222858962@lid"}

@@ -408,6 +408,23 @@ def test_answer_approval_request_queues_shared_decision_for_external_owner(
     assert '"decision": "decline"' in approvals_path.read_text(encoding="utf-8")
 
 
+def test_list_approval_requests_hides_requests_with_queued_decisions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    approvals_path = tmp_path / "approvals.json"
+    approvals_path.write_text(
+        '{"requests":{"approval-1":{"id":"approval-1","method":"exec/requestApproval","params":{}}},"decisions":{"approval-1":{"decision":"accept"}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SUPER_AGENTS_APPROVAL_REQUESTS_FILE", str(approvals_path))
+    client = FakeSuperAgentsClient({"pending_permission_requests": [[]]})
+
+    requests = asyncio.run(_manager(client).list_approval_requests())
+
+    assert requests == []
+
+
 def test_routine_methods_delegate_to_super_agents_client() -> None:
     client = FakeSuperAgentsClient(
         {
@@ -826,6 +843,49 @@ def test_read_thread_uses_claude_code_active_turn_id(tmp_path: Path) -> None:
     assert thread.current_run is not None
     assert thread.current_run.run_id == "t_active"
     assert thread.current_run.message == "actual active prompt"
+
+
+def test_read_thread_exposes_stale_active_turn_warning(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    client = FakeBackendSessionClient(
+        {
+            "read_by_label": [
+                {
+                    "threadId": "s_dispatcher",
+                    "backend": "codex",
+                    "session": {
+                        "id": "s_dispatcher",
+                        "name": "dispatcher",
+                        "cwd": str(project_dir),
+                        "status": "unknown",
+                        "activeTurnId": "t_orphan",
+                        "statusWarning": "stale_active_turn",
+                        "isLikelyStale": True,
+                        "createdAt": "2026-06-30T22:00:00.000Z",
+                        "updatedAt": "2026-06-30T22:15:00.000Z",
+                    },
+                    "turns": [
+                        {
+                            "turnId": "t_orphan",
+                            "promptPreview": "hey are you there",
+                            "status": "running",
+                            "createdAt": "2026-06-30T22:13:13.000Z",
+                        },
+                    ],
+                }
+            ]
+        }
+    )
+
+    thread = asyncio.run(_manager(client).get_thread_state("s_dispatcher"))
+
+    assert thread is not None
+    assert thread.status == "idle"
+    assert thread.current_run is None
+    assert thread.is_likely_stale is True
+    assert thread.status_warning == "stale_active_turn"
+    assert [turn.run_id for turn in thread.run_history] == ["t_orphan"]
 
 
 def test_create_session_includes_super_agent_instructions_for_backend_sessions(

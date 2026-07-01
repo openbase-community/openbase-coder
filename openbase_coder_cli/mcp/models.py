@@ -46,6 +46,8 @@ class ThreadInfo(BaseModel):
     agent_name: str | None = Field(default=None, serialization_alias="agent_name")
     title: str | None = None
     preview: str | None = None
+    is_likely_stale: bool = False
+    status_warning: str | None = None
     session_type: Literal["codex"] = Field(default="codex", exclude=True)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

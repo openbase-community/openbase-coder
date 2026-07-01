@@ -13,7 +13,11 @@ from rest_framework.test import APIRequestFactory, force_authenticate  # noqa: E
 
 django.setup()
 
-from openbase_coder_cli.openbase_coder_cli_app import reports as report_views, views  # noqa: E402,I001
+from openbase_coder_cli import reports_service  # noqa: E402,I001
+from openbase_coder_cli.openbase_coder_cli_app import (  # noqa: E402
+    reports as report_views,
+    views,
+)
 
 
 def _delete_report(project_path: Path, relative_path: str):
@@ -101,9 +105,9 @@ def test_global_reports_projects_lists_untracked_report_sources(
         reports.mkdir(parents=True)
         (reports / report_name).write_text("done", encoding="utf-8")
 
-    monkeypatch.setattr(report_views, "CODEX_HOME_DIR", openbase_codex_home)
-    monkeypatch.setattr(report_views, "NORMAL_CODEX_HOME_DIR", normal_codex_home)
-    monkeypatch.setattr(report_views, "HOME_REPORTS_PROJECT_DIR", home)
+    monkeypatch.setattr(reports_service, "CODEX_HOME_DIR", openbase_codex_home)
+    monkeypatch.setattr(reports_service, "NORMAL_CODEX_HOME_DIR", normal_codex_home)
+    monkeypatch.setattr(reports_service, "HOME_REPORTS_PROJECT_DIR", home)
 
     response = _get_global_reports_projects()
 
@@ -131,9 +135,9 @@ def test_global_reports_projects_skips_missing_reports_dirs(
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(report_views, "CODEX_HOME_DIR", openbase_codex_home)
-    monkeypatch.setattr(report_views, "NORMAL_CODEX_HOME_DIR", normal_codex_home)
-    monkeypatch.setattr(report_views, "HOME_REPORTS_PROJECT_DIR", home)
+    monkeypatch.setattr(reports_service, "CODEX_HOME_DIR", openbase_codex_home)
+    monkeypatch.setattr(reports_service, "NORMAL_CODEX_HOME_DIR", normal_codex_home)
+    monkeypatch.setattr(reports_service, "HOME_REPORTS_PROJECT_DIR", home)
 
     response = _get_global_reports_projects()
 
@@ -160,16 +164,16 @@ def test_all_project_reports_lists_recent_and_global_reports(
         (reports / report_name).write_text("done", encoding="utf-8")
 
     monkeypatch.setattr(
-        report_views,
+        reports_service,
         "_get_recent_projects",
         lambda: [
             {"path": str(recent_project), "name": "Recent"},
             {"path": str(duplicate_global_project), "name": "Duplicate"},
         ],
     )
-    monkeypatch.setattr(report_views, "CODEX_HOME_DIR", global_project)
-    monkeypatch.setattr(report_views, "NORMAL_CODEX_HOME_DIR", duplicate_global_project)
-    monkeypatch.setattr(report_views, "HOME_REPORTS_PROJECT_DIR", tmp_path / "missing")
+    monkeypatch.setattr(reports_service, "CODEX_HOME_DIR", global_project)
+    monkeypatch.setattr(reports_service, "NORMAL_CODEX_HOME_DIR", duplicate_global_project)
+    monkeypatch.setattr(reports_service, "HOME_REPORTS_PROJECT_DIR", tmp_path / "missing")
 
     response = _get_all_project_reports()
 

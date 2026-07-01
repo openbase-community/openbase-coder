@@ -1197,6 +1197,11 @@ class CodexAppServerSessionManager:
         raw_status = _thread_status(thread.get("status"))
         uses_backend_active_turn_id = _is_backend_thread_payload(thread)
         name = extract_thread_name(thread)
+        status_warning = _optional_thread_string(
+            thread,
+            "statusWarning",
+            "status_warning",
+        )
         session = SessionInfo(
             session_id=thread_id,
             directory=extract_thread_cwd(thread) or "",
@@ -1204,6 +1209,10 @@ class CodexAppServerSessionManager:
             agent_name=_optional_thread_string(thread, "agentName", "agent_name"),
             title=_optional_thread_string(thread, "title", "summary"),
             preview=_optional_thread_string(thread, "preview", "description"),
+            is_likely_stale=bool(
+                thread.get("isLikelyStale") or thread.get("is_likely_stale")
+            ),
+            status_warning=status_warning,
             session_type="codex",
             created_at=_timestamp_to_datetime(thread.get("createdAt")),
             updated_at=_timestamp_to_datetime(
@@ -1232,6 +1241,9 @@ class CodexAppServerSessionManager:
             )
             is_active_run = run.status in {SessionStatus.running, SessionStatus.waiting}
             if uses_backend_active_turn_id and is_active_run and turn_id != active_turn_id:
+                continue
+            if status_warning == "stale_active_turn" and is_active_run:
+                run_history.append(run)
                 continue
             if is_active_run:
                 current_run = run

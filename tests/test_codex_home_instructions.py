@@ -65,6 +65,59 @@ def test_ensure_openbase_agents_md_demotes_generated_h2s(tmp_path) -> None:
     assert "### Repo Section" in content.splitlines()
 
 
+def test_ensure_openbase_agents_md_interpolates_confirmation_phrase(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = workspace / "instructions" / "AGENTS.md"
+    codex_home = tmp_path / "codex_home"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        '- Require "{dangerous_confirmation_phrase}" before publishing.\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "openbase_coder_cli.instruction_templates.get_dangerous_confirmation_phrase",
+        lambda: "ship it",
+    )
+
+    codex_home_instructions.ensure_openbase_agents_md(
+        workspace,
+        codex_home_dir=codex_home,
+    )
+
+    content = (codex_home / "AGENTS.md").read_text(encoding="utf-8")
+    assert '"ship it"' in content
+    assert "{dangerous_confirmation_phrase}" not in content
+
+
+def test_ensure_rendered_instruction_file_updates_managed_template(
+    tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "instructions" / "SUPER_AGENT_INSTRUCTIONS.md"
+    target = tmp_path / "openbase" / "instructions" / "SUPER_AGENT_INSTRUCTIONS.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        'Requires "{dangerous_confirmation_phrase}" first.\n',
+        encoding="utf-8",
+    )
+    target.parent.mkdir(parents=True)
+    target.write_text('Requires "yes, proceed" first.\n', encoding="utf-8")
+    monkeypatch.setattr(
+        "openbase_coder_cli.instruction_templates.get_dangerous_confirmation_phrase",
+        lambda: "ship it",
+    )
+
+    changed = codex_home_instructions.ensure_rendered_instruction_file(
+        source,
+        target,
+        document_label="Super Agent instructions",
+    )
+
+    assert changed is True
+    assert target.read_text(encoding="utf-8") == 'Requires "ship it" first.\n'
+
+
 def test_refresh_openbase_agents_md_from_installation_uses_saved_workspace(
     tmp_path, monkeypatch
 ) -> None:

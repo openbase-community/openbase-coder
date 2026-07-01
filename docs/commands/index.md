@@ -29,6 +29,7 @@ openbase-coder [OPTIONS] COMMAND [ARGS]
 | [`logout`](logout.md) | Remove saved auth tokens |
 | [`plugins`](plugins.md) | Install and manage Openbase plugins |
 | [`bootstrap`](bootstrap.md) | Run plugin-provided bootstrap commands |
+| [`voice routing`](../voice-routing.md) | Route the active LiveKit voice room between the dispatcher and Super Agents |
 
 ## Common Examples
 
@@ -47,6 +48,11 @@ openbase-coder backend use codex
 
 # Restart Openbase-managed services
 openbase-coder restart
+
+# Check or change the active voice route
+openbase-coder user voice-route
+openbase-coder user transfer-to-agent "Lucy"
+openbase-coder exit-to-dispatch
 
 # Tail logs for one service
 openbase-coder services logs django-cli

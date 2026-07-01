@@ -103,6 +103,36 @@ def test_skills_symlink_links_normal_skill_to_openbase_codex(
     assert (target_dir / "SKILL.md").read_text(encoding="utf-8") == "instructions"
 
 
+def test_skills_symlink_links_normal_skill_to_openbase_claude(
+    tmp_path: Path, monkeypatch
+):
+    normal_home = tmp_path / "normal-codex"
+    openbase_home = tmp_path / "openbase-codex"
+    claude_home = tmp_path / "openbase-claude"
+    source_dir = _write_skill(normal_home, "shared-skill")
+
+    _patch_skill_homes(monkeypatch, normal_home, openbase_home, claude_home)
+
+    response = views.skills_symlink(
+        _request(
+            "post",
+            "/api/skills/symlink/",
+            {
+                "name": "shared-skill",
+                "source_scope": "home",
+                "target_scope": "claude",
+            },
+        )
+    )
+
+    target_dir = claude_home / "skills" / "shared-skill"
+    assert response.status_code == 201
+    assert response.data["created"] is True
+    assert response.data["target_scope"] == "claude"
+    assert target_dir.is_symlink()
+    assert target_dir.resolve() == source_dir.resolve()
+
+
 def test_skills_symlink_returns_ok_when_link_already_exists(
     tmp_path: Path, monkeypatch
 ):

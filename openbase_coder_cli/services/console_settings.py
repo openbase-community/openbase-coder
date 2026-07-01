@@ -5,6 +5,8 @@ from pathlib import Path
 
 from openbase_coder_cli.paths import CONSOLE_SETTINGS_JSON_PATH
 
+DEFAULT_DANGEROUS_CONFIRMATION_PHRASE = "yes, proceed"
+
 
 def get_ignored_launchctl_labels() -> list[str]:
     data = _read_settings()
@@ -22,6 +24,24 @@ def set_ignored_launchctl_labels(labels: list[str]) -> list[str]:
     )
     data = _read_settings()
     data["ignored_launchctl_labels"] = normalized
+    _write_settings(data)
+    return normalized
+
+
+def get_dangerous_confirmation_phrase() -> str:
+    data = _read_settings()
+    phrase = data.get("dangerous_confirmation_phrase")
+    if not isinstance(phrase, str) or not phrase.strip():
+        return DEFAULT_DANGEROUS_CONFIRMATION_PHRASE
+    return phrase.strip()
+
+
+def set_dangerous_confirmation_phrase(phrase: str) -> str:
+    normalized = phrase.strip()
+    if not normalized:
+        raise ValueError("Dangerous confirmation phrase cannot be blank.")
+    data = _read_settings()
+    data["dangerous_confirmation_phrase"] = normalized
     _write_settings(data)
     return normalized
 

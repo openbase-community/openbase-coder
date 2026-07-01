@@ -13,6 +13,8 @@ from super_agents.app_server_client import CodexAppServerClient
 REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
 SANDBOX_TYPES = ("readOnly", "workspaceWrite", "dangerFullAccess")
 MODES = ("default", "plan")
+SCHEDULE_TYPES = ("daily", "interval")
+DEFAULT_INTERVAL_SECONDS = 60
 
 
 def _json_echo(value: dict[str, Any]) -> None:
@@ -49,15 +51,34 @@ def _validate_time(value: str) -> str:
     return f"{hour:02d}:{minute:02d}"
 
 
+def _validate_interval_seconds(value: int) -> int:
+    if value < 5:
+        raise click.BadParameter("Use an interval of at least 5 seconds.")
+    return value
+
+
+def _resolved_schedule_type(
+    schedule_type: str,
+    schedule_time: str | None,
+    interval_seconds: int | None,
+) -> str:
+    if schedule_type == "daily" and interval_seconds is not None and schedule_time is None:
+        return "interval"
+    return schedule_type
+
+
 def _routine_patch(
     *,
     name: str,
     prompt: str | None = None,
     schedule_time: str | None = None,
+    schedule_type: str | None = None,
+    interval_seconds: int | None = None,
     timezone: str | None = None,
     enabled: bool | None = None,
     target_name: str | None = None,
     thread_id: str | None = None,
+    fresh_thread_per_run: bool | None = None,
     cwd: Path | None = None,
     approval_policy: str | None = None,
     sandbox_type: str | None = None,
@@ -73,6 +94,10 @@ def _routine_patch(
         patch["prompt"] = prompt
     if schedule_time is not None:
         patch["time"] = _validate_time(schedule_time)
+    if schedule_type is not None:
+        patch["scheduleType"] = schedule_type
+    if interval_seconds is not None:
+        patch["intervalSeconds"] = _validate_interval_seconds(interval_seconds)
     if timezone:
         patch["timezone"] = timezone
     if enabled is not None:
@@ -81,6 +106,8 @@ def _routine_patch(
         patch["targetName"] = target_name
     if thread_id:
         patch["threadId"] = thread_id
+    if fresh_thread_per_run is not None:
+        patch["freshThreadPerRun"] = fresh_thread_per_run
     if cwd is not None:
         patch["cwd"] = str(cwd.expanduser().resolve())
     if approval_policy or include_defaults:
@@ -121,10 +148,22 @@ def show_routine(name: str) -> None:
 @routines.command("create")
 @click.argument("name")
 @click.option("--prompt", required=True, help="Prompt to send when the routine runs.")
-@click.option("--time", "schedule_time", required=True, help="Daily HH:MM local time.")
+@click.option("--time", "schedule_time", help="Daily HH:MM local time.")
+@click.option(
+    "--schedule-type",
+    type=click.Choice(SCHEDULE_TYPES),
+    default="daily",
+    show_default=True,
+)
+@click.option("--interval-seconds", type=int, help="Interval schedule frequency in seconds.")
 @click.option("--timezone", default="America/New_York", show_default=True)
 @click.option("--target-name", help="Existing Super Agents thread name to target.")
 @click.option("--thread-id", help="Existing Codex app-server thread id to target.")
+@click.option(
+    "--fresh-thread-per-run",
+    is_flag=True,
+    help="Create a new Super Agents thread for each routine run.",
+)
 @click.option("--cwd", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--approval-policy", default="never", show_default=True)
 @click.option(
@@ -142,10 +181,13 @@ def show_routine(name: str) -> None:
 def create_routine(
     name: str,
     prompt: str,
-    schedule_time: str,
+    schedule_time: str | None,
+    schedule_type: str,
+    interval_seconds: int | None,
     timezone: str,
     target_name: str | None,
     thread_id: str | None,
+    fresh_thread_per_run: bool,
     cwd: Path | None,
     approval_policy: str,
     sandbox_type: str,
@@ -157,14 +199,26 @@ def create_routine(
     disabled: bool,
 ) -> None:
     """Create or replace a routine."""
+    resolved_schedule_type = _resolved_schedule_type(
+        schedule_type,
+        schedule_time,
+        interval_seconds,
+    )
+    if resolved_schedule_type == "daily" and schedule_time is None:
+        raise click.ClickException("Daily routines require --time.")
+    if resolved_schedule_type == "interval" and interval_seconds is None:
+        interval_seconds = DEFAULT_INTERVAL_SECONDS
     patch = _routine_patch(
         name=name,
         prompt=prompt,
         schedule_time=schedule_time,
+        schedule_type=resolved_schedule_type,
+        interval_seconds=interval_seconds,
         timezone=timezone,
         enabled=not disabled,
         target_name=target_name,
         thread_id=thread_id,
+        fresh_thread_per_run=True if fresh_thread_per_run else None,
         cwd=cwd,
         approval_policy=approval_policy,
         sandbox_type=sandbox_type,
@@ -182,11 +236,15 @@ def create_routine(
 @click.argument("name")
 @click.option("--prompt")
 @click.option("--time", "schedule_time", help="Daily HH:MM local time.")
+@click.option("--schedule-type", type=click.Choice(SCHEDULE_TYPES))
+@click.option("--interval-seconds", type=int, help="Interval schedule frequency in seconds.")
 @click.option("--timezone")
 @click.option("--enable", "enabled", flag_value=True, default=None)
 @click.option("--disable", "enabled", flag_value=False)
 @click.option("--target-name")
 @click.option("--thread-id")
+@click.option("--fresh-thread-per-run", "fresh_thread_per_run", flag_value=True, default=None)
+@click.option("--reuse-target-thread", "fresh_thread_per_run", flag_value=False)
 @click.option("--cwd", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--approval-policy")
 @click.option("--sandbox-type", type=click.Choice(SANDBOX_TYPES))
@@ -199,10 +257,13 @@ def update_routine(
     name: str,
     prompt: str | None,
     schedule_time: str | None,
+    schedule_type: str | None,
+    interval_seconds: int | None,
     timezone: str | None,
     enabled: bool | None,
     target_name: str | None,
     thread_id: str | None,
+    fresh_thread_per_run: bool | None,
     cwd: Path | None,
     approval_policy: str | None,
     sandbox_type: str | None,
@@ -213,14 +274,22 @@ def update_routine(
     developer_instructions: str | None,
 ) -> None:
     """Update fields on a routine."""
+    resolved_schedule_type = (
+        _resolved_schedule_type(schedule_type, schedule_time, interval_seconds)
+        if schedule_type
+        else _resolved_schedule_type("daily", schedule_time, interval_seconds)
+    )
     patch = _routine_patch(
         name=name,
         prompt=prompt,
         schedule_time=schedule_time,
+        schedule_type=resolved_schedule_type if schedule_type or interval_seconds is not None else None,
+        interval_seconds=interval_seconds,
         timezone=timezone,
         enabled=enabled,
         target_name=target_name,
         thread_id=thread_id,
+        fresh_thread_per_run=fresh_thread_per_run,
         cwd=cwd,
         approval_policy=approval_policy,
         sandbox_type=sandbox_type,

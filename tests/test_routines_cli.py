@@ -63,6 +63,7 @@ def test_create_routine_calls_super_agents_library(monkeypatch) -> None:
             "name": "daily",
             "prompt": "Check status",
             "time": "09:05",
+            "scheduleType": "daily",
             "timezone": "UTC",
             "enabled": True,
             "threadId": "thread-1",
@@ -72,6 +73,64 @@ def test_create_routine_calls_super_agents_library(monkeypatch) -> None:
         },
     )
     assert client.calls[-1] == ("close", {})
+
+
+def test_create_routine_can_request_fresh_thread_per_run(monkeypatch) -> None:
+    FakeRoutinesClient.instances = []
+    monkeypatch.setattr(routines_cli, "CodexAppServerClient", FakeRoutinesClient)
+
+    result = CliRunner().invoke(
+        routines_cli.routines,
+        [
+            "create",
+            "daily",
+            "--prompt",
+            "Check status",
+            "--time",
+            "09:05",
+            "--fresh-thread-per-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert FakeRoutinesClient.instances[0].calls[0][1]["freshThreadPerRun"] is True
+
+
+def test_create_interval_routine_calls_super_agents_library(monkeypatch) -> None:
+    FakeRoutinesClient.instances = []
+    monkeypatch.setattr(routines_cli, "CodexAppServerClient", FakeRoutinesClient)
+
+    result = CliRunner().invoke(
+        routines_cli.routines,
+        [
+            "create",
+            "poll-prioritized",
+            "--prompt",
+            "Check Notion priority.",
+            "--interval-seconds",
+            "60",
+            "--thread-id",
+            "thread-1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    client = FakeRoutinesClient.instances[0]
+    assert client.calls[0] == (
+        "save_routine",
+        {
+            "name": "poll-prioritized",
+            "prompt": "Check Notion priority.",
+            "scheduleType": "interval",
+            "intervalSeconds": 60,
+            "timezone": "America/New_York",
+            "enabled": True,
+            "threadId": "thread-1",
+            "approvalPolicy": "never",
+            "sandboxType": "dangerFullAccess",
+            "mode": "default",
+        },
+    )
 
 
 def test_run_due_routines_command_supports_force(monkeypatch) -> None:
@@ -87,4 +146,20 @@ def test_run_due_routines_command_supports_force(monkeypatch) -> None:
     assert FakeRoutinesClient.instances[0].calls[0] == (
         "run_due_routines",
         {"name": "daily", "force": True},
+    )
+
+
+def test_update_routine_can_toggle_fresh_thread_per_run(monkeypatch) -> None:
+    FakeRoutinesClient.instances = []
+    monkeypatch.setattr(routines_cli, "CodexAppServerClient", FakeRoutinesClient)
+
+    result = CliRunner().invoke(
+        routines_cli.routines,
+        ["update", "daily", "--reuse-target-thread"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert FakeRoutinesClient.instances[0].calls[0] == (
+        "save_routine",
+        {"name": "daily", "freshThreadPerRun": False},
     )

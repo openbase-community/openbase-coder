@@ -4,44 +4,36 @@ from __future__ import annotations
 
 import base64
 import mimetypes
-import os
 import re
-from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from asgiref.sync import async_to_sync
 from django.http import FileResponse
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from super_agents.app_server_client import DEFAULT_STATE_FILE
-from super_agents.state import SessionRecord, read_state_file_locked
 
-from openbase_coder_cli.mcp.projects import get_recent_projects as _get_recent_projects
 from openbase_coder_cli.mcp.session_manager import get_session_manager
 from openbase_coder_cli.openbase_coder_cli_app.item_tags import (
-    report_tags,
     report_tags_payload,
     set_report_tags,
 )
-from openbase_coder_cli.paths import CODEX_HOME_DIR, NORMAL_CODEX_HOME_DIR
-
-REPORTS_DIRECTORY = ".reports"
-REPORTS_TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
-REPORTS_IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
-REPORTS_MAX_FILES = 200
-REPORTS_MAX_TEXT_BYTES = 1024 * 1024
-REPORTS_MAX_IMAGE_BYTES = 5 * 1024 * 1024
-HOME_REPORTS_PROJECT_DIR = Path.home()
-REPORT_ACTION_PROMPT_MAX_CHARS = 24000
-REPORT_ORIGIN_TIME_WINDOW_SECONDS = 10 * 60
-SUPER_AGENTS_STATE_FILE_ENV = "SUPER_AGENTS_STATE_FILE"
-REPORT_THREAD_ID_RE = re.compile(
-    r"(?im)^\s*(?:super agent\s+)?thread\s+id\s*:\s*([A-Za-z0-9._:-]+)\s*$"
+from openbase_coder_cli.reports_service import (
+    REPORTS_MAX_IMAGE_BYTES,
+    REPORTS_MAX_TEXT_BYTES,
+    _all_reports_items,
+    _global_reports_projects,
+    _list_reports_files,
+    _reports_dir,
+    _reports_file_payload,
+    _reports_kind,
+    _reports_summary,  # noqa: F401
+    _resolve_report_origin,
+    _resolve_reports_file,
+    _resolve_reports_path,
 )
-REPORT_THREAD_NAME_RE = re.compile(r"(?im)^\s*super agent thread name\s*:\s*(.+?)\s*$")
+
+REPORT_ACTION_PROMPT_MAX_CHARS = 24000
 ACTION_HEADING_RE = re.compile(
     r"(?i)^#{1,6}\s*(action items?|next steps?|follow[- ]?ups?|todo|to do|implementation|recommendations?)\b"
 )
@@ -51,157 +43,6 @@ ACTION_LINE_RE = re.compile(
     r"(?im)^\s*(?:[-*]|\d+[.)])\s+(?:\[[ xX]\]\s*)?"
     r"(?:action item|todo|to do|implement|fix|start|add|update|remove|investigate|follow up|follow-up)\b.*$"
 )
-
-
-@dataclass(frozen=True)
-class ReportActionOrigin:
-    thread_id: str
-    label: str | None = None
-    agent_name: str | None = None
-    source: str = "unknown"
-
-
-def _reports_dir(project_path: str) -> Path:
-    return Path(project_path).expanduser().resolve() / REPORTS_DIRECTORY
-
-
-def _reports_kind(path: Path) -> str:
-    suffix = path.suffix.lower()
-    if suffix in REPORTS_TEXT_EXTENSIONS:
-        return "markdown" if suffix in {".md", ".markdown"} else "text"
-    if suffix in REPORTS_IMAGE_EXTENSIONS:
-        return "image"
-    return "other"
-
-
-def _reports_file_payload(path: Path, reports_dir: Path) -> dict:
-    stat = path.stat()
-    relative_path = str(path.relative_to(reports_dir))
-    project_path = str(reports_dir.parent)
-    return {
-        "path": relative_path,
-        "name": path.name,
-        "kind": _reports_kind(path),
-        "size": stat.st_size,
-        "updated_at": stat.st_mtime,
-        "tags": report_tags(project_path, relative_path),
-    }
-
-
-def _list_reports_files(project_path: str) -> list[dict]:
-    reports_dir = _reports_dir(project_path).resolve()
-    if not reports_dir.is_dir():
-        return []
-
-    files: list[dict] = []
-    for candidate in sorted(reports_dir.rglob("*")):
-        if len(files) >= REPORTS_MAX_FILES:
-            break
-        if not candidate.is_file():
-            continue
-        try:
-            resolved = candidate.resolve()
-            resolved.relative_to(reports_dir)
-        except (OSError, ValueError):
-            continue
-        try:
-            files.append(_reports_file_payload(resolved, reports_dir))
-        except OSError:
-            continue
-
-    return sorted(files, key=lambda item: item["updated_at"], reverse=True)
-
-
-def _reports_summary(project_path: str) -> dict:
-    files = _list_reports_files(project_path)
-    updated_at = files[0]["updated_at"] if files else None
-    return {
-        "reports_count": len(files),
-        "reports_updated_at": updated_at,
-    }
-
-
-def _global_reports_projects() -> list[dict]:
-    projects: list[dict] = []
-    seen: set[Path] = set()
-    for project_dir in (
-        CODEX_HOME_DIR,
-        NORMAL_CODEX_HOME_DIR,
-        HOME_REPORTS_PROJECT_DIR,
-    ):
-        try:
-            resolved = project_dir.expanduser().resolve()
-        except OSError:
-            continue
-        if resolved in seen or not _reports_dir(str(resolved)).is_dir():
-            continue
-        seen.add(resolved)
-        project = {
-            "path": str(resolved),
-            "global_reports": True,
-        }
-        project.update(_reports_summary(str(resolved)))
-        projects.append(project)
-    return projects
-
-
-def _all_reports_items() -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    seen: set[Path] = set()
-
-    projects = _global_reports_projects() + _get_recent_projects()
-    for project in projects:
-        project_path = str(project.get("path", "")).strip()
-        if not project_path:
-            continue
-        try:
-            resolved = Path(project_path).expanduser().resolve()
-        except OSError:
-            continue
-        if resolved in seen or not resolved.is_dir():
-            continue
-        seen.add(resolved)
-
-        project_payload = dict(project)
-        project_payload["path"] = str(resolved)
-        for file_payload in _list_reports_files(str(resolved)):
-            items.append(
-                {
-                    "id": f"{resolved}:{file_payload['path']}",
-                    "project": project_payload,
-                    "file": file_payload,
-                    "updated_at": file_payload["updated_at"],
-                }
-            )
-
-    return sorted(items, key=lambda item: item["updated_at"], reverse=True)
-
-
-def _resolve_reports_path(project_path: str, relative_path: str) -> tuple[Path, Path]:
-    if not relative_path:
-        raise ValueError("file is required")
-
-    reports_dir = _reports_dir(project_path).resolve()
-    candidate = (reports_dir / relative_path).resolve()
-    try:
-        candidate.relative_to(reports_dir)
-    except ValueError as exc:
-        raise ValueError("file must be inside .reports") from exc
-    return candidate, reports_dir
-
-
-def _resolve_reports_file(project_path: str, relative_path: str) -> Path:
-    candidate, _reports_dir_path = _resolve_reports_path(project_path, relative_path)
-    if not candidate.is_file():
-        raise FileNotFoundError(relative_path)
-    return candidate
-
-
-def _super_agents_state_path() -> Path:
-    configured = os.environ.get(SUPER_AGENTS_STATE_FILE_ENV, "").strip()
-    if configured:
-        return Path(configured).expanduser()
-    return DEFAULT_STATE_FILE
 
 
 def _extract_report_action_items(content: str) -> list[str]:
@@ -231,147 +72,6 @@ def _extract_report_action_items(content: str) -> list[str]:
             add(match.group(0))
 
     return action_items[:80]
-
-
-def _parse_report_thread_id(content: str) -> str | None:
-    match = REPORT_THREAD_ID_RE.search(content)
-    if not match:
-        return None
-    return match.group(1).strip() or None
-
-
-def _parse_report_thread_name(content: str) -> str | None:
-    match = REPORT_THREAD_NAME_RE.search(content)
-    if not match:
-        return None
-    return match.group(1).strip() or None
-
-
-def _parse_iso_timestamp(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
-    except ValueError:
-        return None
-
-
-def _session_sort_time(session: SessionRecord) -> datetime:
-    return (
-        _parse_iso_timestamp(session.last_finished_at)
-        or _parse_iso_timestamp(session.last_started_at)
-        or _parse_iso_timestamp(session.updated_at)
-        or datetime.fromtimestamp(0, tz=UTC)
-    )
-
-
-def _session_report_delta_seconds(
-    session: SessionRecord,
-    report_updated_at: float,
-) -> float:
-    report_time = datetime.fromtimestamp(report_updated_at, tz=UTC)
-    values = [
-        session.last_finished_at,
-        session.last_started_at,
-        session.last_event_at,
-        session.updated_at,
-    ]
-    if session.turns:
-        for turn in session.turns.values():
-            values.extend([turn.finished_at, turn.updated_at, turn.started_at])
-
-    deltas = [
-        abs((report_time - parsed).total_seconds())
-        for parsed in (_parse_iso_timestamp(value) for value in values)
-        if parsed is not None
-    ]
-    return min(deltas) if deltas else float("inf")
-
-
-def _session_matches_cwd(session: SessionRecord, project_path: Path) -> bool:
-    if not session.cwd:
-        return False
-    try:
-        return Path(session.cwd).expanduser().resolve() == project_path
-    except OSError:
-        return False
-
-
-def _origin_from_session(session: SessionRecord, source: str) -> ReportActionOrigin:
-    return ReportActionOrigin(
-        thread_id=session.thread_id,
-        label=session.label,
-        agent_name=session.agent_name,
-        source=source,
-    )
-
-
-def _resolve_report_origin(
-    content: str,
-    project_path: Path,
-    report_updated_at: float,
-) -> tuple[ReportActionOrigin | None, str | None]:
-    state = read_state_file_locked(_super_agents_state_path())
-    explicit_thread_id = _parse_report_thread_id(content)
-    if explicit_thread_id:
-        session = state.sessions.get(explicit_thread_id)
-        if session is not None:
-            return _origin_from_session(session, "report_thread_id"), None
-        return ReportActionOrigin(
-            thread_id=explicit_thread_id,
-            source="report_thread_id",
-        ), None
-
-    explicit_name = _parse_report_thread_name(content)
-    if explicit_name:
-        label_matches = [
-            session
-            for session in state.sessions.values()
-            if session.label == explicit_name
-        ]
-        cwd_matches = [
-            session
-            for session in label_matches
-            if _session_matches_cwd(session, project_path)
-        ]
-        matches = cwd_matches or label_matches
-        if matches:
-            selected = sorted(matches, key=_session_sort_time, reverse=True)[0]
-            return _origin_from_session(selected, "report_thread_name"), None
-        return None, f"No Super Agent thread named {explicit_name!r} was found."
-
-    cwd_matches = [
-        session
-        for session in state.sessions.values()
-        if _session_matches_cwd(session, project_path)
-    ]
-    if len(cwd_matches) == 1:
-        return _origin_from_session(cwd_matches[0], "project_thread"), None
-    if len(cwd_matches) > 1:
-        scored = sorted(
-            (
-                (_session_report_delta_seconds(session, report_updated_at), session)
-                for session in cwd_matches
-            ),
-            key=lambda item: item[0],
-        )
-        close_matches = [
-            item for item in scored if item[0] <= REPORT_ORIGIN_TIME_WINDOW_SECONDS
-        ]
-        if len(close_matches) == 1:
-            return _origin_from_session(
-                close_matches[0][1],
-                "project_thread_report_time",
-            ), None
-        return (
-            None,
-            "Multiple Super Agent threads match this project, and the report does not identify which one created it.",
-        )
-
-    return (
-        None,
-        "The originating Super Agent thread could not be determined from this report.",
-    )
 
 
 def _report_action_prompt(
@@ -405,7 +105,6 @@ def _report_action_prompt(
         f"Report content:{truncation_note}\n\n"
         f"{excerpt}"
     )
-
 
 @api_view(["GET"])
 def project_reports(request):

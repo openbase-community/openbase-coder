@@ -30,6 +30,7 @@ PROJECT_LIST_CACHE_TTL_SECONDS = 15.0
 PROJECT_METADATA_CACHE_TTL_SECONDS = 10.0
 PROJECT_STATUS_WORKERS = 8
 PROJECT_STATUS_TIMEOUT_SECONDS = 12.0
+WORKTREE_SIBLING_SUFFIXES = ("worktrees", "work-trees")
 
 _project_cache_lock = threading.Lock()
 _project_executor = ThreadPoolExecutor(
@@ -120,9 +121,58 @@ def _project_payload(project: dict[str, Any]) -> dict[str, Any]:
     if metadata is None:
         payload.setdefault("git_status", "unknown")
         payload.setdefault("stack", None)
-        return payload
-    payload.update(metadata)
+    else:
+        payload.update(metadata)
+    payload["worktrees"] = _worktree_children(str(project.get("path", "")))
     return payload
+
+
+def _worktree_sibling_dirs(project_path: str) -> list[Path]:
+    project_dir = Path(project_path).expanduser()
+    parent = project_dir.parent
+    if not parent.is_dir():
+        return []
+    project_name = project_dir.name
+    try:
+        siblings = list(parent.iterdir())
+    except OSError:
+        return []
+    return [
+        sibling
+        for sibling in siblings
+        if sibling.is_dir()
+        and sibling.name != project_name
+        and sibling.name.casefold().endswith(WORKTREE_SIBLING_SUFFIXES)
+    ]
+
+
+def _worktree_children(project_path: str) -> list[dict[str, Any]]:
+    children: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for sibling in _worktree_sibling_dirs(project_path):
+        try:
+            candidates = sorted(
+                (item for item in sibling.iterdir() if item.is_dir()),
+                key=lambda item: item.name.casefold(),
+            )
+        except OSError:
+            continue
+        for candidate in candidates:
+            if not (candidate / "multi.json").is_file():
+                continue
+            path = str(candidate.resolve())
+            key = path.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            metadata = _cached_metadata(path)
+            child = {"path": path, "source": "worktree"}
+            if metadata is None:
+                child.update({"git_status": "unknown", "stack": None})
+            else:
+                child.update(metadata)
+            children.append(child)
+    return children
 
 
 def _refresh_project_metadata_task(project_path: str) -> None:
@@ -252,7 +302,15 @@ def recent_projects(request):
     start = (page - 1) * page_size
     end = start + page_size
     page_projects = projects[start:end]
-    project_paths = [str(project.get("path", "")) for project in page_projects]
+    project_paths = [
+        str(project.get("path", ""))
+        for project in page_projects
+        if str(project.get("path", ""))
+    ]
+    for project_path in list(project_paths):
+        project_paths.extend(
+            child["path"] for child in _worktree_children(project_path)
+        )
     _schedule_project_metadata_refresh(project_paths)
 
     next_url = (

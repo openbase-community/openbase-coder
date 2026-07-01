@@ -23,6 +23,7 @@ from .computer_use import computer_use
 from .desktop import desktop
 from .doctor import doctor
 from .plugins import plugins
+from .reports import reports
 from .restart import restart
 from .routines import routines
 from .server import server
@@ -67,6 +68,7 @@ main.add_command(login)
 main.add_command(logout)
 main.add_command(auth)
 main.add_command(plugins)
+main.add_command(reports)
 main.add_command(bootstrap)
 main.add_command(restart)
 main.add_command(user)

@@ -10,6 +10,7 @@ from rest_framework.routers import DefaultRouter
 from openbase_coder_cli.openbase_coder_cli_app.views import (
     agents_md,
     all_project_reports,
+    apple_music_playback_entitlement,
     approval_request_detail,
     approval_requests,
     auth_logout,
@@ -94,6 +95,11 @@ urlpatterns = [
     path("agents-md/", agents_md, name="agents-md"),
     path("health/", health_check, name="health-check"),
     path("brain-readiness/", brain_readiness, name="brain-readiness"),
+    path(
+        "features/apple-music-playback/",
+        apple_music_playback_entitlement,
+        name="apple-music-playback-entitlement",
+    ),
     path("diagnostics/ios-logs/", ios_logs_upload, name="ios-logs-upload"),
     path("user/ios-app-control/", ios_app_control, name="ios-app-control"),
     path("devices/", devices_list, name="devices-list"),

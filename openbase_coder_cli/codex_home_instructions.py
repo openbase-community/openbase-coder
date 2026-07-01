@@ -3,12 +3,27 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from openbase_coder_cli.paths import CODEX_HOME_DIR
+from openbase_coder_cli.instruction_templates import (
+    render_instruction_template,
+    text_matches_instruction_template,
+)
+from openbase_coder_cli.paths import (
+    CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
+    CODEX_DISPATCHER_INSTRUCTIONS_PATH,
+    CODEX_HOME_DIR,
+    CODEX_SUPER_AGENT_INSTRUCTIONS_PATH,
+    OPENBASE_CLAUDE_MD_PATH,
+)
 from openbase_coder_cli.runtime import packaged_instructions_dir
 from openbase_coder_cli.services.installation import InstallationConfig
 
 CODEX_HOME_DEFAULT_SOURCE_DIR = "instructions"
 MANAGED_AGENTS_HEADING = "## Openbase Coder Instructions"
+OPENBASE_DEFAULT_INSTRUCTION_FILES = (
+    ("VOICE_INSTRUCTIONS.md", CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH),
+    ("DISPATCHER_INSTRUCTIONS.md", CODEX_DISPATCHER_INSTRUCTIONS_PATH),
+    ("SUPER_AGENT_INSTRUCTIONS.md", CODEX_SUPER_AGENT_INSTRUCTIONS_PATH),
+)
 
 
 def refresh_openbase_agents_md_from_installation() -> bool:
@@ -21,6 +36,48 @@ def refresh_openbase_agents_md_from_installation() -> bool:
         if source_root is None:
             return False
         return ensure_openbase_agents_md(source_root.parent)
+    except Exception:
+        return False
+
+
+def refresh_openbase_instruction_files_from_installation(
+    *,
+    report: Callable[[str], None] | None = None,
+) -> bool:
+    """Refresh all managed instruction files that can contain console settings."""
+    try:
+        if not InstallationConfig.exists():
+            return False
+        config = InstallationConfig.load()
+        source_root = _instruction_source_root(config.workspace_path)
+        if source_root is None:
+            return False
+
+        changed = ensure_openbase_agents_md(
+            source_root.parent,
+            codex_home_dir=CODEX_HOME_DIR,
+            report=report,
+        )
+        changed = (
+            ensure_openbase_instruction_md(
+                source_root.parent,
+                target_path=OPENBASE_CLAUDE_MD_PATH,
+                document_label="Claude config CLAUDE.md",
+                report=report,
+            )
+            or changed
+        )
+        for resource_name, target_path in OPENBASE_DEFAULT_INSTRUCTION_FILES:
+            changed = (
+                ensure_rendered_instruction_file(
+                    source_root / resource_name,
+                    target_path,
+                    document_label=f"Openbase instruction {resource_name}",
+                    report=report,
+                )
+                or changed
+            )
+        return changed
     except Exception:
         return False
 
@@ -86,11 +143,61 @@ def ensure_openbase_instruction_md(
 
 
 def _managed_agents_md_section(source_text: str, source_path: Path) -> str:
-    body = _without_h2_headings(source_text).strip()
+    body = _without_h2_headings(render_instruction_template(source_text)).strip()
     note = f"- These instructions are auto generated from {source_path}."
     if body:
         return f"{MANAGED_AGENTS_HEADING}\n\n{note}\n\n{body}\n"
     return f"{MANAGED_AGENTS_HEADING}\n\n{note}\n"
+
+
+def ensure_rendered_instruction_file(
+    source_path: Path,
+    target_path: Path,
+    *,
+    document_label: str,
+    report: Callable[[str], None] | None = None,
+) -> bool:
+    if not source_path.is_file():
+        _report(report, f"{document_label} source not found at {source_path}")
+        return False
+
+    source_text = source_path.read_text(encoding="utf-8")
+    rendered = render_instruction_template(source_text)
+    existing = ""
+    if target_path.exists() or target_path.is_symlink():
+        try:
+            existing = target_path.read_text(encoding="utf-8")
+        except OSError:
+            existing = ""
+
+    if target_path.is_symlink():
+        target_path.unlink()
+    elif target_path.exists():
+        if not target_path.is_file():
+            _report(
+                report,
+                f"{document_label} already exists at {target_path}; leaving it unchanged.",
+            )
+            return False
+        if (
+            existing != rendered
+            and existing != source_text
+            and not text_matches_instruction_template(existing, source_text)
+        ):
+            _report(
+                report,
+                f"{document_label} already exists at {target_path} and differs from the workspace default; leaving it unchanged.",
+            )
+            return False
+
+    if existing == rendered and target_path.exists():
+        _report(report, f"{document_label} already configured at {target_path}")
+        return False
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(rendered, encoding="utf-8")
+    _report(report, f"Updated {document_label} at {target_path}")
+    return True
 
 
 def _agents_source_path(workspace_dir: str | Path) -> Path:

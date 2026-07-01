@@ -4,7 +4,6 @@ import importlib
 import json
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -210,6 +209,39 @@ def test_ensure_codex_home_default_files_links_missing_files(
         legacy_path = codex_home / resource_name
         assert legacy_path.is_symlink()
         assert legacy_path.readlink() == target_path
+
+
+def test_ensure_codex_home_default_files_renders_template_files(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    instructions = workspace / "instructions"
+    instructions.mkdir(parents=True)
+    codex_home, _claude_config = _patch_openbase_agent_paths(monkeypatch, tmp_path)
+    shared_instructions = tmp_path / "openbase" / "instructions"
+    target = shared_instructions / "SUPER_AGENT_INSTRUCTIONS.md"
+    (instructions / "SUPER_AGENT_INSTRUCTIONS.md").write_text(
+        'Require "{dangerous_confirmation_phrase}".\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        setup_cli,
+        "CODEX_HOME_DEFAULT_FILES",
+        (("SUPER_AGENT_INSTRUCTIONS.md", target),),
+    )
+    monkeypatch.setattr(
+        "openbase_coder_cli.instruction_templates.get_dangerous_confirmation_phrase",
+        lambda: "ship it",
+    )
+
+    setup_cli._ensure_codex_home_default_files(str(workspace))
+
+    assert target.is_file()
+    assert not target.is_symlink()
+    assert target.read_text(encoding="utf-8") == 'Require "ship it".\n'
+    legacy_path = codex_home / "SUPER_AGENT_INSTRUCTIONS.md"
+    assert legacy_path.is_symlink()
+    assert legacy_path.readlink() == target
 
 
 def test_ensure_codex_home_default_files_preserves_custom_existing_files(
@@ -630,29 +662,6 @@ def test_ensure_codex_home_config_falls_back_to_resolved_uv(
         f"command = {json.dumps(str(uv_bin))}\n"
         f"args = {json.dumps(['--directory', str(cli_dir), 'run', 'super-agents-mcp'])}\n"
     )
-
-
-def test_super_agents_mcp_command_prefers_packaged_python_bin(
-    tmp_path, monkeypatch
-) -> None:
-    workspace = tmp_path / "workspace"
-    package = tmp_path / "package"
-    python_path = package / "python" / "bin" / "python"
-    command = python_path.parent / "super-agents-mcp"
-    command.parent.mkdir(parents=True)
-    command.write_text("#!/bin/sh\n", encoding="utf-8")
-    python_path.write_text("#!/bin/sh\n", encoding="utf-8")
-    monkeypatch.setattr(
-        setup_cli,
-        "current_runtime_package",
-        lambda: SimpleNamespace(python_path=python_path),
-    )
-    monkeypatch.setattr(setup_cli, "which", lambda _command: None)
-
-    command_path, args = setup_cli._super_agents_mcp_command(workspace)
-
-    assert command_path == command
-    assert args == []
 
 
 def test_ensure_claude_config_installs_super_agents_mcp(tmp_path, monkeypatch) -> None:

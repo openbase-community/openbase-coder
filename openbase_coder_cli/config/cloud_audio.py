@@ -20,6 +20,9 @@ OPENBASE_CLOUD_AUDIO_SUBSCRIBE_DETAIL = (
     "available audio credits. Subscribe in Openbase Cloud, or switch voice "
     "settings to direct provider keys or local audio."
 )
+OPENBASE_CLOUD_SUBSCRIBE_DETAIL = (
+    "Apple Music playback requires an active Openbase Cloud subscription."
+)
 
 
 class OpenbaseCloudAudioSubscriptionError(RuntimeError):
@@ -56,6 +59,20 @@ def ensure_openbase_cloud_audio_subscription(
             "month. Subscribe in Openbase Cloud, or switch voice settings to "
             "direct provider keys or local audio."
         )
+
+
+def openbase_cloud_subscription_entitlement(
+    *,
+    web_backend_url: str = DEFAULT_WEB_BACKEND_URL,
+) -> dict[str, object]:
+    """Return Cloud-backed subscription state for paid local app features."""
+    usage = _audio_usage_summary(web_backend_url.rstrip("/"))
+    has_active_subscription = _numeric_usage_value(usage, "monthly_limit_cents") > 0
+    detail = "" if has_active_subscription else OPENBASE_CLOUD_SUBSCRIBE_DETAIL
+    return {
+        "has_active_subscription": has_active_subscription,
+        "detail": detail,
+    }
 
 
 def _audio_usage_summary(web_backend_url: str) -> dict:
