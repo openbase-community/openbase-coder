@@ -27,6 +27,7 @@ from openbase_coder_cli.config.token_manager import (
     create_pkce_verifier,
 )
 from openbase_coder_cli.paths import AUTH_JSON_PATH, MACHINE_TOKEN_JSON_PATH
+from openbase_coder_cli.services.cloud_registration import register_and_report
 
 DEFAULT_WEB_BACKEND_URL = "https://app.openbase.cloud"
 DESKTOP_LOGIN_COMPLETE_URL = "openbase-coder://open?source=cli-auth&intent=login-complete"
@@ -280,6 +281,15 @@ def login() -> None:
         click.echo(
             click.style(
                 f"Warning: logged in, but could not create an Openbase Cloud machine token: {exc}",
+                fg="yellow",
+            )
+        )
+
+    report = register_and_report()
+    if not report.ok and report.supported:
+        click.echo(
+            click.style(
+                f"Warning: logged in, but could not register this device with Openbase Cloud: {report.error}",
                 fg="yellow",
             )
         )

@@ -61,6 +61,7 @@ because Kokoro currently declares Python `<3.13`.
 | `--dev-workspace` | `false` | Clone/sync the Openbase Coder workspace for development-mode runtime assets |
 | `--skip-services` | `false` | Skip service install |
 | `--link-codex-config` | `false` | Symlink Openbase's service Codex config to `~/.codex/config.toml` |
+| `--json-progress` | `false` | Emit NDJSON step events on stdout for UI-driven setup; human-readable output moves to stderr |
 
 ## Behavior Details
 
@@ -86,6 +87,28 @@ because Kokoro currently declares Python `<3.13`.
 18. Configures Tailscale Serve routes for the iOS app:
     - `tailscale serve --bg --http=18080 http://127.0.0.1:7999`
     - `tailscale serve --bg --tcp=7880 tcp://127.0.0.1:7880`
+19. Registers this device with Openbase cloud and reports `cli_configured`
+    for the onboarding flow (warns and continues on failure; requires a prior
+    `openbase-coder login`). See [`onboarding`](onboarding.md).
+
+## JSON Progress
+
+With `--json-progress`, setup emits one NDJSON event per line on stdout so a
+UI (e.g. the Mac app's one-click setup) can render a live checklist; all
+human-readable output — including subprocess output — is redirected to
+stderr. Step ids, in order: `workspace`, `installation_config`, `env`,
+`agent_config`, `services`, `tailscale_serve`, `cloud_report`.
+
+```jsonc
+{"event": "step", "id": "services", "status": "start", "detail": null}
+{"event": "step", "id": "services", "status": "ok", "detail": null}
+{"event": "step", "id": "tailscale_serve", "status": "warn", "detail": "tailscale was not found on PATH."}
+{"event": "result", "ok": true, "cli_configured": true, "tailscale_serve_healthy": false}
+```
+
+`warn` steps are non-fatal. A hard failure emits a final `error` step event
+and `{"event": "result", "ok": false, ...}`, and exits nonzero. The full
+protocol is specified in the workspace `specs/onboarding/README.md`.
 
 The generated env file records the selected backend as `OPENBASE_CODING_BACKEND`.
 Older env files that still set `OPENBASE_CODEX_BACKEND` are supported as a

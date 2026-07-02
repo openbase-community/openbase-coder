@@ -14,6 +14,9 @@ openbase-coder login
 2. Waits for the local OAuth callback.
 3. Exchanges the authorization code for access/refresh tokens.
 4. Stores tokens in `~/.openbase/auth.json`.
+5. Registers this device (including its Tailscale identity, when available)
+   with Openbase cloud for the onboarding flow. Failures only warn; see
+   [`onboarding`](onboarding.md) to retry.
 
 ## Backend URL
 

@@ -39,6 +39,7 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     livekit_voice_route_exit,
     livekit_voice_route_transfer,
     local_stt_download,
+    onboarding_status,
     openbase_restart,
     openbase_service_action,
     openbase_services_list,
@@ -92,6 +93,7 @@ urlpatterns = [
     path("diagnostics/ios-logs/", ios_logs_upload, name="ios-logs-upload"),
     path("user/ios-app-control/", ios_app_control, name="ios-app-control"),
     path("devices/", devices_list, name="devices-list"),
+    path("onboarding/status/", onboarding_status, name="onboarding-status"),
     path("threads/", thread_list, name="thread-list"),
     path("threads/<str:thread_id>/", thread_detail, name="thread-detail"),
     path(
