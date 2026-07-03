@@ -25,6 +25,7 @@ openbase-coder [OPTIONS] COMMAND [ARGS]
 | [`restart`](restart.md) | Restart Openbase-managed services |
 | [`services`](services.md) | Manage launchd services |
 | [`doctor`](doctor.md) | Verify install, service health, and secrets |
+| [`onboarding`](onboarding.md) | Inspect onboarding state and report it to Openbase cloud |
 | [`login`](login.md) | Email-code login to Openbase cloud |
 | [`logout`](logout.md) | Remove saved auth tokens |
 | [`plugins`](plugins.md) | Install and manage Openbase plugins |

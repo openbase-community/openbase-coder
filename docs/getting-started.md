@@ -83,7 +83,12 @@ By default this command:
 ```bash
 openbase-coder doctor
 openbase-coder services status
+openbase-coder onboarding status
 ```
+
+`onboarding status` summarizes the state the desktop/iOS onboarding flow
+cares about: CLI configured, login, Tailscale identity, and Tailscale Serve
+health. See [onboarding](commands/onboarding.md).
 
 ## Uninstalling Openbase
 

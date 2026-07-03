@@ -42,15 +42,15 @@ class TailnetDevice:
         }
 
 
-def tailnet_devices_payload() -> dict[str, Any]:
+def _tailscale_status_payload() -> tuple[bool, dict[str, Any] | None, str | None]:
+    """Run ``tailscale status --json``.
+
+    Returns ``(tailscale_available, status_payload, error)``; ``status_payload``
+    is ``None`` whenever ``error`` is set.
+    """
     tailscale_bin = shutil.which("tailscale")
     if not tailscale_bin:
-        return {
-            "tailscale_available": False,
-            "devices": [],
-            "openbase_devices": [],
-            "error": "tailscale was not found on PATH.",
-        }
+        return False, None, "tailscale was not found on PATH."
 
     try:
         result = subprocess.run(
@@ -60,32 +60,70 @@ def tailnet_devices_payload() -> dict[str, Any]:
             timeout=TAILSCALE_STATUS_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return {
-            "tailscale_available": True,
-            "devices": [],
-            "openbase_devices": [],
-            "error": f"Unable to run tailscale status: {exc}",
-        }
+        return True, None, f"Unable to run tailscale status: {exc}"
 
     if result.returncode != 0:
         detail = (
             result.stderr.strip() or result.stdout.strip() or "tailscale status failed."
         )
-        return {
-            "tailscale_available": True,
-            "devices": [],
-            "openbase_devices": [],
-            "error": detail,
-        }
+        return True, None, detail
 
     try:
-        status_payload = json.loads(result.stdout)
+        return True, json.loads(result.stdout), None
     except json.JSONDecodeError as exc:
+        return True, None, f"Unable to parse tailscale status JSON: {exc}"
+
+
+def tailscale_self_identity() -> dict[str, Any]:
+    """Return the local node's Tailscale identity for device registration."""
+    tailscale_available, status_payload, error = _tailscale_status_payload()
+    identity: dict[str, Any] = {
+        "available": False,
+        "tailscale_available": tailscale_available,
+        "dns_name": None,
+        "node_hostname": None,
+        "tailnet": None,
+        "ips": [],
+        "error": error,
+    }
+    if status_payload is None:
+        return identity
+
+    self_entry = status_payload.get("Self")
+    if not isinstance(self_entry, dict):
+        identity["error"] = "tailscale status did not include a Self entry."
+        return identity
+
+    dns_name = _normalize_dns_name(self_entry.get("DNSName"))
+    ips = self_entry.get("TailscaleIPs")
+    tailnet = status_payload.get("CurrentTailnet")
+    tailnet_name = (
+        tailnet.get("MagicDNSSuffix") or tailnet.get("Name")
+        if isinstance(tailnet, dict)
+        else None
+    ) or status_payload.get("MagicDNSSuffix")
+
+    identity.update(
+        {
+            "available": bool(dns_name),
+            "dns_name": dns_name,
+            "node_hostname": str(self_entry.get("HostName") or "") or None,
+            "tailnet": _normalize_dns_name(tailnet_name),
+            "ips": [str(ip) for ip in ips] if isinstance(ips, list) else [],
+            "error": None if dns_name else "Tailscale DNS name is unavailable.",
+        }
+    )
+    return identity
+
+
+def tailnet_devices_payload() -> dict[str, Any]:
+    tailscale_available, status_payload, error = _tailscale_status_payload()
+    if status_payload is None:
         return {
-            "tailscale_available": True,
+            "tailscale_available": tailscale_available,
             "devices": [],
             "openbase_devices": [],
-            "error": f"Unable to parse tailscale status JSON: {exc}",
+            "error": error,
         }
 
     devices = _devices_from_tailscale_status(status_payload)

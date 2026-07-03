@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.resources as importlib_resources
 import json
+import os
 import platform
 import secrets
 import shlex
@@ -76,8 +77,10 @@ from openbase_coder_cli.runtime import (
     packaged_instructions_dir,
     packaged_skills_dir,
 )
+from openbase_coder_cli.services.cloud_registration import register_and_report
 from openbase_coder_cli.services.installation import InstallationConfig
 from openbase_coder_cli.services.launchd import install_all_services
+from openbase_coder_cli.services.onboarding import compute_cli_configured
 from openbase_coder_cli.services.tailscale_serve import (
     configure_tailscale_serve,
     tailscale_serve_health,
@@ -164,6 +167,79 @@ LOCAL_AUDIO_REQUIREMENTS = (
     "mlx-whisper>=0.4.3",
 )
 LOCAL_AUDIO_PYTHON_MAX = (3, 13)
+SETUP_PROGRESS_STEPS = (
+    "workspace",
+    "installation_config",
+    "env",
+    "agent_config",
+    "services",
+    "tailscale_serve",
+    "cloud_report",
+)
+
+
+class _SetupProgress:
+    """Emit NDJSON step events for `setup --json-progress`.
+
+    Event shapes and step ids are defined in the workspace
+    ``specs/onboarding/README.md`` setup progress protocol. When enabled, the
+    process's stdout fd is redirected to stderr so human-readable output
+    (including subprocess output) stays off the NDJSON stream; events are
+    written to the saved original stdout.
+    """
+
+    def __init__(self, enabled: bool):
+        self.enabled = enabled
+        self._current: str | None = None
+        self._fd: int | None = None
+        if enabled:
+            self._fd = os.dup(1)
+            os.dup2(2, 1)
+
+    def step(self, step_id: str, step_status: str, detail: str | None = None) -> None:
+        self._current = step_id if step_status == "start" else None
+        self._emit(
+            {
+                "event": "step",
+                "id": step_id,
+                "status": step_status,
+                "detail": detail,
+            }
+        )
+
+    def abort(self, detail: str) -> None:
+        if self._current:
+            self._emit(
+                {
+                    "event": "step",
+                    "id": self._current,
+                    "status": "error",
+                    "detail": detail,
+                }
+            )
+        self._emit(
+            {
+                "event": "result",
+                "ok": False,
+                "cli_configured": False,
+                "tailscale_serve_healthy": False,
+            }
+        )
+
+    def result(self, *, cli_configured: bool, tailscale_serve_healthy: bool) -> None:
+        self._emit(
+            {
+                "event": "result",
+                "ok": True,
+                "cli_configured": cli_configured,
+                "tailscale_serve_healthy": tailscale_serve_healthy,
+            }
+        )
+
+    def _emit(self, payload: dict[str, object]) -> None:
+        if self._fd is None:
+            return
+        os.write(self._fd, (json.dumps(payload) + "\n").encode("utf-8"))
 
 
 @click.command()
@@ -235,6 +311,14 @@ LOCAL_AUDIO_PYTHON_MAX = (3, 13)
         "omitted; existing configs are only changed when this option is provided."
     ),
 )
+@click.option(
+    "--json-progress",
+    is_flag=True,
+    help=(
+        "Emit NDJSON step events on stdout for UI-driven setup; "
+        "human-readable output moves to stderr."
+    ),
+)
 def setup(
     workspace_dir: str,
     env_file: str,
@@ -246,6 +330,7 @@ def setup(
     link_codex_config: bool,
     coding_backend: str | None,
     audio_provider: str | None,
+    json_progress: bool,
 ) -> None:
     """Full install flow for Openbase Coder."""
     if platform.system() not in ("Darwin", "Linux"):
@@ -256,6 +341,54 @@ def setup(
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
 
+    progress = _SetupProgress(json_progress)
+    try:
+        serve_healthy = _run_setup_phases(
+            progress,
+            workspace_dir=workspace_dir,
+            env_file=env_file,
+            assembly_ai_api_key=assembly_ai_api_key,
+            cartesia_api_key=cartesia_api_key,
+            skip_clone=skip_clone,
+            dev_workspace=dev_workspace,
+            skip_services=skip_services,
+            link_codex_config=link_codex_config,
+            coding_backend=coding_backend,
+            audio_provider=audio_provider,
+        )
+    except Exception as exc:
+        progress.abort(str(exc))
+        raise
+    cli_configured = compute_cli_configured()
+    progress.result(
+        cli_configured=cli_configured, tailscale_serve_healthy=serve_healthy
+    )
+
+    click.echo()
+    click.echo("Setup complete.")
+    click.echo()
+    click.echo(
+        "To enable remote authentication, run 'openbase-coder login' "
+        "and ensure OPENBASE_CODER_CLI_WEB_BACKEND_URL is set in your .env."
+    )
+
+
+def _run_setup_phases(
+    progress: _SetupProgress,
+    *,
+    workspace_dir: str,
+    env_file: str,
+    assembly_ai_api_key: str,
+    cartesia_api_key: str,
+    skip_clone: bool,
+    dev_workspace: bool,
+    skip_services: bool,
+    link_codex_config: bool,
+    coding_backend: str | None,
+    audio_provider: str | None,
+) -> bool:
+    """Run the setup phases, returning whether Tailscale Serve is healthy."""
+    progress.step("workspace", "start")
     OPENBASE_BASE_DIR.mkdir(parents=True, exist_ok=True)
     _ensure_thread_sync_exchange_dir()
     _ensure_bundled_sounds()
@@ -269,8 +402,10 @@ def setup(
         click.echo(f"Using bundled runtime assets from {runtime_package.root}")
     else:
         click.echo("Skipping workspace clone; no bundled runtime package detected.")
+    progress.step("workspace", "ok")
 
     # --- Write installation.json ---
+    progress.step("installation_config", "start")
     config = InstallationConfig(
         workspace_path=workspace_dir if use_dev_workspace else "",
         env_file=env_file,
@@ -294,8 +429,10 @@ def setup(
     )
     config.save()
     click.echo("Wrote installation.json")
+    progress.step("installation_config", "ok")
 
     # --- Generate .env ---
+    progress.step("env", "start")
     _ensure_env_file(
         env_file,
         assembly_ai_api_key=assembly_ai_api_key,
@@ -305,8 +442,10 @@ def setup(
     selected_coding_backend = _selected_coding_backend(Path(env_file), coding_backend)
     if selected_coding_backend == OPENBASE_CLOUD_BACKEND:
         _ensure_openbase_cloud_machine_token(Path(env_file))
+    progress.step("env", "ok")
 
     # --- Symlink Codex auth into the service CODEX_HOME ---
+    progress.step("agent_config", "start")
     _symlink_codex_auth()
     _ensure_codex_home_default_files(workspace_dir if use_dev_workspace else "")
     _ensure_codex_home_dispatcher_config(audio_provider=audio_provider)
@@ -346,18 +485,24 @@ def setup(
         click.echo(
             "No bundled console build found; server will require a console build."
         )
+    progress.step("agent_config", "ok")
 
     # --- Install services ---
+    progress.step("services", "start")
     if not skip_services:
         click.echo()
         service_manager = "launchd" if platform.system() == "Darwin" else "systemd"
         click.echo(f"Installing {service_manager} services...")
         install_all_services(config)
+        progress.step("services", "ok")
     else:
         click.echo("Skipped service installation (--skip-services).")
+        progress.step("services", "ok", "skipped (--skip-services)")
 
     click.echo()
     click.echo("Configuring Tailscale Serve routes...")
+    progress.step("tailscale_serve", "start")
+    serve_healthy = False
     try:
         configure_tailscale_serve()
     except Exception as exc:
@@ -367,10 +512,13 @@ def setup(
             "    tailscale serve --bg --http=18080 http://127.0.0.1:7999\n"
             "    tailscale serve --bg --tcp=7880 tcp://127.0.0.1:7880"
         )
+        progress.step("tailscale_serve", "warn", str(exc))
     else:
         health = tailscale_serve_health()
+        serve_healthy = health.healthy
         if health.healthy:
             click.echo(f"  OK    Openbase is reachable at {health.openbase_url}")
+            progress.step("tailscale_serve", "ok")
         else:
             click.echo(
                 click.style(
@@ -381,14 +529,29 @@ def setup(
             )
             if health.error:
                 click.echo(f"        {health.error}")
+            progress.step("tailscale_serve", "warn", health.error)
 
-    click.echo()
-    click.echo("Setup complete.")
-    click.echo()
-    click.echo(
-        "To enable remote authentication, run 'openbase-coder login' "
-        "and ensure OPENBASE_CODER_CLI_WEB_BACKEND_URL is set in your .env."
+    # --- Report onboarding state to openbase-cloud ---
+    progress.step("cloud_report", "start")
+    cli_configured = compute_cli_configured()
+    report = register_and_report(
+        cli_configured=cli_configured, serve_healthy=serve_healthy
     )
+    if report.ok:
+        click.echo("Registered device and reported CLI state to openbase-cloud.")
+        progress.step("cloud_report", "ok")
+    else:
+        if report.supported:
+            click.echo(
+                click.style(
+                    f"  WARN  Could not report onboarding state to openbase-cloud: "
+                    f"{report.error}",
+                    fg="yellow",
+                )
+            )
+        progress.step("cloud_report", "warn", report.error)
+
+    return serve_healthy
 
 
 def _clone_workspace(workspace_dir: str) -> None:
