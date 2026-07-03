@@ -55,9 +55,11 @@ def test_device_registration_payload_includes_tailscale(monkeypatch) -> None:
     monkeypatch.setattr(
         cloud_registration, "tailscale_self_identity", _fake_identity
     )
+    monkeypatch.setattr(cloud_registration, "_device_id", lambda: "desktop-1")
 
     payload = cloud_registration.device_registration_payload()
 
+    assert payload["device_id"] == "desktop-1"
     assert payload["kind"] == "desktop"
     assert payload["hostname"]
     assert payload["platform"] in ("darwin", "linux")
@@ -67,6 +69,8 @@ def test_device_registration_payload_includes_tailscale(monkeypatch) -> None:
         "tailnet": "tailnet.ts.net",
         "ips": ["100.64.0.1"],
     }
+    assert payload["tailscale_ip"] == "100.64.0.1"
+    assert payload["tailscale_magic_dns"] == "mac.tailnet.ts.net"
 
 
 def test_device_registration_payload_omits_tailscale_when_down(monkeypatch) -> None:
@@ -78,7 +82,27 @@ def test_device_registration_payload_omits_tailscale_when_down(monkeypatch) -> N
 
     payload = cloud_registration.device_registration_payload()
 
-    assert payload["tailscale"] is None
+    assert "tailscale" not in payload
+    assert "tailscale_ip" not in payload
+    assert "tailscale_magic_dns" not in payload
+
+
+def test_device_registration_payload_reuses_cached_device_id(
+    monkeypatch, onboarding_cache
+) -> None:
+    monkeypatch.setattr(
+        cloud_registration,
+        "tailscale_self_identity",
+        lambda: _fake_identity(available=False),
+    )
+
+    first = cloud_registration.device_registration_payload()
+    second = cloud_registration.device_registration_payload()
+
+    assert first["device_id"].startswith("desktop-")
+    assert second["device_id"] == first["device_id"]
+    cache = json.loads(onboarding_cache.read_text(encoding="utf-8"))
+    assert cache["device_id"] == first["device_id"]
 
 
 def test_register_success_writes_cache(
@@ -169,7 +193,7 @@ def test_login_required_never_raises(monkeypatch, onboarding_cache) -> None:
     assert "login" in (result.error or "").lower()
 
 
-def test_register_and_report_stops_after_failed_register(
+def test_register_and_report_returns_registration_failure(
     monkeypatch, onboarding_cache, logged_in
 ) -> None:
     monkeypatch.setattr(
@@ -185,11 +209,16 @@ def test_register_and_report_stops_after_failed_register(
 
     assert result.supported is False
     assert len(calls) == 1
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["url"].endswith("/api/openbase/devices/register/")
 
 
-def test_report_cli_state_patches_state(
+def test_report_cli_state_posts_registration_capabilities(
     monkeypatch, onboarding_cache, logged_in
 ) -> None:
+    monkeypatch.setattr(
+        cloud_registration, "tailscale_self_identity", _fake_identity
+    )
     calls = _mock_response(monkeypatch, httpx.Response(200, json={}))
 
     result = cloud_registration.report_cli_state(
@@ -197,10 +226,10 @@ def test_report_cli_state_patches_state(
     )
 
     assert result.ok is True
-    assert calls[0]["method"] == "PATCH"
-    assert calls[0]["url"].endswith("/api/openbase/devices/self/state/")
-    assert calls[0]["json"]["cli_configured"] is True
-    assert calls[0]["json"]["serve_healthy"] is False
+    assert calls[0]["url"].endswith("/api/openbase/devices/register/")
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["json"]["capabilities"]["cli_configured"] is True
+    assert calls[0]["json"]["capabilities"]["tailscale_serve_healthy"] is False
 
     cache = json.loads(onboarding_cache.read_text(encoding="utf-8"))
     assert cache["last_report"]["cli_configured"] is True

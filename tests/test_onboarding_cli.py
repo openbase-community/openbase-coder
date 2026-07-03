@@ -178,3 +178,27 @@ def test_setup_progress_disabled_is_noop() -> None:
     progress.step("workspace", "start")
     progress.result(cli_configured=True, tailscale_serve_healthy=True)
     progress.abort("boom")
+
+
+def test_setup_result_uses_computed_cli_state(monkeypatch, capfd) -> None:
+    monkeypatch.setattr(setup_cli.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(setup_cli, "_run_setup_phases", lambda *args, **kwargs: True)
+    monkeypatch.setattr(setup_cli, "compute_cli_configured", lambda: False)
+
+    result = CliRunner().invoke(
+        main,
+        ["setup", "--json-progress", "--skip-clone", "--skip-services"],
+    )
+
+    assert result.exit_code == 0
+    events = [
+        json.loads(line)
+        for line in capfd.readouterr().out.splitlines()
+        if line.strip()
+    ]
+    assert events[-1] == {
+        "event": "result",
+        "ok": True,
+        "cli_configured": False,
+        "tailscale_serve_healthy": True,
+    }

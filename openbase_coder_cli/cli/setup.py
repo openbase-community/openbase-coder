@@ -80,6 +80,7 @@ from openbase_coder_cli.runtime import (
 from openbase_coder_cli.services.cloud_registration import register_and_report
 from openbase_coder_cli.services.installation import InstallationConfig
 from openbase_coder_cli.services.launchd import install_all_services
+from openbase_coder_cli.services.onboarding import compute_cli_configured
 from openbase_coder_cli.services.tailscale_serve import (
     configure_tailscale_serve,
     tailscale_serve_health,
@@ -358,7 +359,10 @@ def setup(
     except Exception as exc:
         progress.abort(str(exc))
         raise
-    progress.result(cli_configured=True, tailscale_serve_healthy=serve_healthy)
+    cli_configured = compute_cli_configured()
+    progress.result(
+        cli_configured=cli_configured, tailscale_serve_healthy=serve_healthy
+    )
 
     click.echo()
     click.echo("Setup complete.")
@@ -529,7 +533,10 @@ def _run_setup_phases(
 
     # --- Report onboarding state to openbase-cloud ---
     progress.step("cloud_report", "start")
-    report = register_and_report(cli_configured=True, serve_healthy=serve_healthy)
+    cli_configured = compute_cli_configured()
+    report = register_and_report(
+        cli_configured=cli_configured, serve_healthy=serve_healthy
+    )
     if report.ok:
         click.echo("Registered device and reported CLI state to openbase-cloud.")
         progress.step("cloud_report", "ok")

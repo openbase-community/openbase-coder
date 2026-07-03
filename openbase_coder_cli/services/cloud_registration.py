@@ -12,6 +12,7 @@ from __future__ import annotations
 import platform
 import socket
 import time
+import uuid
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -25,6 +26,7 @@ from openbase_coder_cli.config.token_manager import (
 )
 from openbase_coder_cli.services.onboarding import (
     compute_cli_configured,
+    read_onboarding_cache,
     web_backend_url,
     write_onboarding_cache,
 )
@@ -32,7 +34,6 @@ from openbase_coder_cli.services.tailnet_devices import tailscale_self_identity
 from openbase_coder_cli.services.tailscale_serve import tailscale_serve_health
 
 DEVICE_REGISTER_PATH = "/api/openbase/devices/register/"
-DEVICE_STATE_PATH = "/api/openbase/devices/self/state/"
 REQUEST_TIMEOUT_SECONDS = 15
 
 
@@ -49,27 +50,58 @@ class CloudReportResult:
 
 def device_registration_payload() -> dict[str, Any]:
     identity = tailscale_self_identity()
-    tailscale_block = (
-        {
-            "dns_name": identity["dns_name"],
-            "node_hostname": identity["node_hostname"],
-            "tailnet": identity["tailnet"],
-            "ips": identity["ips"],
-        }
-        if identity["available"]
-        else None
-    )
-    return {
+    payload: dict[str, Any] = {
+        "device_id": _device_id(),
         "kind": "desktop",
         "hostname": socket.gethostname(),
+        "display_name": socket.gethostname(),
         "platform": platform.system().lower(),
         "os_version": (
             platform.mac_ver()[0]
             if platform.system() == "Darwin"
             else platform.release()
         ),
-        "app_version": __version__,
-        "tailscale": tailscale_block,
+        "version": __version__,
+    }
+    if identity["available"]:
+        payload.update(
+            {
+                "tailscale": {
+                    "dns_name": identity["dns_name"],
+                    "node_hostname": identity["node_hostname"],
+                    "tailnet": identity["tailnet"],
+                    "ips": identity["ips"],
+                },
+                "tailscale_magic_dns": identity["dns_name"] or "",
+                "capabilities": {
+                    "tailscale_ips": identity["ips"],
+                },
+            }
+        )
+        if identity["ips"]:
+            payload["tailscale_ip"] = identity["ips"][0]
+    return payload
+
+
+def _device_id() -> str:
+    cache = read_onboarding_cache()
+    existing = cache.get("device_id")
+    if isinstance(existing, str) and existing:
+        return existing
+    generated = f"desktop-{uuid.uuid4().hex}"
+    write_onboarding_cache({"device_id": generated})
+    return generated
+
+
+def _with_capabilities(
+    payload: dict[str, Any], capabilities: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        **payload,
+        "capabilities": {
+            **payload.get("capabilities", {}),
+            **capabilities,
+        },
     }
 
 
@@ -87,20 +119,22 @@ def report_cli_state(
     cli_configured: bool | None = None,
     serve_healthy: bool | None = None,
 ) -> CloudReportResult:
-    """PATCH this device's CLI state to openbase-cloud. Never raises."""
+    """Advertise this device's current CLI facts to openbase-cloud. Never raises."""
     if cli_configured is None:
         cli_configured = compute_cli_configured()
     if serve_healthy is None:
         serve_healthy = tailscale_serve_health().healthy
-    result = _post_to_cloud(
-        DEVICE_STATE_PATH,
+    payload = _with_capabilities(
+        device_registration_payload(),
         {
-            "hostname": socket.gethostname(),
             "cli_configured": cli_configured,
             "cli_version": __version__,
-            "serve_healthy": serve_healthy,
+            "tailscale_serve_healthy": serve_healthy,
         },
-        method="PATCH",
+    )
+    result = _post_to_cloud(
+        DEVICE_REGISTER_PATH,
+        payload,
     )
     write_onboarding_cache(
         {
@@ -120,13 +154,10 @@ def register_and_report(
     cli_configured: bool | None = None,
     serve_healthy: bool | None = None,
 ) -> CloudReportResult:
-    """Register the device, then report CLI state. Never raises.
+    """Register the device and advertise CLI facts. Never raises.
 
     Returns the first failing result so callers can surface a single warning.
     """
-    register_result = register_device_with_cloud()
-    if not register_result.ok:
-        return register_result
     return report_cli_state(
         cli_configured=cli_configured, serve_healthy=serve_healthy
     )
