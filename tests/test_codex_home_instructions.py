@@ -33,18 +33,14 @@ def test_ensure_openbase_agents_md_preserves_user_h2_sections(tmp_path) -> None:
     changed = codex_home_instructions.ensure_openbase_agents_md(
         workspace,
         codex_home_dir=codex_home,
+        include_normal_codex_agents=False,
     )
 
     assert changed is True
     assert agents.read_text(encoding="utf-8") == (
-        "# Personal instructions\n\n"
-        "- Keep this custom top-level note.\n\n"
         "## Openbase Coder Instructions\n\n"
         f"- These instructions are auto generated from {source}.\n\n"
         "- New repo rule\n"
-        "\n"
-        "## My Project Notes\n\n"
-        "- Keep this project note.\n"
     )
 
 
@@ -58,6 +54,7 @@ def test_ensure_openbase_agents_md_demotes_generated_h2s(tmp_path) -> None:
     codex_home_instructions.ensure_openbase_agents_md(
         workspace,
         codex_home_dir=codex_home,
+        include_normal_codex_agents=False,
     )
 
     content = (codex_home / "AGENTS.md").read_text(encoding="utf-8")
@@ -73,7 +70,7 @@ def test_ensure_openbase_agents_md_interpolates_confirmation_phrase(
     codex_home = tmp_path / "codex_home"
     source.parent.mkdir(parents=True)
     source.write_text(
-        '- Require "{dangerous_confirmation_phrase}" before publishing.\n',
+        '- Require "${dangerous_confirmation_phrase}" before publishing.\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(
@@ -84,11 +81,12 @@ def test_ensure_openbase_agents_md_interpolates_confirmation_phrase(
     codex_home_instructions.ensure_openbase_agents_md(
         workspace,
         codex_home_dir=codex_home,
+        include_normal_codex_agents=False,
     )
 
     content = (codex_home / "AGENTS.md").read_text(encoding="utf-8")
     assert '"ship it"' in content
-    assert "{dangerous_confirmation_phrase}" not in content
+    assert "${dangerous_confirmation_phrase}" not in content
 
 
 def test_ensure_rendered_instruction_file_updates_managed_template(
@@ -98,7 +96,7 @@ def test_ensure_rendered_instruction_file_updates_managed_template(
     target = tmp_path / "openbase" / "instructions" / "SUPER_AGENT_INSTRUCTIONS.md"
     source.parent.mkdir(parents=True)
     source.write_text(
-        'Requires "{dangerous_confirmation_phrase}" first.\n',
+        'Requires "${dangerous_confirmation_phrase}" first.\n',
         encoding="utf-8",
     )
     target.parent.mkdir(parents=True)
@@ -115,7 +113,31 @@ def test_ensure_rendered_instruction_file_updates_managed_template(
     )
 
     assert changed is True
-    assert target.read_text(encoding="utf-8") == 'Requires "ship it" first.\n'
+    assert target.read_text(encoding="utf-8") == (
+        f"<!-- Generated from {source}; edit the source template instead. -->\n\n"
+        'Requires "ship it" first.\n'
+    )
+
+
+def test_ensure_rendered_instruction_file_records_template_source(
+    tmp_path,
+) -> None:
+    source = tmp_path / "instructions" / "VOICE_INSTRUCTIONS.md"
+    target = tmp_path / "openbase" / "instructions" / "VOICE_INSTRUCTIONS.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("Voice instructions.\n", encoding="utf-8")
+
+    changed = codex_home_instructions.ensure_rendered_instruction_file(
+        source,
+        target,
+        document_label="Voice instructions",
+    )
+
+    assert changed is True
+    assert target.read_text(encoding="utf-8") == (
+        f"<!-- Generated from {source}; edit the source template instead. -->\n\n"
+        "Voice instructions.\n"
+    )
 
 
 def test_refresh_openbase_agents_md_from_installation_uses_saved_workspace(
@@ -144,12 +166,51 @@ def test_refresh_openbase_agents_md_from_installation_uses_saved_workspace(
         FakeInstallationConfig,
     )
     monkeypatch.setattr(codex_home_instructions, "CODEX_HOME_DIR", codex_home)
+    monkeypatch.setattr(
+        codex_home_instructions,
+        "NORMAL_CODEX_AGENTS_MD_PATH",
+        tmp_path / "missing-normal" / "AGENTS.md",
+    )
 
     assert codex_home_instructions.refresh_openbase_agents_md_from_installation()
     assert (codex_home / "AGENTS.md").read_text(encoding="utf-8") == (
         "## Openbase Coder Instructions\n\n"
         f"- These instructions are auto generated from {source}.\n\n"
         "- Standard rule\n"
+    )
+
+
+def test_ensure_openbase_agents_md_can_include_normal_codex_agents(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = workspace / "instructions" / "AGENTS.md"
+    codex_home = tmp_path / "codex_home"
+    normal_agents = tmp_path / "normal" / "AGENTS.md"
+    source.parent.mkdir(parents=True)
+    normal_agents.parent.mkdir(parents=True)
+    source.write_text("- Openbase rule\n", encoding="utf-8")
+    normal_agents.write_text("- Personal rule\n", encoding="utf-8")
+    monkeypatch.setattr(
+        codex_home_instructions,
+        "NORMAL_CODEX_AGENTS_MD_PATH",
+        normal_agents,
+    )
+
+    codex_home_instructions.ensure_openbase_agents_md(
+        workspace,
+        codex_home_dir=codex_home,
+        include_normal_codex_agents=True,
+    )
+
+    assert (codex_home / "AGENTS.md").read_text(encoding="utf-8") == (
+        "## Non-Openbase Instructions\n\n"
+        f"- These instructions are included from {normal_agents}.\n\n"
+        "- Personal rule\n\n"
+        "## Openbase Coder Instructions\n\n"
+        f"- These instructions are auto generated from {source}.\n\n"
+        "- Openbase rule\n"
     )
 
 

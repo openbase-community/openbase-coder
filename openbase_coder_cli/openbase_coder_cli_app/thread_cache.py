@@ -17,6 +17,7 @@ _cache_lock = threading.Lock()
 _cached_threads: list[ThreadInfo] | None = None
 _cached_at = 0.0
 _cached_pages: dict[tuple[int, str | None], tuple[float, ThreadListPage]] = {}
+_cached_thread_states: dict[str, tuple[float, ThreadInfo | None]] = {}
 
 
 def get_cached_thread_list(manager: Any) -> list[ThreadInfo]:
@@ -70,11 +71,29 @@ def get_cached_thread_page(
         )
 
 
+def get_cached_thread_state(manager: Any, thread_id: str) -> ThreadInfo | None:
+    """Return one cached thread snapshot and coalesce concurrent refreshes."""
+    global _cached_thread_states
+
+    now = time.monotonic()
+    with _cache_lock:
+        cached = _cached_thread_states.get(thread_id)
+        if cached is not None:
+            cached_at, cached_thread = cached
+            if now - cached_at < THREAD_LIST_CACHE_TTL_SECONDS:
+                return cached_thread
+
+        thread = async_to_sync(manager.get_thread_state)(thread_id)
+        _cached_thread_states[thread_id] = (time.monotonic(), thread)
+        return thread
+
+
 def invalidate_thread_list_cache() -> None:
     """Clear cached thread-list reads after thread mutations."""
-    global _cached_at, _cached_pages, _cached_threads
+    global _cached_at, _cached_pages, _cached_thread_states, _cached_threads
 
     with _cache_lock:
         _cached_threads = None
         _cached_at = 0.0
         _cached_pages = {}
+        _cached_thread_states = {}

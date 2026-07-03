@@ -61,6 +61,7 @@ def test_create_routine_calls_super_agents_library(monkeypatch) -> None:
         "save_routine",
         {
             "name": "daily",
+            "kind": "agent",
             "prompt": "Check status",
             "time": "09:05",
             "scheduleType": "daily",
@@ -120,12 +121,53 @@ def test_create_interval_routine_calls_super_agents_library(monkeypatch) -> None
         "save_routine",
         {
             "name": "poll-prioritized",
+            "kind": "agent",
             "prompt": "Check Notion priority.",
             "scheduleType": "interval",
             "intervalSeconds": 60,
             "timezone": "America/New_York",
             "enabled": True,
             "threadId": "thread-1",
+            "approvalPolicy": "never",
+            "sandboxType": "dangerFullAccess",
+            "mode": "default",
+        },
+    )
+
+
+def test_create_command_routine_calls_super_agents_library(monkeypatch) -> None:
+    FakeRoutinesClient.instances = []
+    monkeypatch.setattr(routines_cli, "CodexAppServerClient", FakeRoutinesClient)
+
+    result = CliRunner().invoke(
+        routines_cli.routines,
+        [
+            "create",
+            "discover-prs",
+            "--kind",
+            "command",
+            "--command",
+            "super-agents-open-pr-review-discover --workspace .",
+            "--command-timeout-seconds",
+            "120",
+            "--interval-seconds",
+            "60",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert FakeRoutinesClient.instances[0].calls[0] == (
+        "save_routine",
+        {
+            "name": "discover-prs",
+            "prompt": "",
+            "kind": "command",
+            "command": "super-agents-open-pr-review-discover --workspace .",
+            "commandTimeoutSeconds": 120,
+            "scheduleType": "interval",
+            "intervalSeconds": 60,
+            "timezone": "America/New_York",
+            "enabled": True,
             "approvalPolicy": "never",
             "sandboxType": "dangerFullAccess",
             "mode": "default",
@@ -162,4 +204,20 @@ def test_update_routine_can_toggle_fresh_thread_per_run(monkeypatch) -> None:
     assert FakeRoutinesClient.instances[0].calls[0] == (
         "save_routine",
         {"name": "daily", "freshThreadPerRun": False},
+    )
+
+
+def test_update_routine_can_switch_to_command(monkeypatch) -> None:
+    FakeRoutinesClient.instances = []
+    monkeypatch.setattr(routines_cli, "CodexAppServerClient", FakeRoutinesClient)
+
+    result = CliRunner().invoke(
+        routines_cli.routines,
+        ["update", "open-pr-review-routine", "--kind", "command", "--command", "discover"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert FakeRoutinesClient.instances[0].calls[0] == (
+        "save_routine",
+        {"name": "open-pr-review-routine", "kind": "command", "command": "discover"},
     )

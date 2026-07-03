@@ -5,15 +5,6 @@ from pathlib import Path
 import click
 
 from openbase_coder_cli.cli.local_server import local_server_request
-from openbase_coder_cli.dispatcher_config import (
-    REASONING_EFFORTS,
-    dispatcher_reasoning_effort,
-    set_dispatcher_reasoning_effort,
-    set_super_agents_model,
-    set_super_agents_reasoning_effort,
-    super_agents_model,
-    super_agents_reasoning_effort,
-)
 from openbase_coder_cli.livekit_announcer import (
     MAX_ANNOUNCER_TEXT_LENGTH,
     SUPPORTED_AUDIO_EXTENSIONS,
@@ -263,6 +254,22 @@ def ios_start_developer_call() -> None:
     click.echo(f"iOS developer call command published: {data.get('command_id')}")
 
 
+@ios.command("upload-logs")
+@click.option(
+    "--limit",
+    type=click.IntRange(1, 2000),
+    default=None,
+    help="Maximum number of recent buffered iOS log entries to upload.",
+)
+def ios_upload_logs(limit: int | None) -> None:
+    """Ask the foreground iOS app to upload its recent diagnostics logs."""
+    payload: dict[str, object] = {"action": "upload_diagnostics"}
+    if limit is not None:
+        payload["limit"] = limit
+    data = _publish_ios_app_control(payload)
+    click.echo(f"iOS diagnostics upload command published: {data.get('command_id')}")
+
+
 def _publish_ios_app_control(payload: dict[str, object]) -> dict:
     response = local_server_request("POST", "/api/user/ios-app-control/", json=payload)
     return response.json()
@@ -291,58 +298,6 @@ def exit_to_dispatch(room_name: str) -> None:
     data = response.json()
     target_room = data.get("room_name") or "active room"
     click.echo(f"Voice route returned to dispatcher in {target_room}.")
-
-
-@user.command("dispatcher-reasoning")
-@click.argument("level", required=False)
-def dispatcher_reasoning(level: str | None) -> None:
-    """Show or set the dispatcher default reasoning effort."""
-    if level is None:
-        current = dispatcher_reasoning_effort() or "app-server default"
-        click.echo(f"Dispatcher reasoning effort: {current}")
-        return
-
-    normalized = level.strip().lower()
-    if normalized not in REASONING_EFFORTS:
-        allowed = ", ".join(sorted(REASONING_EFFORTS))
-        raise click.ClickException(f"Reasoning effort must be one of: {allowed}.")
-
-    set_dispatcher_reasoning_effort(normalized)
-    click.echo(f"Dispatcher reasoning effort set to {normalized}.")
-
-
-@user.command("super-agents-reasoning")
-@click.argument("level", required=False)
-def super_agents_reasoning(level: str | None) -> None:
-    """Show or set the Super Agents default reasoning effort."""
-    if level is None:
-        current = super_agents_reasoning_effort() or "high"
-        click.echo(f"Super Agents reasoning effort: {current}")
-        return
-
-    normalized = level.strip().lower()
-    if normalized not in REASONING_EFFORTS:
-        allowed = ", ".join(sorted(REASONING_EFFORTS))
-        raise click.ClickException(f"Reasoning effort must be one of: {allowed}.")
-
-    set_super_agents_reasoning_effort(normalized)
-    click.echo(f"Super Agents reasoning effort set to {normalized}.")
-
-
-@user.command("super-agents-model")
-@click.argument("model", required=False)
-def super_agents_model_command(model: str | None) -> None:
-    """Show or set the current backend's Super Agents model."""
-    if model is None:
-        current = super_agents_model() or "backend default"
-        click.echo(f"Current backend Super Agents model: {current}")
-        return
-
-    try:
-        set_super_agents_model(model)
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
-    click.echo(f"Current backend Super Agents model set to {' '.join(model.split())}.")
 
 
 @user.command("transfer-to-thread")
@@ -398,8 +353,3 @@ def transfer_to_agent(agent_name: str, room_name: str) -> None:
     target_room = data.get("room_name") or "active room"
     active_target = data.get("state", {}).get("active_target_thread_id") or agent_name
     click.echo(f"Voice route transferred to {active_target} in {target_room}.")
-
-
-user.add_command(dispatcher_reasoning, "operator-reasoning")
-user.add_command(super_agents_reasoning, "super-agent-reasoning")
-user.add_command(super_agents_model_command, "super-agent-model")

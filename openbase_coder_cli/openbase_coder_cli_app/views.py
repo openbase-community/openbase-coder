@@ -47,11 +47,14 @@ from openbase_coder_cli.openbase_coder_cli_app.diagnostics import (
 from openbase_coder_cli.openbase_coder_cli_app.env_settings import env_settings
 from openbase_coder_cli.openbase_coder_cli_app.ios_app_control import ios_app_control
 from openbase_coder_cli.openbase_coder_cli_app.livekit import (
-    apple_music_playback_entitlement,
+    apple_music_playback_entitlement,  # noqa: F401
     livekit_room_token,
     livekit_voice_route,
     livekit_voice_route_exit,
     livekit_voice_route_transfer,
+)
+from openbase_coder_cli.openbase_coder_cli_app.model_settings import (
+    backend_model_settings,  # noqa: F401
 )
 from openbase_coder_cli.openbase_coder_cli_app.onboarding import onboarding_status
 from openbase_coder_cli.openbase_coder_cli_app.plugins_tools import (
@@ -90,6 +93,7 @@ from openbase_coder_cli.openbase_coder_cli_app.service_tier_settings import (
     service_tier_settings,
 )
 from openbase_coder_cli.openbase_coder_cli_app.services_views import (
+    agents_generation_settings,
     launchctl_ignored_settings,
     launchctl_service_action,
     launchctl_services_list,
@@ -100,11 +104,13 @@ from openbase_coder_cli.openbase_coder_cli_app.services_views import (
     thread_device_sync_conflict_resolve,
     thread_device_sync_conflicts,
     thread_device_sync_status,
+    thread_sync_conflicts,
 )
 from openbase_coder_cli.openbase_coder_cli_app.skills import _home_skills_dir
 from openbase_coder_cli.openbase_coder_cli_app.tags import tag_options
 from openbase_coder_cli.openbase_coder_cli_app.threads import (
     thread_detail,
+    thread_dispatcher,  # noqa: F401
     thread_favorite,
     thread_interrupt,
     thread_list,
@@ -243,6 +249,12 @@ def skills_symlink(request):
 
 
 @csrf_exempt
+def skills_auto_link_settings(request):
+    _sync_skills_compat_globals()
+    return _skills.skills_auto_link_settings(request)
+
+
+@csrf_exempt
 def printing_press_catalog(request):
     _sync_skills_compat_globals()
     return _skills.printing_press_catalog(request)
@@ -262,6 +274,7 @@ def skill_detail(request, skill_name):
 
 __all__ = [
     "agents_md",
+    "agents_generation_settings",
     "all_project_reports",
     "approval_request_detail",
     "approval_requests",
@@ -318,9 +331,11 @@ __all__ = [
     "thread_device_sync_status",
     "thread_device_sync_conflicts",
     "thread_device_sync_conflict_resolve",
+    "thread_sync_conflicts",
     "set_dispatcher_voice",
     "skill_detail",
     "skills_list",
+    "skills_auto_link_settings",
     "skills_symlink",
     "tag_options",
     "stt_settings",

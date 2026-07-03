@@ -383,6 +383,7 @@ def launchctl_bootstrap(svc: ServiceDefinition) -> None:
     plist = _plist_path(svc)
     domain = f"gui/{_uid()}"
     _prepare_service_start(svc)
+    _launchctl("enable", f"{domain}/{label}", check=False)
     for attempt in range(4):
         # Bootout on each attempt in case a prior bootstrap partially registered
         _launchctl("bootout", f"{domain}/{label}", check=False)

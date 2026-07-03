@@ -51,7 +51,7 @@ What setup does:
 1. Detects the bundled runtime package, or clones/updates `~/.openbase/workspace` in dev-workspace mode.
 2. Writes `~/.openbase/installation.json`.
 3. Generates `~/.openbase/.env` (if it does not already exist).
-4. Maintains editable `~/.openbase/codex_home/AGENTS.md` and `~/.openbase/claude_config/CLAUDE.md` files, and links shared instruction files into `~/.openbase/instructions`.
+4. Generates Openbase instruction files from bundled or workspace templates, links Openbase Claude instructions to the generated Openbase AGENTS file, and keeps normal Claude linked to normal Codex AGENTS.
 5. Symlinks bundled or workspace skills into both Openbase Codex and Claude config skill homes.
 6. Initializes the CLI workspace and LiveKit model downloads in dev-workspace mode.
 7. Writes Codex app-server defaults such as `CODEX_MODEL=gpt-5.5`, `CODEX_MODEL_REASONING_EFFORT=high`, `CODEX_SERVICE_TIER=standard`, `CODEX_APP_SERVER_URL`, and `LIVEKIT_CODEX_THREAD_CWD`.

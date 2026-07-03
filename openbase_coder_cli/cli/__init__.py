@@ -20,6 +20,7 @@ from .claude_chrome import claude_chrome
 from .claude_sync import claude_sync
 from .codex_sync import codex_sync
 from .computer_use import computer_use
+from .defaults import defaults
 from .desktop import desktop
 from .doctor import doctor
 from .onboarding import onboarding
@@ -82,6 +83,7 @@ main.add_command(claude_chrome)
 main.add_command(computer_use)
 main.add_command(routines)
 main.add_command(super_agent_name)
+main.add_command(defaults)
 main.add_command(exit_to_dispatch)
 main.add_command(vibes)
 

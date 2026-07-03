@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from shutil import which
 
@@ -32,7 +33,8 @@ from openbase_coder_cli.cli.node import run_workspace_package_command
 from openbase_coder_cli.codex_backend_config import apply_backend_to_codex_config
 from openbase_coder_cli.codex_home_instructions import (
     ensure_openbase_agents_md,
-    ensure_openbase_instruction_md,
+    ensure_openbase_claude_md_symlink,
+    ensure_rendered_instruction_file,
 )
 from openbase_coder_cli.config.machine_token_manager import (
     MachineTokenError,
@@ -64,11 +66,11 @@ from openbase_coder_cli.paths import (
     LEGACY_CODEX_SUPER_AGENT_INSTRUCTIONS_PATH,
     NORMAL_CLAUDE_CONFIG_DIR,
     NORMAL_CLAUDE_SETTINGS_PATH,
+    NORMAL_CODEX_AGENTS_MD_PATH,
     NORMAL_CODEX_CONFIG_PATH,
     OPENBASE_BASE_DIR,
     OPENBASE_CLAUDE_CONFIG_DIR,
     OPENBASE_CLAUDE_JSON_PATH,
-    OPENBASE_CLAUDE_MD_PATH,
     OPENBASE_CLAUDE_SETTINGS_PATH,
     OPENBASE_SOUNDS_DIR,
 )
@@ -103,7 +105,7 @@ WORKSPACE_INSTALL_SET = "default"
 CODEX_HOME_DEFAULT_SOURCE_DIR = "instructions"
 CODEX_HOME_SKILLS_SOURCE_DIR = "skills"
 BUNDLED_SOUNDS_PACKAGE = "openbase_coder_cli.resources.sounds"
-BUNDLED_SOUND_FILES = ("wilhelm.wav",)
+BUNDLED_SOUND_FILES = ("deactivate.wav",)
 CODEX_HOME_DEFAULT_FILES = (
     ("VOICE_INSTRUCTIONS.md", CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH),
     ("DISPATCHER_INSTRUCTIONS.md", CODEX_DISPATCHER_INSTRUCTIONS_PATH),
@@ -447,6 +449,7 @@ def _run_setup_phases(
     # --- Symlink Codex auth into the service CODEX_HOME ---
     progress.step("agent_config", "start")
     _symlink_codex_auth()
+    _ensure_normal_claude_md_symlink()
     _ensure_codex_home_default_files(workspace_dir if use_dev_workspace else "")
     _ensure_codex_home_dispatcher_config(audio_provider=audio_provider)
     if audio_provider == AUDIO_PROVIDER_LOCAL:
@@ -801,31 +804,64 @@ def _ensure_codex_home_default_files(workspace_dir: str) -> None:
         codex_home_dir=CODEX_HOME_DIR,
         report=click.echo,
     )
-    ensure_openbase_instruction_md(
-        defaults_dir.parent,
-        target_path=OPENBASE_CLAUDE_MD_PATH,
-        document_label="Claude config CLAUDE.md",
-        report=click.echo,
-    )
+    ensure_openbase_claude_md_symlink(report=click.echo)
 
     for resource_name, target_path in CODEX_HOME_DEFAULT_FILES:
         source_path = defaults_dir / resource_name
-        if not source_path.is_file():
-            click.echo(f"Openbase instruction source not found at {source_path}")
-            continue
-
-        _ensure_matching_symlink_or_file(
+        ensure_rendered_instruction_file(
+            source_path,
             target_path=target_path,
-            source_path=source_path,
-            label="Openbase instruction",
+            document_label=f"Openbase instruction {resource_name}",
+            report=click.echo,
         )
 
     for canonical_path, legacy_path in LEGACY_CODEX_HOME_DEFAULT_FILES:
-        _ensure_legacy_symlink(
-            legacy_path=legacy_path,
-            canonical_path=canonical_path,
-            label="legacy Codex home instruction",
+        source_name = canonical_path.name
+        ensure_rendered_instruction_file(
+            defaults_dir / source_name,
+            target_path=legacy_path,
+            document_label=f"legacy Codex home instruction {source_name}",
+            force=True,
+            report=click.echo,
         )
+
+
+def _ensure_normal_claude_md_symlink() -> None:
+    """Keep the user's normal Claude instructions linked to normal Codex AGENTS.md."""
+    source_path = NORMAL_CODEX_AGENTS_MD_PATH.expanduser()
+    target_path = NORMAL_CLAUDE_CONFIG_DIR.expanduser() / "CLAUDE.md"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not source_path.exists():
+        if target_path.exists() and target_path.is_file() and not target_path.is_symlink():
+            source_path.write_text(target_path.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            source_path.touch()
+
+    relative_source = Path(os.path.relpath(source_path, target_path.parent))
+    if target_path.is_symlink():
+        if target_path.readlink() == relative_source:
+            click.echo(f"Normal Claude CLAUDE.md already linked at {target_path}")
+            return
+        target_path.unlink()
+    elif target_path.exists():
+        if not target_path.is_file():
+            click.echo(
+                f"Normal Claude CLAUDE.md already exists at {target_path}; "
+                "leaving it unchanged."
+            )
+            return
+        if target_path.read_text(encoding="utf-8") != source_path.read_text(encoding="utf-8"):
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup_path = target_path.with_name(f"CLAUDE.md.backup-openbase-coder-{timestamp}")
+            target_path.replace(backup_path)
+            click.echo(f"Backed up normal Claude CLAUDE.md to {backup_path}")
+        else:
+            target_path.unlink()
+
+    target_path.symlink_to(relative_source)
+    click.echo(f"Linked normal Claude CLAUDE.md at {target_path}")
 
 
 def _ensure_matching_symlink_or_file(

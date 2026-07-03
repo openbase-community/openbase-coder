@@ -52,6 +52,7 @@ def test_codex_app_server_service_sets_model_defaults():
     assert "OPENBASE_CLOUD_CODEX_API_KEY" in command
     assert "auth print-machine-token" in command
     assert "auth print-access-token" not in command
+    assert 'export DISABLE_AUTOUPDATER="${DISABLE_AUTOUPDATER:-1}"' in command
     assert "model_providers.openbase_cloud.base_url" not in command
     assert 'CODEX_MODEL="${CODEX_MODEL:-gpt-5.5}"' not in command
     assert (

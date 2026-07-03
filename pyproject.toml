@@ -16,7 +16,6 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "whitenoise>=6.8.0",
     "channels>=4.2.0",
-    "django-mcp-server",
     "pydantic>=2.12.5",
     "PyJWT>=2.9.0",
     "cryptography>=43.0.0",
@@ -26,7 +25,6 @@ dependencies = [
     "docstring-parser>=0.18.0",
     "httpcore>=1.0.9",
     "httpx>=0.28.1",
-    "mcp[cli]>=1.25.0",
     "deepagents==0.6.7",
     "google-auth>=2.53.0",
     "google-genai>=2.8.0",
@@ -89,7 +87,7 @@ source = "vcs"
 [tool.hatch.build.targets.wheel]
 packages = ["openbase_coder_cli"]
 artifacts = [
-    "openbase_coder_cli/resources/sounds/wilhelm.wav",
+    "openbase_coder_cli/resources/sounds/deactivate.wav",
 ]
 
 [tool.hatch.build.targets.sdist]

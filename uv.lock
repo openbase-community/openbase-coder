@@ -600,22 +600,6 @@ wheels = [
 ]
 
 [[package]]
-name = "django-mcp-server"
-version = "0.5.7"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "django" },
-    { name = "djangorestframework" },
-    { name = "inflection" },
-    { name = "mcp" },
-    { name = "uritemplate" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b2/70/e2cf268b77d0aa171b72763325279284561dbbd9b80ed4fd6975b4b7bd9c/django_mcp_server-0.5.7.tar.gz", hash = "sha256:5077f8fabf5fb621b5ce490afd0db60f21e57b3a451ed14a9f44aef545ea4eee", size = 23910, upload-time = "2025-10-10T17:13:34.681Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2c/01/f78a11f51437f70b4ff2d9f131d47acf82c2a4cf78d63e9cf291e3727054/django_mcp_server-0.5.7-py3-none-any.whl", hash = "sha256:04b58bf02623aaee59708c3661ffe17981acd4532587c38b6cfe2c9e7090c6d3", size = 26389, upload-time = "2025-10-10T17:13:33.56Z" },
-]
-
-[[package]]
 name = "djangorestframework"
 version = "3.16.1"
 source = { registry = "https://pypi.org/simple" }
@@ -981,15 +965,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f3/49/3b30cad09e7771a4982d9975a8cbf64f00d4a1ececb53297f1d9a7be1b10/importlib_metadata-8.7.1.tar.gz", hash = "sha256:49fef1ae6440c182052f407c8d34a68f72efc36db9ca90dc0113398f2fdde8bb", size = 57107, upload-time = "2025-12-21T10:00:19.278Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fa/5e/f8e9a1d23b9c20a551a8a02ea3637b4642e22c2626e3a13a9a29cdea99eb/importlib_metadata-8.7.1-py3-none-any.whl", hash = "sha256:5a1f80bf1daa489495071efbb095d75a634cf28a8bc299581244063b53176151", size = 27865, upload-time = "2025-12-21T10:00:18.329Z" },
-]
-
-[[package]]
-name = "inflection"
-version = "0.5.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e1/7e/691d061b7329bc8d54edbf0ec22fbfb2afe61facb681f9aaa9bff7a27d04/inflection-0.5.1.tar.gz", hash = "sha256:1a29730d366e996aaacffb2f1f1cb9593dc38e2ddd30c91250c6dde09ea9b417", size = 15091, upload-time = "2020-08-22T08:16:29.139Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/59/91/aa6bde563e0085a02a435aa99b49ef75b0a4b062635e606dab23ce18d720/inflection-0.5.1-py2.py3-none-any.whl", hash = "sha256:f38b2b640938a4f35ade69ac3d053042959b62a0f1076a5bbaa1b9526605a8a2", size = 9454, upload-time = "2020-08-22T08:16:27.816Z" },
 ]
 
 [[package]]
@@ -2051,7 +2026,6 @@ dependencies = [
     { name = "distro" },
     { name = "django" },
     { name = "django-cors-headers" },
-    { name = "django-mcp-server" },
     { name = "djangorestframework" },
     { name = "docstring-parser" },
     { name = "google-auth" },
@@ -2074,7 +2048,6 @@ dependencies = [
     { name = "livekit-plugins-cartesia" },
     { name = "livekit-plugins-deepgram" },
     { name = "livekit-plugins-noise-cancellation" },
-    { name = "mcp", extra = ["cli"] },
     { name = "mlx-whisper" },
     { name = "multi-workspace" },
     { name = "numpy" },
@@ -2110,7 +2083,6 @@ requires-dist = [
     { name = "distro", specifier = ">=1.9.0" },
     { name = "django", specifier = "==5.2.6" },
     { name = "django-cors-headers", specifier = ">=4.6.0" },
-    { name = "django-mcp-server" },
     { name = "djangorestframework", specifier = "==3.16.1" },
     { name = "docstring-parser", specifier = ">=0.18.0" },
     { name = "google-auth", specifier = ">=2.53.0" },
@@ -2133,7 +2105,6 @@ requires-dist = [
     { name = "livekit-plugins-cartesia", specifier = "==1.5.17" },
     { name = "livekit-plugins-deepgram", specifier = "==1.5.4" },
     { name = "livekit-plugins-noise-cancellation", specifier = ">=0.2.5" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.25.0" },
     { name = "mlx-whisper", specifier = ">=0.4.3" },
     { name = "multi-workspace", specifier = ">=3.2.2" },
     { name = "numpy", specifier = ">=2.3.0" },

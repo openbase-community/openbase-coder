@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -11,6 +12,9 @@ from click.testing import CliRunner
 from openbase_coder_cli import claude_auth
 
 setup_cli = importlib.import_module("openbase_coder_cli.cli.setup")
+codex_home_instructions = importlib.import_module(
+    "openbase_coder_cli.codex_home_instructions"
+)
 
 
 def _patch_openbase_agent_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path]:
@@ -19,8 +23,11 @@ def _patch_openbase_agent_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path
     instructions = tmp_path / "openbase" / "instructions"
     monkeypatch.setattr(setup_cli, "CODEX_HOME_DIR", codex_home)
     monkeypatch.setattr(setup_cli, "OPENBASE_CLAUDE_CONFIG_DIR", claude_config)
+    monkeypatch.setattr(codex_home_instructions, "CODEX_HOME_DIR", codex_home)
     monkeypatch.setattr(
-        setup_cli, "OPENBASE_CLAUDE_MD_PATH", claude_config / "CLAUDE.md"
+        codex_home_instructions,
+        "OPENBASE_CLAUDE_MD_PATH",
+        claude_config / "CLAUDE.md",
     )
     monkeypatch.setattr(
         setup_cli,
@@ -36,6 +43,16 @@ def _patch_openbase_agent_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path
         setup_cli,
         "NORMAL_CLAUDE_CONFIG_DIR",
         tmp_path / "normal_claude",
+    )
+    monkeypatch.setattr(
+        setup_cli,
+        "NORMAL_CODEX_AGENTS_MD_PATH",
+        tmp_path / "normal_codex" / "AGENTS.md",
+    )
+    monkeypatch.setattr(
+        codex_home_instructions,
+        "NORMAL_CODEX_AGENTS_MD_PATH",
+        tmp_path / "normal_codex" / "AGENTS.md",
     )
     monkeypatch.setattr(
         setup_cli,
@@ -203,12 +220,19 @@ def test_ensure_codex_home_default_files_links_missing_files(
     setup_cli._ensure_codex_home_default_files(str(workspace))
 
     for resource_name, target_path in targets:
-        assert target_path.is_symlink()
-        assert target_path.resolve() == (instructions / resource_name).resolve()
-        assert target_path.read_text(encoding="utf-8") == f"default {resource_name}\n"
+        source_path = instructions / resource_name
+        assert target_path.is_file()
+        assert not target_path.is_symlink()
+        assert target_path.read_text(encoding="utf-8") == (
+            f"<!-- Generated from {source_path}; edit the source template instead. -->\n\n"
+            f"default {resource_name}\n"
+        )
         legacy_path = codex_home / resource_name
-        assert legacy_path.is_symlink()
-        assert legacy_path.readlink() == target_path
+        assert legacy_path.is_file()
+        assert not legacy_path.is_symlink()
+        assert legacy_path.read_text(encoding="utf-8") == target_path.read_text(
+            encoding="utf-8"
+        )
 
 
 def test_ensure_codex_home_default_files_renders_template_files(
@@ -221,7 +245,7 @@ def test_ensure_codex_home_default_files_renders_template_files(
     shared_instructions = tmp_path / "openbase" / "instructions"
     target = shared_instructions / "SUPER_AGENT_INSTRUCTIONS.md"
     (instructions / "SUPER_AGENT_INSTRUCTIONS.md").write_text(
-        'Require "{dangerous_confirmation_phrase}".\n',
+        'Require "${dangerous_confirmation_phrase}".\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(
@@ -238,10 +262,16 @@ def test_ensure_codex_home_default_files_renders_template_files(
 
     assert target.is_file()
     assert not target.is_symlink()
-    assert target.read_text(encoding="utf-8") == 'Require "ship it".\n'
+    assert target.read_text(encoding="utf-8") == (
+        f"<!-- Generated from {instructions / 'SUPER_AGENT_INSTRUCTIONS.md'}; "
+        'edit the source template instead. -->\n\nRequire "ship it".\n'
+    )
     legacy_path = codex_home / "SUPER_AGENT_INSTRUCTIONS.md"
-    assert legacy_path.is_symlink()
-    assert legacy_path.readlink() == target
+    assert legacy_path.is_file()
+    assert not legacy_path.is_symlink()
+    assert legacy_path.read_text(encoding="utf-8") == target.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_ensure_codex_home_default_files_preserves_custom_existing_files(
@@ -274,17 +304,22 @@ def test_ensure_codex_home_default_files_preserves_custom_existing_files(
 
     assert not existing_path.is_symlink()
     updated_agents = existing_path.read_text(encoding="utf-8")
-    assert updated_agents.startswith("custom instructions\n\n")
-    assert "## Openbase Coder Instructions\n\n" in updated_agents
-    assert (
+    assert updated_agents == (
+        "## Openbase Coder Instructions\n\n"
         f"- These instructions are auto generated from {instructions / 'AGENTS.md'}."
-        in updated_agents
+        "\n\n"
+        "default agents\n"
     )
-    assert "default agents\n" in updated_agents
-    assert missing_path.is_symlink()
-    assert missing_path.resolve() == (instructions / "VOICE_INSTRUCTIONS.md").resolve()
-    assert missing_path.read_text(encoding="utf-8") == "default voice\n"
-    assert (codex_home / "VOICE_INSTRUCTIONS.md").readlink() == missing_path
+    assert missing_path.is_file()
+    assert not missing_path.is_symlink()
+    assert missing_path.read_text(encoding="utf-8") == (
+        f"<!-- Generated from {instructions / 'VOICE_INSTRUCTIONS.md'}; "
+        "edit the source template instead. -->\n\n"
+        "default voice\n"
+    )
+    assert (codex_home / "VOICE_INSTRUCTIONS.md").read_text(
+        encoding="utf-8"
+    ) == missing_path.read_text(encoding="utf-8")
 
 
 def test_ensure_codex_home_default_files_rewrites_matching_agents_file(
@@ -339,9 +374,12 @@ def test_ensure_codex_home_default_files_converts_stale_agents_symlink(
 
     assert not target_path.is_symlink()
     updated = target_path.read_text(encoding="utf-8")
-    assert updated.startswith("stale agents\n\n")
-    assert "## Openbase Coder Instructions\n\n" in updated
-    assert "default agents\n" in updated
+    assert updated == (
+        "## Openbase Coder Instructions\n\n"
+        f"- These instructions are auto generated from {instructions / 'AGENTS.md'}."
+        "\n\n"
+        "default agents\n"
+    )
 
 
 def test_ensure_codex_home_default_files_converts_current_agents_symlink(
@@ -372,6 +410,68 @@ def test_ensure_codex_home_default_files_converts_current_agents_symlink(
     )
 
 
+def test_ensure_codex_home_default_files_honors_excluding_normal_agents(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from openbase_coder_cli.services import console_settings
+
+    workspace = tmp_path / "workspace"
+    instructions = workspace / "instructions"
+    normal_agents = tmp_path / "normal_codex" / "AGENTS.md"
+    instructions.mkdir(parents=True)
+    normal_agents.parent.mkdir(parents=True)
+    codex_home, _claude_config = _patch_openbase_agent_paths(monkeypatch, tmp_path)
+    (instructions / "AGENTS.md").write_text("- Openbase rule\n", encoding="utf-8")
+    normal_agents.write_text("- Normal rule\n", encoding="utf-8")
+    monkeypatch.setattr(setup_cli, "CODEX_HOME_DEFAULT_FILES", ())
+    monkeypatch.setattr(
+        console_settings,
+        "CONSOLE_SETTINGS_JSON_PATH",
+        tmp_path / "console-settings.json",
+    )
+    console_settings.set_include_normal_codex_agents_in_openbase_agents(False)
+
+    setup_cli._ensure_codex_home_default_files(str(workspace))
+
+    content = (codex_home / "AGENTS.md").read_text(encoding="utf-8")
+    assert content == (
+        "## Openbase Coder Instructions\n\n"
+        f"- These instructions are auto generated from {instructions / 'AGENTS.md'}."
+        "\n\n"
+        "- Openbase rule\n"
+    )
+    assert "Non-Openbase Instructions" not in content
+    assert "Normal rule" not in content
+
+
+def test_ensure_codex_home_default_files_replaces_stale_openbase_claude_symlink(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    instructions = workspace / "instructions"
+    stale_dir = tmp_path / "stale-openbase-codex"
+    instructions.mkdir(parents=True)
+    stale_dir.mkdir()
+    codex_home, claude_config = _patch_openbase_agent_paths(monkeypatch, tmp_path)
+    stale_agents = stale_dir / "AGENTS.md"
+    stale_agents.write_text("- Stale rule\n", encoding="utf-8")
+    (instructions / "AGENTS.md").write_text("- Openbase rule\n", encoding="utf-8")
+    claude_md = claude_config / "CLAUDE.md"
+    claude_md.parent.mkdir(parents=True)
+    claude_md.symlink_to(stale_agents)
+    monkeypatch.setattr(setup_cli, "CODEX_HOME_DEFAULT_FILES", ())
+
+    setup_cli._ensure_codex_home_default_files(str(workspace))
+
+    assert claude_md.is_symlink()
+    assert claude_md.resolve() == (codex_home / "AGENTS.md").resolve()
+    assert claude_md.readlink() == Path(
+        os.path.relpath(codex_home / "AGENTS.md", claude_config)
+    )
+
+
 def test_ensure_codex_home_default_files_skips_missing_sources(
     tmp_path, monkeypatch
 ) -> None:
@@ -388,6 +488,60 @@ def test_ensure_codex_home_default_files_skips_missing_sources(
     setup_cli._ensure_codex_home_default_files(str(workspace))
 
     assert not target_path.exists()
+
+
+def test_ensure_normal_claude_md_symlink_links_to_normal_codex_agents(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _patch_openbase_agent_paths(monkeypatch, tmp_path)
+    normal_agents_path = setup_cli.NORMAL_CODEX_AGENTS_MD_PATH
+    normal_agents_path.parent.mkdir(parents=True)
+    normal_agents_path.write_text("normal codex\n", encoding="utf-8")
+
+    setup_cli._ensure_normal_claude_md_symlink()
+
+    claude_md_path = setup_cli.NORMAL_CLAUDE_CONFIG_DIR / "CLAUDE.md"
+    assert claude_md_path.is_symlink()
+    assert claude_md_path.resolve() == normal_agents_path.resolve()
+
+
+def test_ensure_normal_claude_md_symlink_migrates_existing_claude_file(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _patch_openbase_agent_paths(monkeypatch, tmp_path)
+    claude_md_path = setup_cli.NORMAL_CLAUDE_CONFIG_DIR / "CLAUDE.md"
+    claude_md_path.parent.mkdir(parents=True)
+    claude_md_path.write_text("normal claude\n", encoding="utf-8")
+
+    setup_cli._ensure_normal_claude_md_symlink()
+
+    normal_agents_path = setup_cli.NORMAL_CODEX_AGENTS_MD_PATH
+    assert normal_agents_path.read_text(encoding="utf-8") == "normal claude\n"
+    assert claude_md_path.is_symlink()
+    assert claude_md_path.resolve() == normal_agents_path.resolve()
+
+
+def test_ensure_normal_claude_md_symlink_backs_up_different_file(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _patch_openbase_agent_paths(monkeypatch, tmp_path)
+    normal_agents_path = setup_cli.NORMAL_CODEX_AGENTS_MD_PATH
+    claude_md_path = setup_cli.NORMAL_CLAUDE_CONFIG_DIR / "CLAUDE.md"
+    normal_agents_path.parent.mkdir(parents=True)
+    claude_md_path.parent.mkdir(parents=True)
+    normal_agents_path.write_text("normal codex\n", encoding="utf-8")
+    claude_md_path.write_text("normal claude\n", encoding="utf-8")
+
+    setup_cli._ensure_normal_claude_md_symlink()
+
+    backups = list(claude_md_path.parent.glob("CLAUDE.md.backup-openbase-coder-*"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "normal claude\n"
+    assert claude_md_path.is_symlink()
+    assert claude_md_path.resolve() == normal_agents_path.resolve()
 
 
 def test_ensure_codex_home_dispatcher_config_creates_default(
@@ -1021,13 +1175,13 @@ def test_ensure_thread_sync_exchange_dir_replaces_stale_global_ignore_symlink(
     assert (exchange_dir / ".stglobalignore").resolve() == global_ignore.resolve()
 
 
-def test_ensure_bundled_sounds_installs_wilhelm(tmp_path, monkeypatch) -> None:
+def test_ensure_bundled_sounds_installs_deactivate(tmp_path, monkeypatch) -> None:
     sounds_dir = tmp_path / "sounds"
     monkeypatch.setattr(setup_cli, "OPENBASE_SOUNDS_DIR", sounds_dir)
 
     setup_cli._ensure_bundled_sounds()
 
-    target = sounds_dir / "wilhelm.wav"
+    target = sounds_dir / "deactivate.wav"
     assert target.is_file()
     assert target.read_bytes().startswith(b"RIFF")
 
@@ -1036,7 +1190,7 @@ def test_ensure_bundled_sounds_preserves_custom_existing_file(
     tmp_path, monkeypatch
 ) -> None:
     sounds_dir = tmp_path / "sounds"
-    target = sounds_dir / "wilhelm.wav"
+    target = sounds_dir / "deactivate.wav"
     target.parent.mkdir(parents=True)
     target.write_bytes(b"custom sound")
     monkeypatch.setattr(setup_cli, "OPENBASE_SOUNDS_DIR", sounds_dir)
@@ -1063,6 +1217,11 @@ def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
     )
     monkeypatch.setattr(setup_cli, "_ensure_env_file", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_cli, "_symlink_codex_auth", lambda: None)
+    monkeypatch.setattr(
+        setup_cli,
+        "_ensure_normal_claude_md_symlink",
+        lambda: calls.append("normal-claude"),
+    )
     monkeypatch.setattr(
         setup_cli,
         "_ensure_codex_home_default_files",
@@ -1126,7 +1285,7 @@ def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert calls == ["thread-sync", "sounds", "configure"]
+    assert calls == ["thread-sync", "sounds", "normal-claude", "configure"]
 
 
 def test_ensure_local_audio_dependencies_installs_into_runtime_python(

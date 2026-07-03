@@ -42,6 +42,16 @@ def _patch_report(project_path: Path, relative_path: str, content):
     return views.project_reports_file(request)
 
 
+def _get_report_file(project_path: Path, relative_path: str):
+    factory = APIRequestFactory()
+    query = urlencode({"path": str(project_path), "file": relative_path})
+    request = factory.get(
+        f"/api/projects/reports/file/?{query}",
+    )
+    force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+    return views.project_reports_file(request)
+
+
 def _download_report(project_path: Path, relative_path: str):
     factory = APIRequestFactory()
     query = urlencode({"path": str(project_path), "file": relative_path})
@@ -258,6 +268,87 @@ def test_project_reports_file_patch_updates_markdown_report(tmp_path: Path) -> N
     assert response.data["file"]["kind"] == "markdown"
     assert response.data["content"] == "# New\n\nUpdated."
     assert report.read_text(encoding="utf-8") == "# New\n\nUpdated."
+
+
+def test_project_reports_file_reads_front_matter_provenance(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    reports = project / ".reports"
+    reports.mkdir(parents=True)
+    (reports / "summary.md").write_text(
+        "---\n"
+        "openbase_report:\n"
+        "  thread_id: thread-123\n"
+        "  thread_name: Report Thread\n"
+        "  agent_name: Evie\n"
+        "---\n"
+        "# Summary\n",
+        encoding="utf-8",
+    )
+
+    response = _get_report_file(project, "summary.md")
+
+    assert response.status_code == 200
+    assert response.data["provenance"] == {
+        "source": "front_matter",
+        "thread_id": "thread-123",
+        "thread_name": "Report Thread",
+        "agent_name": "Evie",
+    }
+
+
+def test_project_reports_file_reads_hidden_comment_provenance(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    reports = project / ".reports"
+    reports.mkdir(parents=True)
+    (reports / "summary.md").write_text(
+        "<!-- openbase-report: "
+        '{"thread_id":"thread-456","thread_name":"Hidden Thread"}'
+        " -->\n# Summary\n",
+        encoding="utf-8",
+    )
+
+    response = _get_report_file(project, "summary.md")
+
+    assert response.status_code == 200
+    assert response.data["provenance"] == {
+        "source": "html_comment",
+        "thread_id": "thread-456",
+        "thread_name": "Hidden Thread",
+    }
+
+
+def test_project_reports_file_reads_visible_provenance_block(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    reports = project / ".reports"
+    reports.mkdir(parents=True)
+    (reports / "summary.md").write_text(
+        "# Summary\n\n"
+        "## Report Provenance\n\n"
+        "- **Super Agent thread ID**: `thread-789`\n"
+        "- **Agent name**: Evie\n",
+        encoding="utf-8",
+    )
+
+    response = _get_report_file(project, "summary.md")
+
+    assert response.status_code == 200
+    assert response.data["provenance"] == {
+        "source": "embedded_text",
+        "thread_id": "thread-789",
+        "agent_name": "Evie",
+    }
+
+
+def test_project_reports_file_omits_unknown_provenance(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    reports = project / ".reports"
+    reports.mkdir(parents=True)
+    (reports / "summary.md").write_text("# Summary\n", encoding="utf-8")
+
+    response = _get_report_file(project, "summary.md")
+
+    assert response.status_code == 200
+    assert "provenance" not in response.data
 
 
 def test_project_reports_file_patch_rejects_path_traversal(tmp_path: Path) -> None:

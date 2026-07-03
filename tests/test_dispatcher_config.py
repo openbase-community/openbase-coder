@@ -28,6 +28,15 @@ def test_backend_model_uses_env_backend(tmp_path: Path, monkeypatch) -> None:
     assert dispatcher_config.super_agents_model(config_path) == "opus"
 
 
+def test_claude_model_options_include_fable_alias(monkeypatch) -> None:
+    monkeypatch.setenv("OPENBASE_CODING_BACKEND", "claude_code")
+
+    options = dispatcher_config.model_options_for_backend()
+
+    assert options[0]["id"] == "fable"
+    assert dispatcher_config.is_known_backend_model("fable")
+
+
 def test_backend_model_uses_env_file_backend(tmp_path: Path, monkeypatch) -> None:
     env_file = tmp_path / ".env"
     config_path = tmp_path / "dispatcher-config.json"

@@ -26,6 +26,10 @@ class FakeThreadManager:
             next_cursor=cursor,
         )
 
+    async def get_thread_state(self, thread_id: str):
+        self.calls += 1
+        return SimpleNamespace(session_id=thread_id, call=self.calls)
+
 
 def test_cached_thread_list_reuses_fresh_result(monkeypatch) -> None:
     thread_cache.invalidate_thread_list_cache()
@@ -86,6 +90,30 @@ def test_cached_thread_page_cache_key_includes_cursor(monkeypatch) -> None:
 
     first = thread_cache.get_cached_thread_page(manager, limit=25, cursor=None)
     second = thread_cache.get_cached_thread_page(manager, limit=25, cursor="cursor-2")
+
+    assert manager.calls == 2
+    assert first != second
+
+
+def test_cached_thread_state_reuses_fresh_result(monkeypatch) -> None:
+    thread_cache.invalidate_thread_list_cache()
+    manager = FakeThreadManager()
+    monkeypatch.setattr(thread_cache.time, "monotonic", lambda: 100.0)
+
+    first = thread_cache.get_cached_thread_state(manager, "dispatcher-thread")
+    second = thread_cache.get_cached_thread_state(manager, "dispatcher-thread")
+
+    assert manager.calls == 1
+    assert first == second
+
+
+def test_cached_thread_state_cache_key_includes_thread_id(monkeypatch) -> None:
+    thread_cache.invalidate_thread_list_cache()
+    manager = FakeThreadManager()
+    monkeypatch.setattr(thread_cache.time, "monotonic", lambda: 100.0)
+
+    first = thread_cache.get_cached_thread_state(manager, "dispatcher-thread")
+    second = thread_cache.get_cached_thread_state(manager, "other-thread")
 
     assert manager.calls == 2
     assert first != second

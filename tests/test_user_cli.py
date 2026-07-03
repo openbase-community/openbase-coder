@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 dispatcher_config = importlib.import_module("openbase_coder_cli.dispatcher_config")
+defaults_cli = importlib.import_module("openbase_coder_cli.cli.defaults")
 local_server = importlib.import_module("openbase_coder_cli.cli.local_server")
 main_cli = importlib.import_module("openbase_coder_cli.cli")
 user_cli = importlib.import_module("openbase_coder_cli.cli.user")
@@ -324,6 +325,26 @@ def test_user_ios_developer_call_posts_control_command(monkeypatch):
     assert calls == [{"action": "start_developer_call"}]
 
 
+def test_user_ios_upload_logs_posts_control_command(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        assert method == "POST"
+        calls.append(kwargs["json"])
+        return httpx.Response(
+            202,
+            json={"command_id": "ios-app-control-1", "status": "published"},
+        )
+
+    patch_local_server_request(monkeypatch, fake_request)
+
+    result = CliRunner().invoke(user_cli.user, ["ios", "upload-logs", "--limit", "500"])
+
+    assert result.exit_code == 0
+    assert "ios-app-control-1" in result.output
+    assert calls == [{"action": "upload_diagnostics", "limit": 500}]
+
+
 def test_user_super_agent_name_derives_from_thread_name(monkeypatch):
     voice_route = importlib.import_module("openbase_coder_cli.livekit_voice_route")
     monkeypatch.setattr(
@@ -577,14 +598,14 @@ def test_top_level_exit_to_dispatch_posts_route_command(monkeypatch):
     ]
 
 
-def test_dispatcher_reasoning_sets_config_file(monkeypatch, tmp_path):
+def test_default_dispatcher_reasoning_sets_config_file(monkeypatch, tmp_path):
     config_path = tmp_path / "dispatcher-config.json"
     monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
 
-    result = CliRunner().invoke(user_cli.user, ["dispatcher-reasoning", "low"])
+    result = CliRunner().invoke(defaults_cli.defaults, ["dispatcher-reasoning", "low"])
 
     assert result.exit_code == 0
-    assert "set to low" in result.output
+    assert "Default dispatcher reasoning effort set to low" in result.output
     assert (
         json.loads(config_path.read_text(encoding="utf-8"))[
             "dispatcher_reasoning_effort"
@@ -593,14 +614,14 @@ def test_dispatcher_reasoning_sets_config_file(monkeypatch, tmp_path):
     )
 
 
-def test_super_agents_reasoning_sets_config_file(monkeypatch, tmp_path):
+def test_default_super_agents_reasoning_sets_config_file(monkeypatch, tmp_path):
     config_path = tmp_path / "dispatcher-config.json"
     monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
 
-    result = CliRunner().invoke(user_cli.user, ["super-agents-reasoning", "medium"])
+    result = CliRunner().invoke(defaults_cli.defaults, ["super-agents-reasoning", "medium"])
 
     assert result.exit_code == 0
-    assert "set to medium" in result.output
+    assert "Default Super Agents reasoning effort set to medium" in result.output
     assert (
         json.loads(config_path.read_text(encoding="utf-8"))[
             "super_agents_reasoning_effort"
@@ -609,15 +630,32 @@ def test_super_agents_reasoning_sets_config_file(monkeypatch, tmp_path):
     )
 
 
-def test_super_agents_model_sets_config_file(monkeypatch, tmp_path):
+def test_default_dispatcher_model_sets_config_file(monkeypatch, tmp_path):
     config_path = tmp_path / "dispatcher-config.json"
     monkeypatch.setenv("OPENBASE_CODING_BACKEND", "codex")
     monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
 
-    result = CliRunner().invoke(user_cli.user, ["super-agents-model", "opus"])
+    result = CliRunner().invoke(defaults_cli.defaults, ["dispatcher-model", "gpt-5.5"])
 
     assert result.exit_code == 0
-    assert "set to opus" in result.output
+    assert "Default dispatcher model set to gpt-5.5" in result.output
+    assert (
+        json.loads(config_path.read_text(encoding="utf-8"))["backend_models"]["codex"][
+            "dispatcher"
+        ]
+        == "gpt-5.5"
+    )
+
+
+def test_default_super_agents_model_sets_config_file(monkeypatch, tmp_path):
+    config_path = tmp_path / "dispatcher-config.json"
+    monkeypatch.setenv("OPENBASE_CODING_BACKEND", "codex")
+    monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
+
+    result = CliRunner().invoke(defaults_cli.defaults, ["super-agents-model", "opus"])
+
+    assert result.exit_code == 0
+    assert "Default Super Agents model set to opus" in result.output
     assert (
         json.loads(config_path.read_text(encoding="utf-8"))["backend_models"]["codex"][
             "super_agents"
@@ -634,8 +672,8 @@ def test_reasoning_config_ignores_legacy_shared_key(tmp_path):
     assert dispatcher_config.super_agents_reasoning_effort(config_path) is None
 
 
-def test_dispatcher_reasoning_rejects_invalid_level():
-    result = CliRunner().invoke(user_cli.user, ["operator-reasoning", "extreme"])
+def test_default_dispatcher_reasoning_rejects_invalid_level():
+    result = CliRunner().invoke(defaults_cli.defaults, ["dispatcher-reasoning", "extreme"])
 
     assert result.exit_code != 0
     assert "Reasoning effort must be one of" in result.output

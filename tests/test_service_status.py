@@ -112,3 +112,31 @@ def test_thread_device_sync_status_returns_snapshot_payload(monkeypatch) -> None
     assert response.status_code == 200
     assert response.data["device"]["device_id"] == "device-1"
     assert response.data["snapshot_count"] == 2
+
+
+def test_thread_sync_conflicts_returns_aggregate_payload(monkeypatch) -> None:
+    monkeypatch.setattr(
+        services_views,
+        "thread_sync_conflicts_payload",
+        lambda: {
+            "conflict_count": 2,
+            "home_conflict_count": 1,
+            "device_conflict_count": 1,
+            "conflicts": [
+                {"source_type": "home", "thread_id": "thread-home"},
+                {"source_type": "device", "thread_id": "thread-device"},
+            ],
+        },
+    )
+
+    request = APIRequestFactory().get("/api/settings/thread-sync/conflicts/")
+    force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+
+    response = services_views.thread_sync_conflicts(request)
+
+    assert response.status_code == 200
+    assert response.data["conflict_count"] == 2
+    assert {item["source_type"] for item in response.data["conflicts"]} == {
+        "home",
+        "device",
+    }

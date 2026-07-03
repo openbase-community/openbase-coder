@@ -16,7 +16,7 @@ from openbase_coder_cli.services.definitions import ServiceDefinition
 
 VOICE_INTERRUPTING_SERVICE_NAMES = frozenset({"livekit-agent", "livekit-server"})
 VOICE_INTERRUPTING_ACTIONS = frozenset({"stop", "restart"})
-VOICE_WARNING_SOUND_NAME = "wilhelm"
+VOICE_WARNING_SOUND_NAME = "deactivate"
 VOICE_WARNING_DELAY_SECONDS = 1.2
 
 logger = logging.getLogger(__name__)

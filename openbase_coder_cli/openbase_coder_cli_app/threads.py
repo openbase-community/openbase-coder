@@ -22,6 +22,7 @@ from openbase_coder_cli.openbase_coder_cli_app.item_tags import (
 from openbase_coder_cli.openbase_coder_cli_app.thread_cache import (
     get_cached_thread_list,
     get_cached_thread_page,
+    get_cached_thread_state,
     invalidate_thread_list_cache,
 )
 from openbase_coder_cli.openbase_coder_cli_app.thread_favorites import (
@@ -133,14 +134,7 @@ def _include_livekit_fallback_thread(manager, threads: list) -> list:
         thread.session_id == livekit_thread_id for thread in threads
     ):
         return threads
-    try:
-        livekit_thread = async_to_sync(manager.get_thread_state)(livekit_thread_id)
-    except RuntimeError:
-        logger.warning(
-            "thread_list skipping unavailable LiveKit dispatcher fallback thread_id=%s",
-            livekit_thread_id,
-        )
-        return threads
+    livekit_thread = _get_cached_livekit_dispatcher_thread(manager)
     if livekit_thread is None:
         return threads
     logger.info(
@@ -148,6 +142,20 @@ def _include_livekit_fallback_thread(manager, threads: list) -> list:
         livekit_thread_id,
     )
     return sorted([*threads, livekit_thread], key=_thread_sort_value, reverse=True)
+
+
+def _get_cached_livekit_dispatcher_thread(manager):
+    livekit_thread_id = get_livekit_shared_thread_id()
+    if not livekit_thread_id:
+        return None
+    try:
+        return get_cached_thread_state(manager, livekit_thread_id)
+    except RuntimeError:
+        logger.warning(
+            "thread_list skipping unavailable LiveKit dispatcher fallback thread_id=%s",
+            livekit_thread_id,
+        )
+        return None
 
 
 def _favorite_thread_list_response(
@@ -303,6 +311,19 @@ def thread_list(request):
             ],
         }
     )
+
+
+@api_view(["GET"])
+def thread_dispatcher(request):
+    """Return the LiveKit dispatcher thread without scanning the thread list."""
+    manager = get_session_manager()
+    thread = _get_cached_livekit_dispatcher_thread(manager)
+    if thread is None:
+        return Response(
+            {"error": "LiveKit dispatcher thread not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return Response(annotate_thread_payload(thread.model_dump(mode="json")))
 
 
 @api_view(["GET", "DELETE"])

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -13,7 +14,6 @@ from super_agents.app_server_client import DEFAULT_STATE_FILE
 from super_agents.state import SessionRecord, read_state_file_locked
 
 from openbase_coder_cli.mcp.projects import get_recent_projects as _get_recent_projects
-from openbase_coder_cli.openbase_coder_cli_app.item_tags import report_tags
 from openbase_coder_cli.paths import CODEX_HOME_DIR, NORMAL_CODEX_HOME_DIR
 
 REPORTS_DIRECTORY = ".reports"
@@ -26,9 +26,19 @@ HOME_REPORTS_PROJECT_DIR = Path.home()
 REPORT_ORIGIN_TIME_WINDOW_SECONDS = 10 * 60
 SUPER_AGENTS_STATE_FILE_ENV = "SUPER_AGENTS_STATE_FILE"
 REPORT_THREAD_ID_RE = re.compile(
-    r"(?im)^\s*(?:super agent\s+)?thread\s+id\s*:\s*([A-Za-z0-9._:-]+)\s*$"
+    r"(?im)^\s*(?:[-*]\s*)?(?:\*\*)?(?:super agent\s+)?thread\s+id(?:\*\*)?\s*:\s*`?([A-Za-z0-9._:-]+)`?\s*$"
 )
-REPORT_THREAD_NAME_RE = re.compile(r"(?im)^\s*super agent thread name\s*:\s*(.+?)\s*$")
+REPORT_THREAD_NAME_RE = re.compile(
+    r"(?im)^\s*(?:[-*]\s*)?(?:\*\*)?super agent thread name(?:\*\*)?\s*:\s*(.+?)\s*$"
+)
+REPORT_AGENT_NAME_RE = re.compile(
+    r"(?im)^\s*(?:[-*]\s*)?(?:\*\*)?(?:super agent\s+)?agent\s+name(?:\*\*)?\s*:\s*(.+?)\s*$"
+)
+REPORT_FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.DOTALL)
+REPORT_HTML_COMMENT_RE = re.compile(r"<!--(.*?)-->", re.DOTALL)
+REPORT_PROVENANCE_JSON_RE = re.compile(
+    r"(?is)\b(?:openbase[-_\s]?report|report[-_\s]?provenance|openbase[-_\s]?provenance)\s*:\s*(\{.*?\})\s*$"
+)
 REPORT_FILENAME_DATE_RE = re.compile(
     r"(?<!\d)(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)(?!\d)"
 )
@@ -40,6 +50,24 @@ class ReportActionOrigin:
     label: str | None = None
     agent_name: str | None = None
     source: str = "unknown"
+
+
+@dataclass(frozen=True)
+class ReportProvenance:
+    thread_id: str | None = None
+    thread_name: str | None = None
+    agent_name: str | None = None
+    source: str = "unknown"
+
+    def payload(self) -> dict[str, str]:
+        payload = {"source": self.source}
+        if self.thread_id:
+            payload["thread_id"] = self.thread_id
+        if self.thread_name:
+            payload["thread_name"] = self.thread_name
+        if self.agent_name:
+            payload["agent_name"] = self.agent_name
+        return payload
 
 
 @dataclass(frozen=True)
@@ -80,6 +108,8 @@ def _report_filename_date(relative_path: str) -> str | None:
 
 
 def _reports_file_payload(path: Path, reports_dir: Path) -> dict[str, Any]:
+    from openbase_coder_cli.openbase_coder_cli_app.item_tags import report_tags
+
     stat = path.stat()
     relative_path = str(path.relative_to(reports_dir))
     project_path = str(reports_dir.parent)
@@ -352,6 +382,134 @@ def _parse_report_thread_name(content: str) -> str | None:
     return match.group(1).strip() or None
 
 
+def _parse_report_agent_name(content: str) -> str | None:
+    match = REPORT_AGENT_NAME_RE.search(content)
+    if not match:
+        return None
+    return match.group(1).strip() or None
+
+
+def _normalize_provenance_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+
+
+def _provenance_from_mapping(
+    values: dict[str, Any],
+    *,
+    source: str,
+) -> ReportProvenance | None:
+    normalized = {_normalize_provenance_key(str(key)): value for key, value in values.items()}
+    thread_id = _optional_metadata_string(
+        normalized.get("thread_id")
+        or normalized.get("threadid")
+        or normalized.get("super_agent_thread_id")
+        or normalized.get("super_agents_thread_id")
+    )
+    thread_name = _optional_metadata_string(
+        normalized.get("thread_name")
+        or normalized.get("thread")
+        or normalized.get("name")
+        or normalized.get("super_agent_thread_name")
+        or normalized.get("super_agents_thread_name")
+    )
+    agent_name = _optional_metadata_string(
+        normalized.get("agent_name")
+        or normalized.get("agent")
+        or normalized.get("super_agent_agent_name")
+    )
+    if not thread_id and not thread_name and not agent_name:
+        return None
+    return ReportProvenance(
+        thread_id=thread_id,
+        thread_name=thread_name,
+        agent_name=agent_name,
+        source=source,
+    )
+
+
+def _optional_metadata_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().strip("\"'")
+    return normalized or None
+
+
+def _parse_simple_front_matter(content: str) -> dict[str, Any]:
+    match = REPORT_FRONT_MATTER_RE.match(content)
+    if not match:
+        return {}
+    values: dict[str, Any] = {}
+    prefix_stack: list[str] = []
+    for raw_line in match.group(1).splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        line = raw_line.strip()
+        if ":" not in line:
+            continue
+        key, raw_value = line.split(":", 1)
+        value = raw_value.strip()
+        normalized_key = _normalize_provenance_key(key)
+        if indent == 0:
+            prefix_stack = [normalized_key] if not value else []
+        if value:
+            keys = [normalized_key]
+            if prefix_stack and indent > 0:
+                keys.append(f"{prefix_stack[-1]}_{normalized_key}")
+            for candidate_key in keys:
+                values[candidate_key] = value
+    return values
+
+
+def _parse_hidden_comment_provenance(content: str) -> ReportProvenance | None:
+    for match in REPORT_HTML_COMMENT_RE.finditer(content):
+        comment = match.group(1).strip()
+        json_match = REPORT_PROVENANCE_JSON_RE.search(comment)
+        if json_match:
+            try:
+                data = json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict):
+                provenance = _provenance_from_mapping(data, source="html_comment")
+                if provenance:
+                    return provenance
+
+        values: dict[str, Any] = {}
+        for line in comment.splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            values[key] = value.strip()
+        provenance = _provenance_from_mapping(values, source="html_comment")
+        if provenance:
+            return provenance
+    return None
+
+
+def explicit_report_provenance(content: str) -> ReportProvenance | None:
+    front_matter = _parse_simple_front_matter(content)
+    provenance = _provenance_from_mapping(front_matter, source="front_matter")
+    if provenance:
+        return provenance
+
+    provenance = _parse_hidden_comment_provenance(content)
+    if provenance:
+        return provenance
+
+    thread_id = _parse_report_thread_id(content)
+    thread_name = _parse_report_thread_name(content)
+    agent_name = _parse_report_agent_name(content)
+    if thread_id or thread_name or agent_name:
+        return ReportProvenance(
+            thread_id=thread_id,
+            thread_name=thread_name,
+            agent_name=agent_name,
+            source="embedded_text",
+        )
+    return None
+
+
 def _parse_iso_timestamp(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -407,6 +565,23 @@ def _origin_from_session(session: SessionRecord, source: str) -> ReportActionOri
         label=session.label,
         agent_name=session.agent_name,
         source=source,
+    )
+
+
+def enrich_report_provenance(provenance: ReportProvenance | None) -> ReportProvenance | None:
+    if provenance is None:
+        return None
+    if not provenance.thread_id:
+        return provenance
+    state = read_state_file_locked(_super_agents_state_path())
+    session = state.sessions.get(provenance.thread_id)
+    if session is None:
+        return provenance
+    return ReportProvenance(
+        thread_id=provenance.thread_id,
+        thread_name=provenance.thread_name or session.label,
+        agent_name=provenance.agent_name or session.agent_name,
+        source=provenance.source,
     )
 
 

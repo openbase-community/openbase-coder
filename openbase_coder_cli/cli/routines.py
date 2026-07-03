@@ -14,6 +14,7 @@ REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
 SANDBOX_TYPES = ("readOnly", "workspaceWrite", "dangerFullAccess")
 MODES = ("default", "plan")
 SCHEDULE_TYPES = ("daily", "interval")
+ROUTINE_KINDS = ("agent", "command")
 DEFAULT_INTERVAL_SECONDS = 60
 
 
@@ -71,6 +72,9 @@ def _routine_patch(
     *,
     name: str,
     prompt: str | None = None,
+    kind: str | None = None,
+    command: str | None = None,
+    command_timeout_seconds: int | None = None,
     schedule_time: str | None = None,
     schedule_type: str | None = None,
     interval_seconds: int | None = None,
@@ -92,6 +96,14 @@ def _routine_patch(
     patch: dict[str, Any] = {"name": name}
     if prompt is not None:
         patch["prompt"] = prompt
+    if kind is not None:
+        patch["kind"] = kind
+    if command is not None:
+        patch["command"] = command
+    if command_timeout_seconds is not None:
+        if command_timeout_seconds < 1:
+            raise click.BadParameter("Use a command timeout of at least 1 second.")
+        patch["commandTimeoutSeconds"] = command_timeout_seconds
     if schedule_time is not None:
         patch["time"] = _validate_time(schedule_time)
     if schedule_type is not None:
@@ -147,7 +159,10 @@ def show_routine(name: str) -> None:
 
 @routines.command("create")
 @click.argument("name")
-@click.option("--prompt", required=True, help="Prompt to send when the routine runs.")
+@click.option("--kind", type=click.Choice(ROUTINE_KINDS), default="agent", show_default=True)
+@click.option("--prompt", help="Prompt to send when an agent routine runs.")
+@click.option("--command", help="Local shell command to run for a command routine.")
+@click.option("--command-timeout-seconds", type=int, help="Command routine timeout in seconds.")
 @click.option("--time", "schedule_time", help="Daily HH:MM local time.")
 @click.option(
     "--schedule-type",
@@ -180,7 +195,10 @@ def show_routine(name: str) -> None:
 @click.option("--disabled", is_flag=True, help="Create the routine disabled.")
 def create_routine(
     name: str,
-    prompt: str,
+    kind: str,
+    prompt: str | None,
+    command: str | None,
+    command_timeout_seconds: int | None,
     schedule_time: str | None,
     schedule_type: str,
     interval_seconds: int | None,
@@ -199,6 +217,10 @@ def create_routine(
     disabled: bool,
 ) -> None:
     """Create or replace a routine."""
+    if kind == "agent" and not prompt:
+        raise click.ClickException("Agent routines require --prompt.")
+    if kind == "command" and not command:
+        raise click.ClickException("Command routines require --command.")
     resolved_schedule_type = _resolved_schedule_type(
         schedule_type,
         schedule_time,
@@ -210,7 +232,10 @@ def create_routine(
         interval_seconds = DEFAULT_INTERVAL_SECONDS
     patch = _routine_patch(
         name=name,
-        prompt=prompt,
+        prompt=prompt or "",
+        kind=kind,
+        command=command,
+        command_timeout_seconds=command_timeout_seconds,
         schedule_time=schedule_time,
         schedule_type=resolved_schedule_type,
         interval_seconds=interval_seconds,
@@ -234,7 +259,10 @@ def create_routine(
 
 @routines.command("update")
 @click.argument("name")
+@click.option("--kind", type=click.Choice(ROUTINE_KINDS))
 @click.option("--prompt")
+@click.option("--command")
+@click.option("--command-timeout-seconds", type=int)
 @click.option("--time", "schedule_time", help="Daily HH:MM local time.")
 @click.option("--schedule-type", type=click.Choice(SCHEDULE_TYPES))
 @click.option("--interval-seconds", type=int, help="Interval schedule frequency in seconds.")
@@ -255,7 +283,10 @@ def create_routine(
 @click.option("--developer-instructions")
 def update_routine(
     name: str,
+    kind: str | None,
     prompt: str | None,
+    command: str | None,
+    command_timeout_seconds: int | None,
     schedule_time: str | None,
     schedule_type: str | None,
     interval_seconds: int | None,
@@ -282,6 +313,9 @@ def update_routine(
     patch = _routine_patch(
         name=name,
         prompt=prompt,
+        kind=kind,
+        command=command,
+        command_timeout_seconds=command_timeout_seconds,
         schedule_time=schedule_time,
         schedule_type=resolved_schedule_type if schedule_type or interval_seconds is not None else None,
         interval_seconds=interval_seconds,

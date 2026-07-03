@@ -12,7 +12,7 @@ from openbase_coder_cli.services import voice_warning
 def test_warning_ignores_no_active_livekit_room(monkeypatch, tmp_path):
     sounds_dir = tmp_path / "sounds"
     sounds_dir.mkdir()
-    (sounds_dir / "wilhelm.wav").write_bytes(b"audio")
+    (sounds_dir / "deactivate.wav").write_bytes(b"audio")
 
     async def fake_publish(audio_path):
         raise NoActiveLiveKitRoomError("No active LiveKit voice room was found.")
@@ -26,7 +26,7 @@ def test_warning_ignores_no_active_livekit_room(monkeypatch, tmp_path):
 def test_warning_failure_does_not_raise(monkeypatch, tmp_path, caplog):
     sounds_dir = tmp_path / "sounds"
     sounds_dir.mkdir()
-    (sounds_dir / "wilhelm.wav").write_bytes(b"audio")
+    (sounds_dir / "deactivate.wav").write_bytes(b"audio")
 
     async def fake_publish(audio_path):
         raise AnnouncerValidationError("bad sound")
@@ -47,7 +47,7 @@ def test_warning_failure_does_not_raise(monkeypatch, tmp_path, caplog):
 def test_warning_sends_sound_and_waits(monkeypatch, tmp_path):
     sounds_dir = tmp_path / "sounds"
     sounds_dir.mkdir()
-    sound_path = sounds_dir / "wilhelm.wav"
+    sound_path = sounds_dir / "deactivate.wav"
     sound_path.write_bytes(b"audio")
     calls = []
     delays = []

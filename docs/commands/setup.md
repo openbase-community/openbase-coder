@@ -73,21 +73,23 @@ because Kokoro currently declares Python `<3.13`.
 4. Writes `installation.json` with the active runtime paths and `env_file`.
 5. Creates `.env` with generated secrets if missing.
 6. Symlinks `~/.openbase/codex_home/auth.json` to `~/.codex/auth.json` so launchd Codex services use the normal Codex login.
-7. Maintains `~/.openbase/codex_home/AGENTS.md` and `~/.openbase/claude_config/CLAUDE.md` as editable files with a refreshed `## Openbase Coder Instructions` section generated from the bundled package or workspace `instructions/AGENTS.md`.
-8. Symlinks shared default instruction files from the bundled package or workspace `instructions/` into `~/.openbase/instructions/`, and keeps legacy Codex-home instruction symlinks pointed there.
-9. Creates missing `~/.openbase/dispatcher-config.json` with dispatcher reasoning effort `low`, Super Agents reasoning effort `high`, and backend-specific model defaults, and keeps `~/.openbase/codex_home/dispatcher-config.json` as a legacy symlink.
-10. Symlinks bundled or workspace skills into `~/.openbase/codex_home/skills` and `~/.openbase/claude_config/skills`.
-11. Initializes `cli` with `uv sync` and LiveKit model downloads in dev-workspace mode.
-12. Configures `~/.openbase/codex_home/config.toml` with full Codex local access (`sandbox_mode = "danger-full-access"`), disabled permission prompts, and the Super Agents MCP server. With `--link-codex-config`, this path is first linked to `~/.codex/config.toml`. The MCP command prefers the selected workspace's venv executable and falls back to the resolved local `uv` path.
-13. Configures `~/.openbase/claude_config/.claude.json` with the Super Agents MCP server and writes `CLAUDE_CONFIG_DIR=~/.openbase/claude_config` into the shared `.env`.
-14. Syncs normal Claude Code state into `~/.openbase/claude_config.json` when available. Claude Code OAuth still uses config-dir-scoped credentials; when `--backend claude-code` is selected, setup runs `openbase-coder claude login` if the managed Claude config is not already signed in.
-15. Writes Codex app-server defaults like `CODEX_MODEL=gpt-5.5`, `CODEX_MODEL_REASONING_EFFORT=high`, `CODEX_SERVICE_TIER=standard`, `CODEX_APP_SERVER_URL`, and `LIVEKIT_CODEX_THREAD_CWD` into the shared `.env`. When `OPENBASE_CODING_BACKEND=openbase_cloud`, the app-server service switches to the Openbase Cloud model proxy at startup.
-16. Uses the bundled console build, or builds `console` in dev-workspace mode.
-17. Installs background services (launchd on macOS, systemd user units on Linux) unless skipped.
-18. Configures Tailscale Serve routes for the iOS app:
+7. Links normal `~/.claude/CLAUDE.md` to `~/.codex/AGENTS.md`, preserving an existing real Claude instructions file by copying it into Codex AGENTS when Codex AGENTS is missing or backing it up when both files differ.
+8. Regenerates `~/.openbase/codex_home/AGENTS.md` from the bundled package or workspace `instructions/AGENTS.md`. The generated file records its source template path and, by default, includes normal `~/.codex/AGENTS.md` content above the Openbase section.
+9. Links `~/.openbase/claude_config/CLAUDE.md` to Openbase's generated `~/.openbase/codex_home/AGENTS.md`.
+10. Renders shared default instruction files from the bundled package or workspace `instructions/` into `~/.openbase/instructions/`, and writes legacy Codex-home instruction copies as generated regular files.
+11. Creates missing `~/.openbase/dispatcher-config.json` with default dispatcher reasoning effort `low`, default Super Agents reasoning effort `high`, and backend-specific default model settings, and keeps `~/.openbase/codex_home/dispatcher-config.json` as a legacy symlink.
+12. Symlinks bundled or workspace skills into `~/.openbase/codex_home/skills` and `~/.openbase/claude_config/skills`.
+13. Initializes `cli` with `uv sync` and LiveKit model downloads in dev-workspace mode.
+14. Configures `~/.openbase/codex_home/config.toml` with full Codex local access (`sandbox_mode = "danger-full-access"`), disabled permission prompts, and the Super Agents MCP server. With `--link-codex-config`, this path is first linked to `~/.codex/config.toml`. The MCP command prefers the selected workspace's venv executable and falls back to the resolved local `uv` path.
+15. Configures `~/.openbase/claude_config/.claude.json` with the Super Agents MCP server and writes `CLAUDE_CONFIG_DIR=~/.openbase/claude_config` into the shared `.env`.
+16. Syncs normal Claude Code state into `~/.openbase/claude_config.json` when available. Claude Code OAuth still uses config-dir-scoped credentials; when `--backend claude-code` is selected, setup runs `openbase-coder claude login` if the managed Claude config is not already signed in.
+17. Writes Codex app-server defaults like `CODEX_MODEL=gpt-5.5`, `CODEX_MODEL_REASONING_EFFORT=high`, `CODEX_SERVICE_TIER=standard`, `CODEX_APP_SERVER_URL`, and `LIVEKIT_CODEX_THREAD_CWD` into the shared `.env`. When `OPENBASE_CODING_BACKEND=openbase_cloud`, the app-server service switches to the Openbase Cloud model proxy at startup.
+18. Uses the bundled console build, or builds `console` in dev-workspace mode.
+19. Installs background services (launchd on macOS, systemd user units on Linux) unless skipped.
+20. Configures Tailscale Serve routes for the iOS app:
     - `tailscale serve --bg --http=18080 http://127.0.0.1:7999`
     - `tailscale serve --bg --tcp=7880 tcp://127.0.0.1:7880`
-19. Registers this device with Openbase cloud and reports `cli_configured`
+21. Registers this device with Openbase cloud and reports `cli_configured`
     for the onboarding flow (warns and continues on failure; requires a prior
     `openbase-coder login`). See [`onboarding`](onboarding.md).
 
@@ -125,7 +127,9 @@ uvx --python 3.13 openbase-coder setup \
 ## Notes
 
 - If `.env` already exists, setup leaves it unchanged.
-- `~/.openbase/codex_home/AGENTS.md` and `~/.openbase/claude_config/CLAUDE.md` remain normal editable files. Setup refreshes only their `## Openbase Coder Instructions` sections from the workspace `instructions/AGENTS.md`; custom content above that section or under a separate H2 is preserved. Shared default instruction files are symlinked under `~/.openbase/instructions`, with legacy Codex-home symlinks kept for compatibility. Existing matching copies are replaced with symlinks; existing customized files are left unchanged.
+- `~/.openbase/codex_home/AGENTS.md` is a generated regular file from `instructions/AGENTS.md`; setup rewrites it and records the source template path. A console setting controls whether normal `~/.codex/AGENTS.md` content is included above the Openbase section; the default is enabled.
+- `~/.openbase/claude_config/CLAUDE.md` is a symlink to `~/.openbase/codex_home/AGENTS.md`. Normal `~/.claude/CLAUDE.md` is kept symlinked to `~/.codex/AGENTS.md`.
+- Shared default instruction files under `~/.openbase/instructions` are generated regular files with source-template comments. Legacy files under `~/.openbase/codex_home/*_INSTRUCTIONS.md` are generated regular copies, not symlinks.
 - If `dispatcher-config.json` already exists, setup preserves it. Legacy configs from `~/.openbase/codex_home/dispatcher-config.json` are migrated to `~/.openbase/dispatcher-config.json`.
 - Existing skill symlinks in `~/.openbase/codex_home/skills` and `~/.openbase/claude_config/skills` are updated to the bundled or workspace source. Real skill directories or files are left unchanged.
 - Existing `~/.openbase/codex_home/config.toml` content is preserved, except setup enforces the root permission keys and creates or replaces the `[mcp_servers.super-agents]` table. Passing `--link-codex-config` makes `~/.openbase/codex_home/config.toml` a symlink to `~/.codex/config.toml`; if the normal Codex config is missing, setup seeds it from the existing Openbase config before linking.

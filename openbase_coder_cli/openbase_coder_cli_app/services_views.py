@@ -21,14 +21,18 @@ from openbase_coder_cli.mcp.thread_exchange import (
     resolve_thread_snapshot_conflict,
     thread_snapshot_conflicts_payload,
     thread_snapshot_status,
+    thread_sync_conflicts_payload,
 )
 from openbase_coder_cli.openbase_coder_cli_app.common import _auth_debug_value
 from openbase_coder_cli.services.console_settings import (
     DEFAULT_DANGEROUS_CONFIRMATION_PHRASE,
+    DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS,
     get_dangerous_confirmation_phrase,
     get_ignored_launchctl_labels,
+    include_normal_codex_agents_in_openbase_agents,
     set_dangerous_confirmation_phrase,
     set_ignored_launchctl_labels,
+    set_include_normal_codex_agents_in_openbase_agents,
 )
 from openbase_coder_cli.services.definitions import SERVICES
 from openbase_coder_cli.services.launchctl_tools import (
@@ -84,10 +88,26 @@ class DangerousConfirmationSettingsSerializer(serializers.Serializer):
     )
 
 
+class AgentsGenerationSettingsSerializer(serializers.Serializer):
+    include_normal_codex_agents_in_openbase_agents = serializers.BooleanField()
+
+
 def _dangerous_confirmation_settings_payload(*, refreshed: bool = False) -> dict:
     return {
         "dangerous_confirmation_phrase": get_dangerous_confirmation_phrase(),
         "default_dangerous_confirmation_phrase": DEFAULT_DANGEROUS_CONFIRMATION_PHRASE,
+        "refreshed": refreshed,
+    }
+
+
+def _agents_generation_settings_payload(*, refreshed: bool = False) -> dict:
+    return {
+        "include_normal_codex_agents_in_openbase_agents": (
+            include_normal_codex_agents_in_openbase_agents()
+        ),
+        "default_include_normal_codex_agents_in_openbase_agents": (
+            DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS
+        ),
         "refreshed": refreshed,
     }
 
@@ -132,6 +152,26 @@ def dangerous_confirmation_settings(request):
     )
 
 
+@api_view(["GET", "PATCH"])
+def agents_generation_settings(request):
+    """Read or update generated Openbase instruction settings."""
+    if request.method == "GET":
+        return Response(_agents_generation_settings_payload())
+
+    serializer = AgentsGenerationSettingsSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    include_normal = set_include_normal_codex_agents_in_openbase_agents(
+        serializer.validated_data["include_normal_codex_agents_in_openbase_agents"]
+    )
+    refreshed = refresh_openbase_instruction_files_from_installation()
+    return Response(
+        {
+            **_agents_generation_settings_payload(refreshed=refreshed),
+            "include_normal_codex_agents_in_openbase_agents": include_normal,
+        }
+    )
+
+
 @api_view(["POST"])
 def launchctl_service_action(request, label):
     """Run a launchctl action for a LaunchAgent label."""
@@ -165,6 +205,12 @@ def thread_device_sync_status(request):
 def thread_device_sync_conflicts(request):
     """Show unresolved cross-device Codex thread snapshot sync conflicts."""
     return Response(thread_snapshot_conflicts_payload())
+
+
+@api_view(["GET"])
+def thread_sync_conflicts(request):
+    """Show unresolved Codex thread sync conflicts across homes and devices."""
+    return Response(thread_sync_conflicts_payload())
 
 
 @api_view(["POST"])

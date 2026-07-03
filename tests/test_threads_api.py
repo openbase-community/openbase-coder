@@ -23,6 +23,7 @@ class FakeThreadManager:
     def __init__(self, threads: list[ThreadInfo]) -> None:
         self._threads = threads
         self.page_calls: list[dict[str, str | int | None]] = []
+        self.thread_state_calls: list[str] = []
 
     async def list_threads(self) -> list[ThreadInfo]:
         return self._threads
@@ -43,6 +44,7 @@ class FakeThreadManager:
         )
 
     async def get_thread_state(self, thread_id: str) -> ThreadInfo | None:
+        self.thread_state_calls.append(thread_id)
         return next(
             (thread for thread in self._threads if thread.session_id == thread_id),
             None,
@@ -162,6 +164,47 @@ def test_thread_list_skips_unavailable_livekit_fallback(monkeypatch) -> None:
     assert [thread["thread_id"] for thread in response.data["threads"]] == [
         "thread-001"
     ]
+
+
+def test_thread_dispatcher_returns_cached_dispatcher_thread(monkeypatch) -> None:
+    thread_views.invalidate_thread_list_cache()
+    dispatcher_thread = _thread(1)
+    manager = FakeThreadManager([dispatcher_thread, _thread(2)])
+    monkeypatch.setattr(thread_views, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(
+        thread_views,
+        "get_livekit_shared_thread_id",
+        lambda: dispatcher_thread.session_id,
+    )
+
+    factory = APIRequestFactory()
+    request = factory.get("/api/threads/dispatcher/")
+    force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+
+    first_response = thread_views.thread_dispatcher(request)
+    second_response = thread_views.thread_dispatcher(request)
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert first_response.data["thread_id"] == dispatcher_thread.session_id
+    assert manager.page_calls == []
+    assert manager.thread_state_calls == [dispatcher_thread.session_id]
+
+
+def test_thread_dispatcher_returns_404_without_dispatcher(monkeypatch) -> None:
+    thread_views.invalidate_thread_list_cache()
+    manager = FakeThreadManager([_thread(1)])
+    monkeypatch.setattr(thread_views, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(thread_views, "get_livekit_shared_thread_id", lambda: None)
+
+    factory = APIRequestFactory()
+    request = factory.get("/api/threads/dispatcher/")
+    force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+    response = thread_views.thread_dispatcher(request)
+
+    assert response.status_code == 404
+    assert manager.page_calls == []
+    assert manager.thread_state_calls == []
 
 
 def test_thread_list_filters_favorites_without_changing_default_order(

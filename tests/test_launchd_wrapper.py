@@ -1,3 +1,5 @@
+import subprocess
+
 from openbase_coder_cli.services import launchd
 from openbase_coder_cli.services.definitions import ServiceDefinition
 from openbase_coder_cli.services.installation import InstallationConfig
@@ -57,3 +59,32 @@ def test_resolve_binaries_prefers_standalone_paths(tmp_path, monkeypatch):
     assert binaries["livekit"] == str(livekit)
     assert binaries["python"] == str(python)
     assert binaries["runtime_workdir"] == str(tmp_path / "openbase")
+
+
+def test_launchctl_bootstrap_reenables_disabled_label(tmp_path, monkeypatch):
+    service = ServiceDefinition(
+        name="sample",
+        description="Sample",
+        command_template="exec true",
+        workdir_template="{workspace}",
+    )
+    plist = tmp_path / "sample.plist"
+    calls = []
+
+    def fake_launchctl(*args, check=True):
+        calls.append(args)
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    monkeypatch.setattr(launchd, "_is_macos", lambda: True)
+    monkeypatch.setattr(launchd, "_uid", lambda: 501)
+    monkeypatch.setattr(launchd, "_plist_path", lambda _svc: plist)
+    monkeypatch.setattr(launchd, "_prepare_service_start", lambda _svc: None)
+    monkeypatch.setattr(launchd.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(launchd, "_launchctl", fake_launchctl)
+
+    launchd.launchctl_bootstrap(service)
+
+    assert ("enable", "gui/501/com.openbase.coder.sample") in calls
+    assert calls.index(("enable", "gui/501/com.openbase.coder.sample")) < calls.index(
+        ("bootstrap", "gui/501", str(plist))
+    )

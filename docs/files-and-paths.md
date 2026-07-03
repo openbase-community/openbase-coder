@@ -16,16 +16,18 @@ This page lists the key files Openbase CLI creates or consumes.
 | `~/.openbase/installation.json` | `openbase-coder setup` | Stores `workspace_path` + `env_file` |
 | `~/.openbase/.env` | `openbase-coder setup` | Shared env config and generated secrets |
 | `~/.openbase/codex_home/auth.json` | `openbase-coder setup` | Symlink to `~/.codex/auth.json` for launchd Codex services |
-| `~/.openbase/codex_home/AGENTS.md` | `openbase-coder setup`, CLI launch | Editable instructions for the Openbase voice Codex home, with an auto-refreshed `## Openbase Coder Instructions` section |
-| `~/.openbase/claude_config/CLAUDE.md` | `openbase-coder setup` | Editable instructions for Claude Code sessions using Openbase's managed `CLAUDE_CONFIG_DIR` |
+| `~/.codex/AGENTS.md` | User, `openbase-coder setup` | Normal/general-purpose Codex instructions; setup creates it if needed so normal Claude can link to it |
+| `~/.claude/CLAUDE.md` | User, `openbase-coder setup` | Symlink to normal `~/.codex/AGENTS.md` |
+| `~/.openbase/codex_home/AGENTS.md` | `openbase-coder setup`, CLI launch, settings API | Generated Openbase Codex-home instructions from `instructions/AGENTS.md`; records the source template path and can include normal Codex instructions |
+| `~/.openbase/claude_config/CLAUDE.md` | `openbase-coder setup` | Symlink to Openbase's generated `~/.openbase/codex_home/AGENTS.md` for Claude Code sessions using Openbase's managed `CLAUDE_CONFIG_DIR` |
 | `~/.openbase/claude_config/.claude.json` | `openbase-coder setup` | Claude Code user config for the Openbase-managed Claude config dir, including the Super Agents MCP server |
-| `~/.openbase/instructions/VOICE_INSTRUCTIONS.md` | `openbase-coder setup` | Default direct voice-session instructions |
-| `~/.openbase/instructions/DISPATCHER_INSTRUCTIONS.md` | `openbase-coder setup` | Default dispatcher-only instructions |
-| `~/.openbase/instructions/SUPER_AGENT_INSTRUCTIONS.md` | `openbase-coder setup` | Default Super Agent thread instructions |
-| `~/.openbase/codex_home/VOICE_INSTRUCTIONS.md` | `openbase-coder setup` | Legacy symlink to the shared voice instructions |
-| `~/.openbase/codex_home/DISPATCHER_INSTRUCTIONS.md` | `openbase-coder setup` | Legacy symlink to the shared dispatcher instructions |
-| `~/.openbase/codex_home/SUPER_AGENT_INSTRUCTIONS.md` | `openbase-coder setup` | Legacy symlink to the shared Super Agent instructions |
-| `~/.openbase/dispatcher-config.json` | `openbase-coder setup`, user/MCP commands | Dispatcher runtime settings, including reasoning and backend-specific model defaults |
+| `~/.openbase/instructions/VOICE_INSTRUCTIONS.md` | `openbase-coder setup` | Generated default direct voice-session instructions |
+| `~/.openbase/instructions/DISPATCHER_INSTRUCTIONS.md` | `openbase-coder setup` | Generated default dispatcher-only instructions |
+| `~/.openbase/instructions/SUPER_AGENT_INSTRUCTIONS.md` | `openbase-coder setup` | Generated default Super Agent thread instructions |
+| `~/.openbase/codex_home/VOICE_INSTRUCTIONS.md` | `openbase-coder setup` | Legacy generated regular copy of the shared voice instructions |
+| `~/.openbase/codex_home/DISPATCHER_INSTRUCTIONS.md` | `openbase-coder setup` | Legacy generated regular copy of the shared dispatcher instructions |
+| `~/.openbase/codex_home/SUPER_AGENT_INSTRUCTIONS.md` | `openbase-coder setup` | Legacy generated regular copy of the shared Super Agent instructions |
+| `~/.openbase/dispatcher-config.json` | `openbase-coder setup`, `openbase-coder defaults`, settings API | Dispatcher runtime settings, including default reasoning and backend-specific model defaults |
 | `~/.openbase/codex_home/dispatcher-config.json` | `openbase-coder setup` | Legacy symlink to `~/.openbase/dispatcher-config.json` |
 | `~/.openbase/codex_home/config.toml` | `openbase-coder setup` | Openbase service Codex config, including broad local access and the Super Agents MCP server. With `--link-codex-config`, this is a symlink to `~/.codex/config.toml` |
 | `~/.openbase/codex_home/skills/<skill>/` | `openbase-coder setup` | Symlink to a workspace-owned skill source under `skills/skills/<skill>/` |
@@ -33,11 +35,15 @@ This page lists the key files Openbase CLI creates or consumes.
 | `~/.openbase/workspace/` | `openbase-coder setup` | Openbase workspace repo clone |
 | `~/.openbase/workspace/cli/.venv/` | `openbase-coder setup` | CLI and bundled LiveKit worker environment |
 
-The four instruction files above are seeded from the workspace `instructions/`
-directory and are only created when missing.
-The dispatcher config is created when missing with dispatcher reasoning effort
-`low` and Super Agents reasoning effort `high`; setup does not overwrite an
-existing dispatcher config.
+Generated instruction files are rendered from the workspace or bundled
+`instructions/` directory, record their source template path, and interpolate
+template variables such as `${dangerous_confirmation_phrase}`. Setup rewrites
+`~/.openbase/codex_home/AGENTS.md` and legacy Codex-home instruction copies;
+shared files under `~/.openbase/instructions` are updated when they are already
+managed/generated and left alone if they appear to be unrelated custom files.
+The dispatcher config is created when missing with default dispatcher reasoning
+effort `low` and default Super Agents reasoning effort `high`; setup does not
+overwrite an existing dispatcher config.
 Workspace skills are symlink-installed, not copied, so edits to source skills
 are visible to the Openbase Codex home immediately.
 The Codex home config grants full local sandbox access, disables permission

@@ -95,10 +95,8 @@ INSTALLED_APPS = [
     "channels",
     "rest_framework",
     "corsheaders",
-    "mcp_server",
     # Local apps
     "openbase_coder_cli.openbase_coder_cli_app",
-    "openbase_coder_cli.mcp",
 ]
 
 MIDDLEWARE = [
@@ -215,19 +213,6 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
 ).split(",")
 
 CORS_ALLOW_CREDENTIALS = True
-
-
-# MCP Server configuration
-
-DJANGO_MCP_AUTHENTICATION_CLASSES = [
-    "openbase_coder_cli.config.authentication.JWTAuthentication",
-]
-
-# Workaround for macOS + uvicorn 100% CPU issue
-# See: https://github.com/gts360/django-mcp-server/issues/48
-DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
-    "stateless": True,
-}
 
 
 # Channels (WebSocket) configuration

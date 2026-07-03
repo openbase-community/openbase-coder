@@ -20,6 +20,7 @@ IOS_APP_CONTROL_ACTIONS = {
     "set_call_muted",
     "start_developer_call",
     "start_livekit_voice_test_call",
+    "upload_diagnostics",
 }
 DISALLOWED_URL_SCHEMES = {"data", "file", "javascript"}
 URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*$")
@@ -33,6 +34,7 @@ class IOSAppControlSerializer(serializers.Serializer):
         max_length=4096,
     )
     muted = serializers.BooleanField(required=False)
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=2000)
 
     def validate(self, attrs):
         action = attrs["action"]

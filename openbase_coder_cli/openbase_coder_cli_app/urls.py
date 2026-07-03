@@ -8,6 +8,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from openbase_coder_cli.openbase_coder_cli_app.views import (
+    agents_generation_settings,
     agents_md,
     all_project_reports,
     apple_music_playback_entitlement,
@@ -16,6 +17,7 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     auth_logout,
     auth_refresh_jwt,
     auth_session,
+    backend_model_settings,
     boilersync_templates,
     bootstrap_run,
     brain_readiness,
@@ -66,6 +68,7 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     skill_approval_request_detail,
     skill_approval_requests,
     skill_detail,
+    skills_auto_link_settings,
     skills_list,
     skills_symlink,
     stt_settings,
@@ -74,10 +77,12 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     thread_device_sync_conflict_resolve,
     thread_device_sync_conflicts,
     thread_device_sync_status,
+    thread_dispatcher,
     thread_favorite,
     thread_interrupt,
     thread_list,
     thread_start_turn,
+    thread_sync_conflicts,
     thread_tags,
     tts_settings,
     user_play,
@@ -106,6 +111,7 @@ urlpatterns = [
     path("devices/", devices_list, name="devices-list"),
     path("onboarding/status/", onboarding_status, name="onboarding-status"),
     path("threads/", thread_list, name="thread-list"),
+    path("threads/dispatcher/", thread_dispatcher, name="thread-dispatcher"),
     path("threads/<str:thread_id>/", thread_detail, name="thread-detail"),
     path(
         "threads/<str:thread_id>/tags/",
@@ -180,6 +186,11 @@ urlpatterns = [
         name="project-reports-download",
     ),
     path("skills/", skills_list, name="skills-list"),
+    path(
+        "skills/auto-link-normal-codex/",
+        skills_auto_link_settings,
+        name="skills-auto-link-normal-codex",
+    ),
     path("skills/symlink/", skills_symlink, name="skills-symlink"),
     path(
         "skills/printing-press/catalog/",
@@ -214,6 +225,11 @@ urlpatterns = [
         name="launchctl-ignored-settings",
     ),
     path(
+        "settings/agents-generation/",
+        agents_generation_settings,
+        name="agents-generation-settings",
+    ),
+    path(
         "settings/openbase-services/",
         openbase_services_list,
         name="openbase-services-list",
@@ -227,6 +243,11 @@ urlpatterns = [
         "settings/thread-device-sync/conflicts/",
         thread_device_sync_conflicts,
         name="thread-device-sync-conflicts",
+    ),
+    path(
+        "settings/thread-sync/conflicts/",
+        thread_sync_conflicts,
+        name="thread-sync-conflicts",
     ),
     path(
         "settings/thread-device-sync/conflicts/<str:thread_id>/resolve/",
@@ -247,6 +268,11 @@ urlpatterns = [
         "settings/coding-backend/",
         coding_backend_settings,
         name="coding-backend-settings",
+    ),
+    path(
+        "settings/backend-model/",
+        backend_model_settings,
+        name="backend-model-settings",
     ),
     path(
         "settings/reasoning/",

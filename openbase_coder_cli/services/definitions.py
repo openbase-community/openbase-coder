@@ -78,29 +78,6 @@ SERVICES: list[ServiceDefinition] = [
             '            LIVEKIT_CONFIG_BODY="$(printf \'%s\\n      - %s/128\\n\' "$LIVEKIT_CONFIG_BODY" "$LIVEKIT_NODE_IP_V6")"\n'
             "        fi\n"
             "        ;;\n"
-            "    lan)\n"
-            '        if [ -z "${{LIVEKIT_INTERFACE:-}}" ]; then\n'
-            '            if [ "$(uname)" = "Darwin" ]; then\n'
-            "                LIVEKIT_INTERFACE=\"$(route -n get default 2>/dev/null | sed -n 's/.*interface: //p' | head -n 1)\"\n"
-            "            else\n"
-            "                LIVEKIT_INTERFACE=\"$(ip -4 route show default 2>/dev/null | sed -n 's/.* dev \\([^ ]*\\).*/\\1/p' | head -n 1)\"\n"
-            "            fi\n"
-            "        fi\n"
-            '        if [ -z "${{LIVEKIT_NODE_IP:-}}" ]; then\n'
-            '            if [ "$(uname)" = "Darwin" ]; then\n'
-            '                LIVEKIT_NODE_IP="$(ipconfig getifaddr "$LIVEKIT_INTERFACE" 2>/dev/null || true)"\n'
-            "            else\n"
-            '                LIVEKIT_NODE_IP="$(ip -o -4 addr show dev "$LIVEKIT_INTERFACE" 2>/dev/null | awk \'NR == 1 {{ sub(/\\/.*/, "", $4); print $4 }}\')"\n'
-            "            fi\n"
-            "        fi\n"
-            '        if [ -z "${{LIVEKIT_INTERFACE:-}}" ] || [ -z "${{LIVEKIT_NODE_IP:-}}" ]; then\n'
-            '            echo "LIVEKIT_INTERFACE and LIVEKIT_NODE_IP are required for LAN LiveKit media." >&2\n'
-            "            exit 1\n"
-            "        fi\n"
-            '        LIVEKIT_BIND_IP="${{LIVEKIT_BIND_IP:-0.0.0.0}}"\n'
-            '        NODE_IP_ARGS=(--node-ip "$LIVEKIT_NODE_IP")\n'
-            '        LIVEKIT_CONFIG_BODY="$(printf \'rtc:\\n  tcp_port: %s\\n  udp_port: %s\\n  enable_loopback_candidate: true\\n  interfaces:\\n    includes:\\n      - %s\\n      - %s\\n  ips:\\n    includes:\\n      - 127.0.0.1/32\\n      - %s/32\\n\' "$LIVEKIT_TCP_PORT" "$LIVEKIT_UDP_PORT" "$LIVEKIT_LOOPBACK_IFACE" "$LIVEKIT_INTERFACE" "$LIVEKIT_NODE_IP")"\n'
-            "        ;;\n"
             "    *)\n"
             '        echo "Unsupported LIVEKIT_NETWORK_MODE: $LIVEKIT_NETWORK_MODE" >&2\n'
             "        exit 1\n"
@@ -122,6 +99,7 @@ SERVICES: list[ServiceDefinition] = [
         description="Codex App Server",
         command_template=(
             'export CODEX_HOME="{data_dir}/codex_home"\n'
+            'export DISABLE_AUTOUPDATER="${{DISABLE_AUTOUPDATER:-1}}"\n'
             'mkdir -p "$CODEX_HOME"\n'
             'OPENBASE_CODING_BACKEND="${{OPENBASE_CODING_BACKEND:-codex}}"\n'
             'CODEX_MODEL_REASONING_EFFORT="${{CODEX_MODEL_REASONING_EFFORT:-high}}"\n'

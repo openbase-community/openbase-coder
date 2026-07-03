@@ -4,7 +4,7 @@ from openbase_coder_cli.services.console_settings import (
     get_dangerous_confirmation_phrase,
 )
 
-DANGEROUS_CONFIRMATION_PHRASE_TOKEN = "{dangerous_confirmation_phrase}"
+DANGEROUS_CONFIRMATION_PHRASE_TOKEN = "${dangerous_confirmation_phrase}"
 
 
 def has_instruction_template_tokens(text: str) -> bool:

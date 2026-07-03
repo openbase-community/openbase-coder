@@ -6,6 +6,7 @@ from pathlib import Path
 from openbase_coder_cli.paths import CONSOLE_SETTINGS_JSON_PATH
 
 DEFAULT_DANGEROUS_CONFIRMATION_PHRASE = "yes, proceed"
+DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS = True
 
 
 def get_ignored_launchctl_labels() -> list[str]:
@@ -44,6 +45,21 @@ def set_dangerous_confirmation_phrase(phrase: str) -> str:
     data["dangerous_confirmation_phrase"] = normalized
     _write_settings(data)
     return normalized
+
+
+def include_normal_codex_agents_in_openbase_agents() -> bool:
+    data = _read_settings()
+    value = data.get("include_normal_codex_agents_in_openbase_agents")
+    if isinstance(value, bool):
+        return value
+    return DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS
+
+
+def set_include_normal_codex_agents_in_openbase_agents(value: bool) -> bool:
+    data = _read_settings()
+    data["include_normal_codex_agents_in_openbase_agents"] = bool(value)
+    _write_settings(data)
+    return bool(value)
 
 
 def _read_settings() -> dict:

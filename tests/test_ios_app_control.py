@@ -91,8 +91,30 @@ def test_ios_app_control_start_developer_call_broadcasts(monkeypatch):
     assert channel_layer.sent[0][1]["data"]["action"] == "start_developer_call"
 
 
+def test_ios_app_control_upload_diagnostics_broadcasts(monkeypatch):
+    channel_layer = FakeChannelLayer()
+    monkeypatch.setattr(views, "get_channel_layer", lambda: channel_layer)
+
+    response = views.ios_app_control(
+        _request({"action": "upload_diagnostics", "limit": 500})
+    )
+
+    assert response.status_code == 202
+    assert channel_layer.sent[0][1]["data"]["action"] == "upload_diagnostics"
+    assert channel_layer.sent[0][1]["data"]["limit"] == 500
+
+
 @pytest.mark.parametrize("url", ["example.com", "javascript:alert(1)", "file:///tmp/a"])
 def test_ios_app_control_rejects_invalid_urls(url):
     response = views.ios_app_control(_request({"action": "open_url", "url": url}))
+
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize("limit", [0, 2001])
+def test_ios_app_control_rejects_invalid_upload_diagnostics_limit(limit):
+    response = views.ios_app_control(
+        _request({"action": "upload_diagnostics", "limit": limit})
+    )
 
     assert response.status_code == 400

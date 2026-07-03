@@ -31,6 +31,8 @@ from openbase_coder_cli.reports_service import (
     _resolve_report_origin,
     _resolve_reports_file,
     _resolve_reports_path,
+    enrich_report_provenance,
+    explicit_report_provenance,
 )
 
 REPORT_ACTION_PROMPT_MAX_CHARS = 24000
@@ -360,11 +362,16 @@ def project_reports_file(request):
                 {"error": "File is too large to render as text"},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             )
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        provenance = enrich_report_provenance(explicit_report_provenance(content))
+        payload = {
+            "file": _reports_file_payload(file_path, _reports_dir(str(resolved))),
+            "content": content,
+        }
+        if provenance:
+            payload["provenance"] = provenance.payload()
         return Response(
-            {
-                "file": _reports_file_payload(file_path, _reports_dir(str(resolved))),
-                "content": file_path.read_text(encoding="utf-8", errors="replace"),
-            }
+            payload
         )
 
     if kind == "image":

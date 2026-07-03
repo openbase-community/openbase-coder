@@ -24,7 +24,6 @@ urlpatterns = [
         r"^openbase-plugin-assets/(?P<plugin_id>[^/]+)/(?P<page_key>[^/]+)/(?P<path>.*)$",
         plugin_console_asset,
     ),
-    path("", include("mcp_server.urls")),  # MCP at /mcp
     # Catch-all: serve built React console (SPA)
     re_path(r"^(?P<path>.*)$", serve_console),
 ]

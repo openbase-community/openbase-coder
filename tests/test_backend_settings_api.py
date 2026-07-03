@@ -12,7 +12,10 @@ from rest_framework.test import APIRequestFactory, force_authenticate  # noqa: E
 
 django.setup()
 
-from openbase_coder_cli.openbase_coder_cli_app import backend_settings  # noqa: E402
+from openbase_coder_cli.openbase_coder_cli_app import (  # noqa: E402
+    backend_settings,
+    model_settings,
+)
 
 
 def _authenticated_request(method: str, path: str, data: dict | None = None):
@@ -104,6 +107,69 @@ def test_coding_backend_settings_reads_legacy_backend(
         "openbase_cloud",
         "claude_code",
     ]
+
+
+def test_backend_model_settings_lists_claude_fable(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENBASE_CODING_BACKEND=claude-code\n", encoding="utf-8")
+    monkeypatch.setattr(model_settings, "DEFAULT_ENV_FILE_PATH", env_file)
+    monkeypatch.setattr(
+        model_settings.dispatcher_config,
+        "DEFAULT_ENV_FILE_PATH",
+        env_file,
+    )
+    monkeypatch.setattr(
+        model_settings.dispatcher_config,
+        "CODEX_DISPATCHER_CONFIG_PATH",
+        tmp_path / "dispatcher-config.json",
+    )
+
+    response = model_settings.backend_model_settings(
+        _authenticated_request("GET", "/api/settings/backend-model/")
+    )
+
+    assert response.status_code == 200
+    assert response.data["backend"] == "claude_code"
+    assert [option["id"] for option in response.data["options"]] == [
+        "fable",
+        "opus",
+        "sonnet",
+        "haiku",
+    ]
+
+
+def test_backend_model_settings_accepts_fable(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    config_path = tmp_path / "dispatcher-config.json"
+    env_file.write_text("OPENBASE_CODING_BACKEND=claude-code\n", encoding="utf-8")
+    monkeypatch.setattr(model_settings, "DEFAULT_ENV_FILE_PATH", env_file)
+    monkeypatch.setattr(
+        model_settings.dispatcher_config,
+        "DEFAULT_ENV_FILE_PATH",
+        env_file,
+    )
+    monkeypatch.setattr(
+        model_settings.dispatcher_config,
+        "CODEX_DISPATCHER_CONFIG_PATH",
+        config_path,
+    )
+
+    response = model_settings.backend_model_settings(
+        _authenticated_request(
+            "PUT",
+            "/api/settings/backend-model/",
+            {"role": "super_agents", "model": "fable"},
+        )
+    )
+
+    assert response.status_code == 200
+    assert response.data["models"]["super_agents"] == "fable"
 
 
 def test_coding_backend_settings_persists_claude_code_selection(

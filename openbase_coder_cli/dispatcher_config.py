@@ -29,6 +29,7 @@ SUPER_AGENTS_REASONING_EFFORT_KEY = "super_agents_reasoning_effort"
 CODEX_SERVICE_TIER_KEY = "codex_service_tier"
 CODEX_SERVICE_TIERS = {"fast", "standard"}
 DEFAULT_CODEX_SERVICE_TIER = "standard"
+AUTO_LINK_NORMAL_CODEX_SKILLS_KEY = "auto_link_normal_codex_skills"
 BACKEND_MODELS_KEY = "backend_models"
 DISPATCHER_MODEL_ROLE = "dispatcher"
 SUPER_AGENTS_MODEL_ROLE = "super_agents"
@@ -37,6 +38,34 @@ LEGACY_CODEX_BACKEND_ENV_KEY = "OPENBASE_CODEX_BACKEND"
 CODEX_BACKEND = "codex"
 OPENBASE_CLOUD_BACKEND = "openbase_cloud"
 CLAUDE_CODE_BACKEND = "claude_code"
+CLAUDE_CODE_MODEL_OPTIONS = (
+    {
+        "id": "fable",
+        "label": "Claude Fable 5",
+        "description": "Claude Code family alias for claude-fable-5.",
+    },
+    {
+        "id": "opus",
+        "label": "Claude Opus",
+        "description": "Claude Code family alias for the default Opus model.",
+    },
+    {
+        "id": "sonnet",
+        "label": "Claude Sonnet",
+        "description": "Claude Code family alias for the default Sonnet model.",
+    },
+    {
+        "id": "haiku",
+        "label": "Claude Haiku",
+        "description": "Claude Code family alias for the default Haiku model.",
+    },
+)
+BACKEND_MODEL_OPTIONS = {
+    CLAUDE_CODE_BACKEND: CLAUDE_CODE_MODEL_OPTIONS,
+}
+CLAUDE_CODE_MODEL_ALIASES = {
+    option["id"] for option in CLAUDE_CODE_MODEL_OPTIONS
+}
 BACKEND_ALIASES = {
     "": CODEX_BACKEND,
     "openai": CODEX_BACKEND,
@@ -99,7 +128,9 @@ def codex_service_tier(path: Path | None = None) -> str:
     env_value = _optional_str(os.getenv("CODEX_SERVICE_TIER"))
     if env_value in CODEX_SERVICE_TIERS:
         return env_value
-    env_file_value = _optional_str(_env_file_values(DEFAULT_ENV_FILE_PATH).get("CODEX_SERVICE_TIER"))
+    env_file_value = _optional_str(
+        _env_file_values(DEFAULT_ENV_FILE_PATH).get("CODEX_SERVICE_TIER")
+    )
     if env_file_value in CODEX_SERVICE_TIERS:
         return env_file_value
     return DEFAULT_CODEX_SERVICE_TIER
@@ -112,7 +143,24 @@ def set_codex_service_tier(value: str, path: Path | None = None) -> Path:
         raise ValueError(f"Codex service tier must be one of: {allowed}.")
 
     config_path = path or CODEX_DISPATCHER_CONFIG_PATH
-    payload = {**read_dispatcher_config(config_path), CODEX_SERVICE_TIER_KEY: normalized}
+    payload = {
+        **read_dispatcher_config(config_path),
+        CODEX_SERVICE_TIER_KEY: normalized,
+    }
+    _write_dispatcher_config(payload, config_path)
+    return config_path
+
+
+def auto_link_normal_codex_skills(path: Path | None = None) -> bool:
+    return read_dispatcher_config(path).get(AUTO_LINK_NORMAL_CODEX_SKILLS_KEY) is True
+
+
+def set_auto_link_normal_codex_skills(enabled: bool, path: Path | None = None) -> Path:
+    config_path = path or CODEX_DISPATCHER_CONFIG_PATH
+    payload = {
+        **read_dispatcher_config(config_path),
+        AUTO_LINK_NORMAL_CODEX_SKILLS_KEY: bool(enabled),
+    }
     _write_dispatcher_config(payload, config_path)
     return config_path
 
@@ -132,9 +180,7 @@ def backend_model(
     path: Path | None = None,
 ) -> str | None:
     selected_backend = _execution_backend(
-        _normalize_backend(
-            backend or _configured_backend_from_environment()
-        )
+        _normalize_backend(backend or _configured_backend_from_environment())
     )
     payload = read_dispatcher_config(path)
     backend_models = payload.get(BACKEND_MODELS_KEY)
@@ -151,6 +197,10 @@ def backend_model(
 
 def set_super_agents_model(value: str, path: Path | None = None) -> Path:
     return set_backend_model(SUPER_AGENTS_MODEL_ROLE, value, path=path)
+
+
+def set_dispatcher_model(value: str, path: Path | None = None) -> Path:
+    return set_backend_model(DISPATCHER_MODEL_ROLE, value, path=path)
 
 
 def set_backend_model(
@@ -185,6 +235,21 @@ def set_backend_model(
         config_path,
     )
     return config_path
+
+
+def model_options_for_backend(backend: str | None = None) -> tuple[dict[str, str], ...]:
+    selected_backend = _normalize_backend(
+        backend or _configured_backend_from_environment()
+    )
+    return tuple(BACKEND_MODEL_OPTIONS.get(selected_backend, ()))
+
+
+def is_known_backend_model(model: str, *, backend: str | None = None) -> bool:
+    normalized = " ".join(model.split()).lower()
+    return any(
+        normalized == option["id"].lower()
+        for option in model_options_for_backend(backend)
+    )
 
 
 def selected_tts_provider_id(path: Path | None = None) -> str:

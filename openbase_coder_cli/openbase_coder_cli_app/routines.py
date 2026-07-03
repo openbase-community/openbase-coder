@@ -13,10 +13,23 @@ from openbase_coder_cli.openbase_coder_cli_app.common import _clean_serializer_d
 
 class RoutineSerializer(serializers.Serializer):
     name = serializers.CharField(trim_whitespace=True, max_length=256)
+    kind = serializers.ChoiceField(
+        choices=["agent", "command"],
+        required=False,
+    )
     prompt = serializers.CharField(
         required=False,
-        allow_blank=False,
+        allow_blank=True,
         trim_whitespace=False,
+    )
+    command = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+    )
+    commandTimeoutSeconds = serializers.IntegerField(
+        required=False,
+        min_value=1,
     )
     time = serializers.CharField(
         required=False,
@@ -113,7 +126,7 @@ class RoutineSerializer(serializers.Serializer):
 
 
 class RoutineCreateSerializer(RoutineSerializer):
-    prompt = serializers.CharField(allow_blank=False, trim_whitespace=False)
+    prompt = serializers.CharField(required=False, allow_blank=True, trim_whitespace=False)
     time = serializers.CharField(
         required=False,
         allow_blank=False,
@@ -123,6 +136,11 @@ class RoutineCreateSerializer(RoutineSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        kind = attrs.get("kind") or "agent"
+        if kind == "agent" and not attrs.get("prompt"):
+            raise serializers.ValidationError({"prompt": "Agent routines require a prompt."})
+        if kind == "command" and not attrs.get("command"):
+            raise serializers.ValidationError({"command": "Command routines require a command."})
         schedule_type = attrs.get("scheduleType") or "daily"
         if schedule_type == "daily" and not attrs.get("time"):
             raise serializers.ValidationError({"time": "Daily routines require a time."})
