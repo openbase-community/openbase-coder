@@ -660,6 +660,8 @@ class FakeSession:
         self.current = FakeSpeechHandle(done=False)
         self.say_calls = []
         self.say_handle = FakeSpeechHandle(done=False)
+        self.user_state = "listening"
+        self.agent_state = "idle"
 
     @property
     def current_speech(self):
@@ -779,7 +781,11 @@ def test_voice_selecting_tts_logs_default_stream_voice_and_text(monkeypatch, cap
 async def test_announcer_queue_waits_and_excludes_chat_context(caplog):
     session = FakeSession()
     fake_tts = FakeTTS()
-    queue = AnnouncerSpeechQueue(session=session, announcer_tts=fake_tts)
+    queue = AnnouncerSpeechQueue(
+        session=session,
+        announcer_tts=fake_tts,
+        silence_grace_seconds=0,
+    )
 
     caplog.set_level(logging.INFO, logger="openbase_coder_cli.livekit_agent.livekit")
     await queue._speak(
@@ -805,13 +811,71 @@ async def test_announcer_queue_waits_and_excludes_chat_context(caplog):
 
 
 @pytest.mark.asyncio
+async def test_announcer_queue_waits_until_user_stops_speaking():
+    session = FakeSession()
+    session.current = FakeSpeechHandle(done=True)
+    session.user_state = "speaking"
+    queue = AnnouncerSpeechQueue(
+        session=session,
+        announcer_tts=FakeTTS(),
+        silence_grace_seconds=0,
+    )
+
+    speak_task = asyncio.create_task(
+        queue._speak(AnnouncerMessage(message_id="announcer-1", text="Done."))
+    )
+    await asyncio.sleep(0)
+
+    assert session.say_calls == []
+
+    session.user_state = "listening"
+    queue.notify_state_changed()
+    await asyncio.wait_for(speak_task, timeout=1)
+
+    assert session.say_calls[0][0] == "Done."
+
+
+@pytest.mark.asyncio
+async def test_announcer_queue_restarts_wait_when_user_speaks_during_grace():
+    session = FakeSession()
+    session.current = FakeSpeechHandle(done=True)
+    queue = AnnouncerSpeechQueue(
+        session=session,
+        announcer_tts=FakeTTS(),
+        silence_grace_seconds=0.05,
+    )
+
+    speak_task = asyncio.create_task(
+        queue._speak(AnnouncerMessage(message_id="announcer-1", text="Done."))
+    )
+    await asyncio.sleep(0.01)
+
+    session.user_state = "speaking"
+    queue.notify_state_changed()
+    await asyncio.sleep(0.06)
+
+    assert session.say_calls == []
+    assert not speak_task.done()
+
+    session.user_state = "listening"
+    queue.notify_state_changed()
+    await asyncio.wait_for(speak_task, timeout=1)
+
+    assert session.say_calls[0][0] == "Done."
+
+
+@pytest.mark.asyncio
 async def test_announcer_queue_plays_audio_file_without_chat_context(
     tmp_path, monkeypatch
 ):
     audio_path = tmp_path / "done.wav"
     audio_path.write_bytes(b"not decoded in this test")
     session = FakeSession()
-    queue = AnnouncerSpeechQueue(session=session, announcer_tts=FakeTTS())
+    queue = AnnouncerSpeechQueue(
+        session=session,
+        announcer_tts=FakeTTS(),
+        silence_grace_seconds=0,
+    )
 
     async def fake_audio_file_frames(path):
         assert path == audio_path
@@ -833,6 +897,47 @@ async def test_announcer_queue_plays_audio_file_without_chat_context(
     assert session.say_calls[0][1]["allow_interruptions"] is False
     assert session.say_calls[0][1]["add_to_chat_ctx"] is False
     assert session.say_calls[0][1]["audio"] is not None
+
+
+@pytest.mark.asyncio
+async def test_announcer_queue_defers_audio_file_while_user_speaks(
+    tmp_path, monkeypatch
+):
+    audio_path = tmp_path / "done.wav"
+    audio_path.write_bytes(b"not decoded in this test")
+    session = FakeSession()
+    session.current = FakeSpeechHandle(done=True)
+    session.user_state = "speaking"
+    queue = AnnouncerSpeechQueue(
+        session=session,
+        announcer_tts=FakeTTS(),
+        silence_grace_seconds=0,
+    )
+
+    async def fake_audio_file_frames(path):
+        assert path == audio_path
+        if False:
+            yield None
+
+    monkeypatch.setattr(queue, "_audio_file_frames", fake_audio_file_frames)
+
+    speak_task = asyncio.create_task(
+        queue._speak(
+            AnnouncerAudioMessage(
+                message_id="announcer-audio-1",
+                audio_path=str(audio_path),
+            )
+        )
+    )
+    await asyncio.sleep(0)
+
+    assert session.say_calls == []
+
+    session.user_state = "listening"
+    queue.notify_state_changed()
+    await asyncio.wait_for(speak_task, timeout=1)
+
+    assert session.say_calls[0][0] == ""
 
 
 class PreparedClient(CodexAppServerClient):
