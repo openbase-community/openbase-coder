@@ -158,15 +158,17 @@ jobs:
           uv python install --managed-python 3.12
           uv python find --managed-python 3.12
 
-      - name: Setup Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-
+      # corepack must run before setup-node: setup-node v5 auto-detects the
+      # packageManager field and probes pnpm for cache setup.
       - name: Enable pnpm
         run: |
           corepack enable
           corepack prepare pnpm@10.18.0 --activate
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
 
       - name: Install LiveKit server
         run: |
