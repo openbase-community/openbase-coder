@@ -11,6 +11,18 @@ This page lists the key files Openbase CLI creates or consumes.
 - Launchd plists (macOS): `~/Library/LaunchAgents`
 - systemd user units (Linux): `~/.config/systemd/user`
 
+## Desktop App Storage
+
+The Electron desktop app keeps its own persistent state (window data,
+renderer storage) at:
+
+- macOS: `~/Library/Application Support/@openbase/coder-desktop`
+
+This survives app reinstalls; machine-onboarding progress lives in
+`~/.openbase/desktop-onboarding.json` instead so wiping the Openbase home
+resets onboarding. Remove both when fully uninstalling (see
+[Uninstall](uninstall.md)).
+
 ## Setup-Time Artifacts
 
 | Path | Created By | Purpose |

@@ -249,6 +249,18 @@ SERVICES: list[ServiceDefinition] = [
         workdir_template="{data_dir}",
         port=7999,
     ),
+    ServiceDefinition(
+        name="openbase-cloud-heartbeat",
+        description="Openbase Cloud idle heartbeat",
+        command_template=(
+            'OPENBASE_CLOUD_HEARTBEAT_INTERVAL="${{OPENBASE_CLOUD_HEARTBEAT_INTERVAL:-60}}"\n'
+            'exec {openbase_coder} cloud heartbeat --interval "$OPENBASE_CLOUD_HEARTBEAT_INTERVAL"'
+        ),
+        workdir_template="{data_dir}",
+        # Only meaningful on openbase-cloud workspaces; installed explicitly by
+        # `openbase-coder provision`, never on normal local installs.
+        install_by_default=False,
+    ),
 ]
 
 

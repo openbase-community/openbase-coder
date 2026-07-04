@@ -4,6 +4,17 @@ Uninstall does not depend on the `openbase-coder` command. Use normal macOS,
 Linux, and Python tool cleanup commands so you can remove Openbase even if the
 CLI environment is broken.
 
+## Service Cleanup With The CLI
+
+If the CLI still runs, this removes every service plist and wrapper (it works
+even when `~/.openbase` has already been deleted):
+
+```bash
+openbase-coder services uninstall
+```
+
+Otherwise use the manual commands below.
+
 ## macOS Launchd Services
 
 Stop and remove the launchd jobs first:
@@ -68,6 +79,18 @@ To keep a backup instead:
 backup="$HOME/.openbase.backup.$(date +%Y%m%d-%H%M%S)"
 mv "$HOME"/.openbase "$backup"
 echo "Archived Openbase state at $backup"
+```
+
+## Remove The Desktop App
+
+Delete the app itself, then its persistent storage. Electron keeps per-app
+state (window data, renderer storage) outside the app bundle, so deleting the
+app alone leaves it behind — and a later reinstall would silently pick up the
+old state:
+
+```bash
+rm -rf "/Applications/Openbase Coder.app"
+rm -rf "$HOME/Library/Application Support/@openbase/coder-desktop"
 ```
 
 ## Optional Tailscale Cleanup
