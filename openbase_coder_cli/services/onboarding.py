@@ -80,9 +80,12 @@ def web_backend_url() -> str:
 def onboarding_status_payload() -> dict[str, Any]:
     """Local onboarding status consumed by the Mac app and console."""
     checks = cli_configured_checks()
+    from openbase_coder_cli.self_update import version_info
+
     return {
         "cli_configured": all(checks.values()),
         "checks": checks,
+        "versions": version_info(),
         "authenticated": TokenManager(web_backend_url()).has_refresh_token,
         "tailscale_self": tailscale_self_identity(),
         "tailscale_serve": tailscale_serve_health().to_dict(),

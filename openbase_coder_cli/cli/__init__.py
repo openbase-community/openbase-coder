@@ -28,6 +28,7 @@ from .plugins import plugins
 from .reports import reports
 from .restart import restart
 from .routines import routines
+from .self_update import self_update, version_command
 from .server import server
 from .services import services
 from .setup import setup
@@ -86,6 +87,8 @@ main.add_command(super_agent_name)
 main.add_command(defaults)
 main.add_command(exit_to_dispatch)
 main.add_command(vibes)
+main.add_command(self_update)
+main.add_command(version_command)
 
 
 if __name__ == "__main__":

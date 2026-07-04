@@ -116,3 +116,22 @@ def bootstrappers() -> None:
     for name, plugin_id, description in rows:
         description_suffix = f" - {description}" if description else ""
         click.echo(f"  {name:<24} ({plugin_id}){description_suffix}")
+
+
+@plugins.command("rebuild-site")
+def rebuild_site() -> None:
+    """Rebuild the standalone plugin site dir from the plugin registry.
+
+    Used after runtime-package upgrades that change the bundled Python (see
+    the workspace AUTO_UPDATE.md guide); a no-op for development installs.
+    """
+    from openbase_coder_cli.plugins.site import rebuild_plugin_site, use_plugin_site
+    from openbase_coder_cli.plugins.store import load_registry
+
+    if not use_plugin_site():
+        click.echo("Development install: plugins live in the workspace venv; nothing to rebuild.")
+        return
+    registry = load_registry()
+    requirements = [plugin.requirement for plugin in registry.plugins]
+    rebuild_plugin_site(requirements)
+    click.echo(f"Rebuilt plugin site with {len(requirements)} plugin(s).")

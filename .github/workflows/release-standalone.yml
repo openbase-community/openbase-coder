@@ -11,9 +11,17 @@ on:
         required: true
         default: true
         type: boolean
-      prerelease:
-        description: "Mark the GitHub release as a prerelease"
+  # Called by auto-release.yml; tags pushed with GITHUB_TOKEN cannot trigger
+  # workflows, so the release runs in the same workflow run instead.
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version, with or without a v prefix"
         required: true
+        type: string
+      draft:
+        description: "Create the GitHub release as a draft"
+        required: false
         default: false
         type: boolean
 
@@ -78,6 +86,28 @@ jobs:
           repository: openbase-community/openbase-coder-workspace
           path: workspace-seed
 
+      - name: Capture repo SHAs
+        id: shas
+        run: |
+          repo_shas="$(jq -cn \
+            --arg cli "$(git -C cli rev-parse HEAD)" \
+            --arg console "$(git -C console rev-parse HEAD)" \
+            --arg coder_react "$(git -C coder-react rev-parse HEAD)" \
+            --arg multi_react "$(git -C multi-react rev-parse HEAD)" \
+            --arg boilersync_react "$(git -C boilersync-react rev-parse HEAD)" \
+            --arg skills "$(git -C skills rev-parse HEAD)" \
+            --arg workspace "$(git -C workspace-seed rev-parse HEAD)" \
+            '{
+              "cli": $cli,
+              "console": $console,
+              "coder-react": $coder_react,
+              "multi-react": $multi_react,
+              "boilersync-react": $boilersync_react,
+              "skills": $skills,
+              "workspace": $workspace
+            }')"
+          echo "repo_shas=${repo_shas}" >> "$GITHUB_OUTPUT"
+
       - name: Prepare public build workspace
         run: |
           cp -R workspace-seed/instructions instructions
@@ -102,10 +132,22 @@ jobs:
             x86_64) target="x86_64-apple-darwin" ;;
             *) echo "Unsupported macOS architecture: $(uname -m)" >&2; exit 1 ;;
           esac
+          # Prerelease versions (PEP 440 a/b/rc/.dev suffixes) publish as
+          # GitHub prereleases and serve the beta update channel.
+          prerelease_pattern='([0-9](a|b|rc)[0-9])|\.dev|-'
+          if [[ "$version" =~ $prerelease_pattern ]]; then
+            channel="beta"
+            prerelease="true"
+          else
+            channel="stable"
+            prerelease="false"
+          fi
           {
             echo "version=${version}"
             echo "tag=v${version}"
             echo "target=${target}"
+            echo "channel=${channel}"
+            echo "prerelease=${prerelease}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Setup uv
@@ -135,12 +177,16 @@ jobs:
           echo "LIVEKIT_SERVER_BIN=${livekit_server}" >> "$GITHUB_ENV"
 
       - name: Build package directory
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPENBASE_CODER: ${{ steps.release.outputs.version }}
         run: |
           package_dir="$RUNNER_TEMP/openbase-coder-package-${{ steps.release.outputs.target }}"
           python_bin="$(uv python find --managed-python 3.12)"
           "$python_bin" cli/scripts/build_standalone_package.py \
             --version "${{ steps.release.outputs.version }}" \
             --target "${{ steps.release.outputs.target }}" \
+            --channel "${{ steps.release.outputs.channel }}" \
+            --repo-shas '${{ steps.shas.outputs.repo_shas }}' \
             --python "$python_bin" \
             --livekit-server-bin "$LIVEKIT_SERVER_BIN" \
             --package-dir "$package_dir" \
@@ -181,6 +227,23 @@ jobs:
           (cd dist && shasum -a 256 "$asset" install.sh > openbase-coder-package_SHA256SUMS)
           echo "ARCHIVE_PATH=dist/${asset}" >> "$GITHUB_ENV"
 
+      - name: Build update manifest
+        env:
+          OPENBASE_UPDATE_SIGNING_KEY: ${{ secrets.OPENBASE_UPDATE_SIGNING_KEY }}
+        run: |
+          # Run with the packaged runtime Python so the cryptography package
+          # is available when OPENBASE_UPDATE_SIGNING_KEY is set (signing is
+          # skipped silently when the secret is unset).
+          "$PACKAGE_DIR/python/bin/python" cli/scripts/build_update_manifest.py \
+            --version "${{ steps.release.outputs.version }}" \
+            --channel "${{ steps.release.outputs.channel }}" \
+            --target "${{ steps.release.outputs.target }}" \
+            --tarball "$ARCHIVE_PATH" \
+            --url-base "https://github.com/openbase-community/openbase-coder/releases/download/${{ steps.release.outputs.tag }}/" \
+            --repo-shas '${{ steps.shas.outputs.repo_shas }}' \
+            --package-metadata "$PACKAGE_DIR/openbase-coder-package.json" \
+            --output dist/update-manifest.json
+
       - name: Notarize package
         if: ${{ env.APPLE_NOTARY_KEY_ID != '' && env.APPLE_NOTARY_ISSUER_ID != '' && env.APPLE_NOTARY_KEY != '' }}
         run: |
@@ -194,14 +257,47 @@ jobs:
             --issuer "$APPLE_NOTARY_ISSUER_ID" \
             --wait
 
-      - name: Create GitHub release
+      # Guard against sibling repos being pushed while this release built
+      # (multi workspaces push all subrepos together); a moved HEAD means the
+      # release snapshot may be incoherent — fail rather than ship it.
+      - name: Verify sibling repos did not move during the build
+        run: |
+          set -euo pipefail
+          # cli itself is pinned by the tag; only floating sibling checkouts race.
+          echo '${{ steps.shas.outputs.repo_shas }}' | jq -r 'to_entries[] | "\(.key) \(.value)"' |
+          while read -r name sha; do
+            [ "$name" = "cli" ] && continue
+            dir="$name"
+            [ "$name" = "workspace" ] && dir="workspace-seed"
+            [ -d "$dir/.git" ] || continue
+            git -C "$dir" fetch origin --quiet
+            now="$(git -C "$dir" rev-parse "origin/HEAD" 2>/dev/null || git -C "$dir" rev-parse origin/main)"
+            if [ "$now" != "$sha" ]; then
+              echo "::error::$name moved from $sha to $now during the release build; re-tag to release a coherent snapshot."
+              exit 1
+            fi
+          done
+
+      # Draft-first so releases/latest and the update manifest never point at
+      # a release whose assets are still uploading; publishing is atomic.
+      - name: Create draft GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: Openbase Coder ${{ steps.release.outputs.tag }}
-          draft: ${{ inputs.draft }}
-          prerelease: ${{ inputs.prerelease }}
+          draft: true
+          prerelease: ${{ steps.release.outputs.prerelease }}
           files: |
             dist/*.tar.gz
             dist/install.sh
             dist/openbase-coder-package_SHA256SUMS
+            dist/update-manifest.json*
+
+      - name: Publish release
+        if: ${{ inputs.draft != true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${{ steps.release.outputs.tag }}" --draft=false \
+            --repo "${{ github.repository }}"

@@ -196,6 +196,18 @@ class _TargetRoom:
     agent_identities: tuple[str, ...]
 
 
+async def active_voice_room_exists() -> bool:
+    """True when a live voice session (agent + user in a room) is active."""
+    client = _build_livekit_client()
+    try:
+        await _resolve_target_room(client, room_name=None)
+    except NoActiveLiveKitRoomError:
+        return False
+    finally:
+        await client.aclose()
+    return True
+
+
 def _build_livekit_client() -> livekit_api.LiveKitAPI:
     api_key = os.environ.get("LIVEKIT_API_KEY")
     api_secret = os.environ.get("LIVEKIT_API_SECRET")

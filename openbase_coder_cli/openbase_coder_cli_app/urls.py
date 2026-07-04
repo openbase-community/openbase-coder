@@ -7,6 +7,10 @@ from __future__ import annotations
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from openbase_coder_cli.openbase_coder_cli_app.update import (
+    update_apply,
+    update_status,
+)
 from openbase_coder_cli.openbase_coder_cli_app.views import (
     agents_generation_settings,
     agents_md,
@@ -111,6 +115,8 @@ urlpatterns = [
     path("user/ios-app-control/", ios_app_control, name="ios-app-control"),
     path("devices/", devices_list, name="devices-list"),
     path("onboarding/status/", onboarding_status, name="onboarding-status"),
+    path("update/status/", update_status, name="update-status"),
+    path("update/apply/", update_apply, name="update-apply"),
     path("threads/", thread_list, name="thread-list"),
     path("threads/dispatcher/", thread_dispatcher, name="thread-dispatcher"),
     path("threads/<str:thread_id>/", thread_detail, name="thread-detail"),

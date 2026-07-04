@@ -30,6 +30,9 @@ from openbase_coder_cli.tts_providers import (
     normalize_tts_provider_id,
 )
 
+# Bump alongside a forward-only migration; see the workspace AUTO_UPDATE.md.
+SCHEMA_VERSION_KEY = "schema_version"
+DISPATCHER_CONFIG_SCHEMA_VERSION = 1
 REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 DISPATCHER_REASONING_EFFORT_KEY = "dispatcher_reasoning_effort"
 SUPER_AGENTS_REASONING_EFFORT_KEY = "super_agents_reasoning_effort"
@@ -82,7 +85,15 @@ def read_dispatcher_config(path: Path | None = None) -> dict[str, Any]:
         return {}
     except (OSError, json.JSONDecodeError):
         return {}
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    found_version = int(payload.get(SCHEMA_VERSION_KEY, 1) or 1)
+    if found_version > DISPATCHER_CONFIG_SCHEMA_VERSION:
+        raise ValueError(
+            f"{config_path.name} schema {found_version} was written by a "
+            "newer Openbase Coder; update the CLI."
+        )
+    return payload
 
 
 def dispatcher_reasoning_effort(path: Path | None = None) -> str | None:
@@ -413,6 +424,7 @@ def _env_file_values(path: Path) -> dict[str, str]:
 
 
 def _write_dispatcher_config(payload: dict[str, Any], config_path: Path) -> None:
+    payload = {**payload, SCHEMA_VERSION_KEY: DISPATCHER_CONFIG_SCHEMA_VERSION}
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         "w", encoding="utf-8", dir=config_path.parent, delete=False

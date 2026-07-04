@@ -174,6 +174,19 @@ def _install_codex() -> Path:
     return installed
 
 
+def refresh_openbase_bin_codex() -> bool:
+    """Re-download codex when we installed it (it cannot self-update there).
+
+    Returns True when a refresh happened; False when codex is user-managed or
+    absent. Used by self-update so the pinned release binary doesn't go stale.
+    """
+    installed = OPENBASE_BIN_DIR / "codex"
+    if not installed.is_file():
+        return False
+    _install_codex()
+    return True
+
+
 def _find_extracted_binary(root: Path, name: str) -> Path | None:
     for candidate in sorted(root.rglob(f"{name}*")):
         if candidate.is_file() and not candidate.name.endswith((".tar.gz", ".zst")):

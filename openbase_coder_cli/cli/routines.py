@@ -372,6 +372,7 @@ def run_due_routines(name: str | None, force: bool) -> None:
 
 
 SKILLS_AUTO_LINK_SYNC_SECONDS = 300.0
+UPDATE_CHECK_SECONDS = 6 * 3600.0
 
 
 @routines.command("run-loop")
@@ -380,6 +381,8 @@ SKILLS_AUTO_LINK_SYNC_SECONDS = 300.0
 def run_loop(interval: float, verbose: bool) -> None:
     """Poll forever and run due routines."""
     from openbase_coder_cli import skills_autolink
+    from openbase_coder_cli.runtime import is_standalone_runtime
+    from openbase_coder_cli.self_update import SelfUpdateError, check_for_update
 
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
@@ -389,6 +392,7 @@ def run_loop(interval: float, verbose: bool) -> None:
     poll_interval = max(interval, 1.0)
     logger.info("routine_runner service_started interval=%s", poll_interval)
     next_skills_sync = time.monotonic()
+    next_update_check = time.monotonic()
     while True:
         started = time.monotonic()
         try:
@@ -418,6 +422,22 @@ def run_loop(interval: float, verbose: bool) -> None:
                         summary["created"],
                         summary["conflicts"],
                         summary["errors"],
+                    )
+
+        # Periodically refresh the update-check cache (standalone installs)
+        # so update_available surfaces in status APIs without manual checks.
+        if is_standalone_runtime() and time.monotonic() >= next_update_check:
+            next_update_check = time.monotonic() + UPDATE_CHECK_SECONDS
+            try:
+                check = check_for_update()
+            except SelfUpdateError as exc:
+                logger.warning("update_check failed: %s", exc)
+            else:
+                if check.update_available:
+                    logger.info(
+                        "update_check update_available current=%s latest=%s",
+                        check.current_version,
+                        check.latest_version,
                     )
 
         elapsed = time.monotonic() - started

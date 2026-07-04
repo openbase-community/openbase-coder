@@ -27,16 +27,27 @@ def ensure_plugin_dirs() -> None:
         ) from exc
 
 
+# Bump alongside a forward-only migration; see the workspace AUTO_UPDATE.md.
+PLUGIN_REGISTRY_SCHEMA_VERSION = 1
+
+
 def load_registry() -> PluginRegistry:
     if not PLUGIN_REGISTRY_PATH.is_file():
         return PluginRegistry()
     data = json.loads(PLUGIN_REGISTRY_PATH.read_text())
+    found_version = int(data.get("schema_version", 1))
+    if found_version > PLUGIN_REGISTRY_SCHEMA_VERSION:
+        raise click.ClickException(
+            f"plugins.json schema {found_version} was written by a newer "
+            "Openbase Coder; update the CLI."
+        )
     return PluginRegistry.from_dict(data)
 
 
 def save_registry(registry: PluginRegistry) -> None:
     ensure_plugin_dirs()
-    PLUGIN_REGISTRY_PATH.write_text(json.dumps(registry.to_dict(), indent=2) + "\n")
+    payload = {"schema_version": PLUGIN_REGISTRY_SCHEMA_VERSION, **registry.to_dict()}
+    PLUGIN_REGISTRY_PATH.write_text(json.dumps(payload, indent=2) + "\n")
 
 
 def write_requirements_file(registry: PluginRegistry) -> None:

@@ -43,6 +43,7 @@ class CloudReportResult:
     supported: bool
     error: str | None = None
     status_code: int | None = None
+    response: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -136,16 +137,20 @@ def report_cli_state(
         DEVICE_REGISTER_PATH,
         payload,
     )
-    write_onboarding_cache(
-        {
-            "last_report": {
-                "at": _timestamp(),
-                "cli_configured": cli_configured,
-                "serve_healthy": serve_healthy,
-                **result.to_dict(),
-            }
+    cache_update: dict[str, Any] = {
+        "last_report": {
+            "at": _timestamp(),
+            "cli_configured": cli_configured,
+            "serve_healthy": serve_healthy,
+            **result.to_dict(),
         }
-    )
+    }
+    if result.response and result.response.get("minimum_cli_version"):
+        cache_update["cloud_policy"] = {
+            "minimum_cli_version": str(result.response["minimum_cli_version"]),
+            "at": _timestamp(),
+        }
+    write_onboarding_cache(cache_update)
     return result
 
 
@@ -203,8 +208,15 @@ def _post_to_cloud(
             status_code=response.status_code,
             error=f"HTTP {response.status_code}: {response.text[:200]}",
         )
+    try:
+        response_payload = response.json()
+    except ValueError:
+        response_payload = None
     return CloudReportResult(
-        ok=True, supported=True, status_code=response.status_code
+        ok=True,
+        supported=True,
+        status_code=response.status_code,
+        response=response_payload if isinstance(response_payload, dict) else None,
     )
 
 

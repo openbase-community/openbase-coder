@@ -1,0 +1,49 @@
+# self-update
+
+Update a standalone Openbase Coder install to the latest release for its
+channel. The full contract (feed, atomicity, rollback, quiescing, channels,
+signing) lives in the workspace `AUTO_UPDATE.md` guide.
+
+## Usage
+
+```bash
+openbase-coder self-update            # update if a newer release exists
+openbase-coder self-update --check    # check only; do not install
+openbase-coder self-update --force    # update even during a voice session
+openbase-coder self-update --json     # machine-readable result (UI-driven)
+```
+
+## Behavior
+
+1. Refuses in development-workspace installs (git-managed; no auto-update).
+2. Fetches `update-manifest.json` for the install's channel — `stable` from
+   the latest GitHub release, `beta` from the newest release including
+   prereleases — and verifies its Ed25519 signature when the build embeds the
+   release public key.
+3. Compares versions and honors `min_supported_version` and the package
+   `layout_version`; a release with a newer layout than the updater
+   understands is reported as `blocked` (reinstall via the desktop app or
+   install.sh).
+4. Defers when a voice session is active unless `--force` is passed.
+5. Downloads the target tarball, verifies its SHA-256, extracts it to
+   `~/.openbase/packages/standalone/releases/<version>-<target>/`, and
+   smoke-runs the new launcher.
+6. Atomically flips the `current` symlink, keeping the outgoing release
+   behind `previous`, then regenerates and restarts services with the new
+   CLI, rebuilds the plugin site when the bundled Python changed, and
+   refreshes `~/.openbase/bin/codex` when Openbase installed it.
+7. Rolls back to `previous` (and reinstalls services) if the post-update
+   health gate fails; older releases are pruned, keeping two.
+
+## Statuses
+
+`updated`, `up-to-date`, `deferred` (voice session), `blocked` (newer package
+layout), `rolled-back` (health gate failed; exit code 1).
+
+## Related
+
+- `GET /api/update/status/` (`?refresh=1` re-checks the feed) and
+  `POST /api/update/apply/` expose the same functionality to the desktop app
+  and console; apply runs detached and logs to `~/.openbase/logs/self-update.log`.
+- Update flags also appear in the `versions` block of
+  `GET /api/onboarding/status/`.

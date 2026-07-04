@@ -1,0 +1,83 @@
+# Auto-release: every push to main cuts a stable release with an
+# auto-bumped version (minor by default). See the workspace AUTO_UPDATE.md.
+#
+# Commit-message overrides (checked on the head commit of the push):
+#   [skip release]    — do not release this push
+#   [release patch]   — bump the patch version instead of minor
+#   [release major]   — bump the major version
+#
+# Staging and other branches never release; pushes to main are production.
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        required: true
+        default: minor
+        type: choice
+        options: [patch, minor, major]
+
+permissions:
+  contents: write
+
+# A burst of pushes (multi pushes all subrepos together) cancels in-flight
+# builds so the final push releases once, after everything has landed.
+concurrency:
+  group: auto-release
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.head_commit.message || '', '[skip release]') }}
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: next
+        env:
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          BUMP_INPUT: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          bump="${BUMP_INPUT:-minor}"
+          message="${HEAD_COMMIT_MESSAGE:-}"
+          case "$message" in
+            *"[release patch]"*) bump="patch" ;;
+            *"[release major]"*) bump="major" ;;
+          esac
+
+          # Highest stable (non-prerelease) v-tag is the baseline.
+          latest="$(git tag --list 'v[0-9]*' \
+            | grep -Ev '([0-9](a|b|rc)[0-9])|\.dev|-' \
+            | sed 's/^v//' \
+            | sort -t. -k1,1n -k2,2n -k3,3n \
+            | tail -1)"
+          latest="${latest:-0.0.0}"
+          IFS=. read -r major minor patch <<< "$latest"
+
+          case "$bump" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          version="${major}.${minor}.${patch}"
+          echo "Auto-release: ${latest} -> ${version} (${bump})"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: plan
+    uses: ./.github/workflows/release-standalone.yml
+    with:
+      version: ${{ needs.plan.outputs.version }}
+      draft: false
+    secrets: inherit

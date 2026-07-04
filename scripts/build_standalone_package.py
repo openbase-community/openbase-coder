@@ -27,6 +27,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--version", required=True)
     parser.add_argument("--target", default=default_target())
+    parser.add_argument("--channel", default="stable")
+    parser.add_argument(
+        "--repo-shas",
+        default="{}",
+        help="JSON object mapping repo names to the commit SHAs baked into the package.",
+    )
     parser.add_argument(
         "--python",
         type=Path,
@@ -58,7 +64,13 @@ def main() -> int:
     stage_console(package_dir, skip_build=args.skip_console_build)
     stage_optional_tree(INSTRUCTIONS_ROOT, package_dir / "instructions")
     stage_optional_tree(SKILLS_ROOT / "skills", package_dir / "skills")
-    write_metadata(package_dir, version=args.version, target=args.target)
+    write_metadata(
+        package_dir,
+        version=args.version,
+        target=args.target,
+        channel=args.channel,
+        repo_shas=parse_repo_shas(args.repo_shas),
+    )
     ad_hoc_sign_macos_package(package_dir)
     validate_package(package_dir)
 
@@ -100,7 +112,9 @@ def prepare_dir(path: Path, *, force: bool) -> None:
 def create_runtime_python(python_dir: Path, python_executable: Path) -> None:
     python_root = python_executable.resolve().parent.parent
     if not (python_root / "bin").is_dir():
-        raise RuntimeError(f"Python executable is not in a Python tree: {python_executable}")
+        raise RuntimeError(
+            f"Python executable is not in a Python tree: {python_executable}"
+        )
 
     shutil.copytree(
         python_root,
@@ -191,9 +205,7 @@ def stage_console(package_dir: Path, *, skip_build: bool) -> None:
             if (REPO_ROOT / "pnpm-lock.yaml").is_file()
             else ["install", "--no-frozen-lockfile", "--shamefully-hoist"]
         )
-        subprocess.run(
-            ["pnpm", *install_args], cwd=REPO_ROOT, check=True
-        )
+        subprocess.run(["pnpm", *install_args], cwd=REPO_ROOT, check=True)
         subprocess.run(["pnpm", "--dir", str(CONSOLE_ROOT), "run", "build"], check=True)
     dist = CONSOLE_ROOT / "dist"
     if not dist.is_dir():
@@ -206,16 +218,34 @@ def stage_optional_tree(source: Path, dest: Path) -> None:
         shutil.copytree(source, dest)
 
 
-def write_metadata(package_dir: Path, *, version: str, target: str) -> None:
+def parse_repo_shas(raw: str) -> dict[str, str]:
+    value = json.loads(raw)
+    if not isinstance(value, dict) or not all(
+        isinstance(key, str) and isinstance(sha, str) for key, sha in value.items()
+    ):
+        raise SystemExit("--repo-shas must be a JSON object mapping repo name to SHA")
+    return value
+
+
+def write_metadata(
+    package_dir: Path,
+    *,
+    version: str,
+    target: str,
+    channel: str,
+    repo_shas: dict[str, str],
+) -> None:
     metadata = {
         "layoutVersion": 1,
         "version": version,
         "target": target,
+        "channel": channel,
         "entrypoint": "bin/openbase-coder",
         "python": "python/bin/python",
         "pythonVersion": package_python_version(package_dir),
         "console": "console",
         "livekit": "bin/livekit-server",
+        "repo_shas": repo_shas,
     }
     (package_dir / METADATA_FILENAME).write_text(
         json.dumps(metadata, indent=2) + "\n",
@@ -255,7 +285,9 @@ def write_archive(package_dir: Path, archive_path: Path, *, force: bool) -> None
 def ad_hoc_sign_macos_package(package_dir: Path) -> None:
     if platform.system() != "Darwin" or not shutil.which("codesign"):
         return
-    for path in sorted(_macho_files(package_dir), key=lambda item: len(item.parts), reverse=True):
+    for path in sorted(
+        _macho_files(package_dir), key=lambda item: len(item.parts), reverse=True
+    ):
         subprocess.run(
             ["codesign", "--force", "--sign", "-", "--timestamp=none", str(path)],
             check=True,

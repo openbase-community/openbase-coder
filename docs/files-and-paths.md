@@ -29,6 +29,9 @@ This page lists the key files Openbase CLI creates or consumes.
 | `~/.openbase/instructions/DISPATCHER_INSTRUCTIONS.md` | `openbase-coder setup` | Generated default dispatcher-only instructions |
 | `~/.openbase/instructions/SUPER_AGENT_INSTRUCTIONS.md` | `openbase-coder setup` | Generated default Super Agent thread instructions |
 | `~/.openbase/dispatcher-config.json` | `openbase-coder setup`, `openbase-coder defaults`, settings API | Dispatcher runtime settings, including default reasoning and backend-specific model defaults |
+| `~/.openbase/packages/standalone/previous` | `openbase-coder self-update` | Symlink to the prior release, kept for rollback |
+| `~/.openbase/update-check.json` | `openbase-coder self-update` / update API | Cached result of the last update check (no-network status reads) |
+| `~/.openbase/logs/self-update.log` | `POST /api/update/apply/` | Output of UI-triggered detached self-updates |
 | `~/.openbase/codex_home/config.toml` | `openbase-coder setup` | Openbase service Codex config, including broad local access and the Super Agents MCP server. With `--link-codex-config`, this is a symlink to `~/.codex/config.toml` |
 | `~/.openbase/codex_home/skills/<skill>/` | `openbase-coder setup`, skills auto-link | Symlink to a workspace-owned skill source under `skills/skills/<skill>/`, or (with auto-link enabled) to a personal skill under `~/.agents/skills/<skill>/` |
 | `~/.openbase/claude_config/skills/<skill>/` | `openbase-coder setup`, skills auto-link | Symlink to a workspace-owned skill source under `skills/skills/<skill>/`, or (with auto-link enabled) to a personal skill under `~/.agents/skills/<skill>/` |
