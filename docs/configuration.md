@@ -2,6 +2,12 @@
 
 Openbase CLI reads configuration from environment variables (usually loaded from `~/.openbase/.env`).
 
+Most day-to-day settings do not require editing this file: the
+[desktop app](desktop-app.md#settings) and [console](console.md) Settings
+page cover backend, model, reasoning, voice providers, and environment
+variables, and the [iOS app](ios-tabs.md#settings) covers phone-side settings
+such as backend host and call audio. This page is the underlying reference.
+
 ## Core Variables
 
 | Variable                                  | Required | Default                                          | Purpose                                     |

@@ -1,7 +1,9 @@
 # Manual Setup for the Desktop App
 
 Use this path when you want to finish first-time setup yourself instead of
-letting the Electron desktop app run setup commands on your behalf.
+letting the Electron desktop app run setup commands on your behalf. The
+app-driven flow this replaces is described in
+[Desktop App](desktop-app.md#install-and-first-run-setup).
 
 You do not need to click the app's setup button for Openbase Coder to work. Run
 the commands below in your own terminal, then return to the desktop app after

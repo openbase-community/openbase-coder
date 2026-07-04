@@ -8,8 +8,10 @@ call usually takes longer to set up because the local models need to load.
 
 ## Use Local STT and TTS From the GUI
 
-The recommended path is the GUI. It handles the provider selection, downloads,
-and dispatcher restart wiring for you.
+The recommended path is the GUI — the [desktop app](desktop-app.md) during
+first-time setup, or the [console](console.md) Settings page afterward. It
+handles the provider selection, downloads, and dispatcher restart wiring for
+you.
 
 During first-time desktop setup:
 

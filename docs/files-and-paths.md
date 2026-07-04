@@ -1,6 +1,10 @@
 # Files and Paths
 
-This page lists the key files Openbase CLI creates or consumes.
+This page lists the key files Openbase CLI creates or consumes. App-side
+storage is much smaller: the [desktop app](desktop-app.md) keeps Electron
+state under `~/Library/Application Support/@openbase/coder-desktop`, and the
+[iOS app](ios-tabs.md#how-the-app-connects) keeps only its auth token
+(Keychain) and backend host list (UserDefaults) on the phone.
 
 ## Base Directories
 
