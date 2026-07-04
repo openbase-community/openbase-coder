@@ -23,8 +23,8 @@ def test_generate_wrapper_includes_user_bin_paths(tmp_path, monkeypatch):
     wrapper = launchd.generate_wrapper(service, config, {})
 
     assert (
-        'export PATH="$HOME/.local/bin:$HOME/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"'
-        in wrapper.read_text()
+        'export PATH="$HOME/.openbase/bin:$HOME/.local/bin:$HOME/bin:'
+        '/opt/homebrew/bin:/usr/local/bin:$PATH"' in wrapper.read_text()
     )
 
 

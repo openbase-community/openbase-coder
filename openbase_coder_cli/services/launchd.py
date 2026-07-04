@@ -9,11 +9,16 @@ import subprocess
 import sys
 import textwrap
 import time
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from string import Formatter
 
 import click
 
+from openbase_coder_cli.backend_binaries import backend_binary_candidates
+from openbase_coder_cli.env_file import selected_backend_from_env_file
 from openbase_coder_cli.paths import (
+    DEFAULT_ENV_FILE_PATH,
     DEFAULT_LOG_DIR,
     LAUNCHD_DOMAIN,
     LAUNCHD_WRAPPER_DIR,
@@ -60,19 +65,6 @@ def _workspace_binary_candidates(config: InstallationConfig, name: str) -> list[
     ]
 
 
-def _nvm_binary_candidates(name: str) -> list[Path]:
-    candidates: list[Path] = []
-
-    nvm_bin = os.environ.get("NVM_BIN")
-    if nvm_bin:
-        candidates.append(Path(nvm_bin) / name)
-
-    nvm_dir = Path(os.environ.get("NVM_DIR") or Path.home() / ".nvm")
-    candidates.extend(sorted(nvm_dir.glob(f"versions/node/*/bin/{name}"), reverse=True))
-
-    return candidates
-
-
 def _resolve_binary_with_preferred_paths(
     name: str,
     preferred_paths: list[Path],
@@ -84,30 +76,35 @@ def _resolve_binary_with_preferred_paths(
     return _resolve_binary(name, homebrew_fallback)
 
 
-def _resolve_binaries(config: InstallationConfig) -> dict[str, str]:
+def _runtime_workdir(config: InstallationConfig) -> str:
     runtime_package = current_runtime_package()
-    runtime_workdir = (
-        str(runtime_package.root)
-        if runtime_package is not None
-        else (config.workspace_path or str(OPENBASE_BASE_DIR))
-    )
+    if runtime_package is not None:
+        return str(runtime_package.root)
+    return config.workspace_path or str(OPENBASE_BASE_DIR)
+
+
+def _binary_resolvers(config: InstallationConfig) -> dict[str, Callable[[], str]]:
     return {
-        "uv": _resolve_binary_with_preferred_paths(
+        "uv": lambda: _resolve_binary_with_preferred_paths(
             "uv",
             _workspace_binary_candidates(config, "uv"),
             "/opt/homebrew/bin/uv",
         ),
-        "codex": _resolve_binary_with_preferred_paths(
+        "codex": lambda: _resolve_binary_with_preferred_paths(
             "codex",
-            _nvm_binary_candidates("codex"),
+            backend_binary_candidates("codex"),
         ),
-        "livekit": _resolve_binary_with_preferred_paths(
+        "claude": lambda: _resolve_binary_with_preferred_paths(
+            "claude",
+            backend_binary_candidates("claude"),
+        ),
+        "livekit": lambda: _resolve_binary_with_preferred_paths(
             "livekit-server",
             [Path(config.livekit_server_path)] if config.livekit_server_path else [],
             "/opt/homebrew/bin/livekit-server",
         ),
-        "python": config.python_path or sys.executable,
-        "openbase_coder": _resolve_binary_with_preferred_paths(
+        "python": lambda: config.python_path or sys.executable,
+        "openbase_coder": lambda: _resolve_binary_with_preferred_paths(
             "openbase-coder",
             [
                 *(
@@ -118,8 +115,42 @@ def _resolve_binaries(config: InstallationConfig) -> dict[str, str]:
                 *_workspace_binary_candidates(config, "openbase-coder"),
             ],
         ),
-        "runtime_workdir": runtime_workdir,
+        "runtime_workdir": lambda: _runtime_workdir(config),
     }
+
+
+def _service_template_keys(services: Iterable[ServiceDefinition]) -> set[str]:
+    keys: set[str] = set()
+    for svc in services:
+        for template in (svc.command_template, svc.workdir_template):
+            for _text, field, _spec, _conv in Formatter().parse(template):
+                if field:
+                    keys.add(field)
+    return keys
+
+
+def _resolve_binaries(
+    config: InstallationConfig,
+    services: Iterable[ServiceDefinition] | None = None,
+) -> dict[str, str]:
+    """Resolve only the binaries the given services actually reference.
+
+    Resolution raises for binaries that cannot be found, so limiting it to the
+    services being installed keeps optional backends (e.g. codex when Claude
+    Code is selected) from failing installs on machines without them.
+    """
+    if services is None:
+        services = SERVICES
+    resolvers = _binary_resolvers(config)
+    keys = _service_template_keys(services)
+    return {key: resolvers[key]() for key in sorted(keys) if key in resolvers}
+
+
+def _selected_backend(config: InstallationConfig) -> str:
+    env_path = (
+        Path(config.env_file).expanduser() if config.env_file else DEFAULT_ENV_FILE_PATH
+    )
+    return selected_backend_from_env_file(env_path)
 
 
 def _uid() -> int:
@@ -285,7 +316,9 @@ def generate_wrapper(
     config: InstallationConfig,
     binaries: dict[str, str],
 ) -> Path:
-    workspace = config.workspace_path
+    # In standalone mode there is no workspace checkout; fall back so
+    # workdirs never render as an empty string.
+    workspace = config.workspace_path or _runtime_workdir(config)
     env_file = config.env_file
     data_dir = str(OPENBASE_BASE_DIR)
 
@@ -308,7 +341,7 @@ def generate_wrapper(
             set +a
         fi
 
-        export PATH="$HOME/.local/bin:$HOME/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+        export PATH="$HOME/.openbase/bin:$HOME/.local/bin:$HOME/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
         {cmd}
     """)
@@ -321,7 +354,7 @@ def generate_plist(svc: ServiceDefinition, config: InstallationConfig) -> Path:
     label = _service_label(svc)
     wrapper = _wrapper_path(svc)
     workdir = svc.workdir_template.format(
-        workspace=config.workspace_path,
+        workspace=config.workspace_path or _runtime_workdir(config),
         data_dir=str(OPENBASE_BASE_DIR),
         runtime_workdir=config.package_path
         or config.workspace_path
@@ -460,9 +493,19 @@ def launchctl_status(svc: ServiceDefinition) -> dict:
 
 def install_all_services(config: InstallationConfig) -> None:
     _ensure_launchd_paths()
-    binaries = _resolve_binaries(config)
+    coding_backend = _selected_backend(config)
+    services = default_services(coding_backend)
+    binaries = _resolve_binaries(config, services)
 
     for svc in default_services():
+        if svc in services:
+            continue
+        if remove_service(svc):
+            click.echo(
+                f"  Removed {svc.name} (not used by the {coding_backend} backend)."
+            )
+
+    for svc in services:
         click.echo(f"  Installing {svc.name}...")
         _write_service_files(svc, config, binaries)
         launchctl_bootstrap(svc)
@@ -473,24 +516,47 @@ def install_all_services(config: InstallationConfig) -> None:
     click.echo(f"Logs: {DEFAULT_LOG_DIR}/")
 
 
+def remove_service(svc: ServiceDefinition) -> bool:
+    """Unload a service and delete its generated files. True if any existed."""
+    existed = False
+    plist = _plist_path(svc)
+    wrapper = _wrapper_path(svc)
+    if launchctl_status(svc).get("installed"):
+        launchctl_bootout(svc)
+        existed = True
+    for path in (plist, wrapper):
+        if path.exists():
+            path.unlink()
+            existed = True
+    return existed
+
+
 def install_service(config: InstallationConfig, svc: ServiceDefinition) -> None:
     _ensure_launchd_paths()
-    binaries = _resolve_binaries(config)
+    binaries = _resolve_binaries(config, [svc])
     _write_service_files(svc, config, binaries)
     launchctl_bootstrap(svc)
 
 
 def regenerate_service(config: InstallationConfig, svc: ServiceDefinition) -> None:
     _ensure_launchd_paths()
-    binaries = _resolve_binaries(config)
+    binaries = _resolve_binaries(config, [svc])
     _write_service_files(svc, config, binaries)
 
 
 def regenerate_all_services(config: InstallationConfig) -> None:
-    binaries = _resolve_binaries(config)
     _ensure_launchd_paths()
+    coding_backend = _selected_backend(config)
 
     for svc in SERVICES:
+        if not svc.supports_backend(coding_backend):
+            click.echo(f"  Skipping {svc.name} (backend: {coding_backend}).")
+            continue
+        try:
+            binaries = _resolve_binaries(config, [svc])
+        except click.ClickException as exc:
+            click.echo(click.style(f"  WARN  Skipping {svc.name}: {exc}", fg="yellow"))
+            continue
         click.echo(f"  Regenerating {svc.name}...")
         _write_service_files(svc, config, binaries)
 

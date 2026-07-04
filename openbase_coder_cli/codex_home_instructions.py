@@ -13,9 +13,6 @@ from openbase_coder_cli.paths import (
     CODEX_DISPATCHER_INSTRUCTIONS_PATH,
     CODEX_HOME_DIR,
     CODEX_SUPER_AGENT_INSTRUCTIONS_PATH,
-    LEGACY_CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
-    LEGACY_CODEX_DISPATCHER_INSTRUCTIONS_PATH,
-    LEGACY_CODEX_SUPER_AGENT_INSTRUCTIONS_PATH,
     NORMAL_CODEX_AGENTS_MD_PATH,
     OPENBASE_CLAUDE_MD_PATH,
 )
@@ -28,11 +25,6 @@ OPENBASE_DEFAULT_INSTRUCTION_FILES = (
     ("VOICE_INSTRUCTIONS.md", CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH),
     ("DISPATCHER_INSTRUCTIONS.md", CODEX_DISPATCHER_INSTRUCTIONS_PATH),
     ("SUPER_AGENT_INSTRUCTIONS.md", CODEX_SUPER_AGENT_INSTRUCTIONS_PATH),
-)
-LEGACY_OPENBASE_DEFAULT_INSTRUCTION_FILES = (
-    ("VOICE_INSTRUCTIONS.md", LEGACY_CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH),
-    ("DISPATCHER_INSTRUCTIONS.md", LEGACY_CODEX_DISPATCHER_INSTRUCTIONS_PATH),
-    ("SUPER_AGENT_INSTRUCTIONS.md", LEGACY_CODEX_SUPER_AGENT_INSTRUCTIONS_PATH),
 )
 GENERATED_INSTRUCTION_PREFIX = "<!-- Generated from "
 
@@ -79,17 +71,6 @@ def refresh_openbase_instruction_files_from_installation(
                     source_root / resource_name,
                     target_path,
                     document_label=f"Openbase instruction {resource_name}",
-                    report=report,
-                )
-                or changed
-            )
-        for resource_name, target_path in LEGACY_OPENBASE_DEFAULT_INSTRUCTION_FILES:
-            changed = (
-                ensure_rendered_instruction_file(
-                    source_root / resource_name,
-                    target_path,
-                    document_label=f"Openbase instruction {resource_name}",
-                    force=True,
                     report=report,
                 )
                 or changed

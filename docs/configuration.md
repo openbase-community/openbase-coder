@@ -21,15 +21,13 @@ Openbase CLI reads configuration from environment variables (usually loaded from
 | `CODEX_MODEL_REASONING_EFFORT`            | No       | `high`                                           | Codex app-server reasoning effort           |
 | `CODEX_SERVICE_TIER`                      | No       | `standard`                                       | Codex app-server service tier               |
 | `OPENBASE_CODING_BACKEND`                 | No       | `codex` from new setup env files                 | `codex`, `openbase_cloud`, or `claude_code` backend |
-| `OPENBASE_CODEX_BACKEND`                  | No       | none                                             | Legacy fallback for `OPENBASE_CODING_BACKEND` |
 | `OPENBASE_CLOUD_LLM_BASE_URL`             | No       | `<WEB_BACKEND_URL>/api/openbase/llm/openai/v1`   | Openbase Cloud Responses-compatible proxy base URL |
 | `OPENBASE_CLOUD_CODEX_MODEL`              | No       | `openbase-codex`                                 | Model name used by the Openbase Cloud backend |
 
 ## Dispatcher Config
 
 Openbase runtime settings that are shared by LiveKit, CLI commands, and MCP
-tools live in `~/.openbase/dispatcher-config.json`. Setup keeps
-`~/.openbase/codex_home/dispatcher-config.json` as a legacy symlink.
+tools live in `~/.openbase/dispatcher-config.json`.
 
 Useful keys:
 

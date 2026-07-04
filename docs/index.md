@@ -24,10 +24,12 @@ openbase-coder setup
 openbase-coder server --host 0.0.0.0 --port 7999
 ```
 
-For source development, use:
+For source development, clone the workspace repo and run its setup script:
 
 ```bash
-uvx --python 3.13 openbase-coder setup --dev-workspace
+git clone https://github.com/openbase-community/openbase-coder-workspace
+cd openbase-coder-workspace
+./scripts/setup
 ```
 
 ## Documentation

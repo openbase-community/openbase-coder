@@ -187,7 +187,7 @@ def test_setup_result_uses_computed_cli_state(monkeypatch, capfd) -> None:
 
     result = CliRunner().invoke(
         main,
-        ["setup", "--json-progress", "--skip-clone", "--skip-services"],
+        ["setup", "--json-progress", "--backend", "codex", "--skip-services"],
     )
 
     assert result.exit_code == 0

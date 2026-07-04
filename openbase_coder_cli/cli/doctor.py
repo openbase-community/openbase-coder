@@ -15,7 +15,6 @@ from openbase_coder_cli.backend_config import (
     CODEX_BACKEND,
     CODING_BACKEND_ENV_KEY,
     DEFAULT_CODING_BACKEND,
-    LEGACY_CODEX_BACKEND_ENV_KEY,
     OPENBASE_CLOUD_BACKEND,
     normalize_backend,
 )
@@ -162,7 +161,6 @@ def _check_livekit_client_credentials(env: dict[str, str], warn, ok) -> None:
 def _selected_backend(env: dict[str, str]) -> str:
     raw_value = (
         env.get(CODING_BACKEND_ENV_KEY)
-        or env.get(LEGACY_CODEX_BACKEND_ENV_KEY)
         or DEFAULT_CODING_BACKEND
     )
     try:
@@ -199,10 +197,10 @@ def _check_installation_config(ok, warn, fail) -> None:
         if config.workspace_path:
             warn(
                 "dev workspace is still configured in standalone mode; "
-                "rerun setup without --dev-workspace for no runtime clone"
+                "rerun setup from the standalone CLI to clear it"
             )
         else:
-            ok("no workspace clone required at runtime")
+            ok("no workspace checkout required at runtime")
         return
 
     if config.workspace_path:

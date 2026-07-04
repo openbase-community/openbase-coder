@@ -15,4 +15,4 @@ Install the standalone CLI on macOS with:
 curl -fsSL https://github.com/openbase-community/openbase-coder/releases/latest/download/install.sh | sh
 ```
 
-The standalone CLI includes its own Python runtime, bundled console assets, bundled agent instructions and skills, and a packaged LiveKit server binary. It does not clone `~/.openbase/workspace` unless setup is run with `--dev-workspace`.
+The standalone CLI includes its own Python runtime, bundled console assets, bundled agent instructions and skills, and a packaged LiveKit server binary. Setup never clones a workspace; developers who want to work from source should clone `openbase-coder-workspace` and run its `./scripts/setup` instead.

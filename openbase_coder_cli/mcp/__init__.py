@@ -1,9 +1,11 @@
 """Shared thread/session helpers for Openbase Coder.
 
 This package name is historical: the CLI no longer exposes its own MCP server.
-Prefer agent skills and the separate ``super-agents-mcp`` server for agent-facing
-workflows. Do not restore a CLI-owned MCP surface unless a workflow genuinely
-needs MCP semantics.
+Prefer agent skills for Openbase-specific agent-facing workflows. The separate
+``super-agents-mcp`` server should stay general-purpose and Openbase-agnostic:
+it is for managing AI agent threads, not for accumulating tools that only make
+sense inside Openbase Coder. Do not restore a CLI-owned MCP surface unless a
+workflow genuinely needs MCP semantics.
 
 To re-enable a CLI-owned MCP server intentionally:
 

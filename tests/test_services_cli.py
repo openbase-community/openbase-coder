@@ -22,10 +22,17 @@ def test_services_uninstall_command_is_not_registered():
 
 def test_services_status_fails_when_tailscale_serve_health_fails(monkeypatch):
     monkeypatch.setattr(services_cli, "require_installation", lambda: None)
+    monkeypatch.setattr(services_cli, "configured_coding_backend", lambda: "codex")
     monkeypatch.setattr(
         services_cli,
         "SERVICES",
-        [SimpleNamespace(name="django-cli")],
+        [
+            SimpleNamespace(
+                name="django-cli",
+                install_by_default=True,
+                supports_backend=lambda _backend: True,
+            )
+        ],
     )
     monkeypatch.setattr(
         services_cli,

@@ -124,7 +124,7 @@ If `doctor` reports missing Openbase Cloud audio configuration on an older
 image, refresh setup in Openbase Cloud mode and start services again:
 
 ```bash
-openbase-coder setup --skip-clone --backend openbase_cloud --audio-provider openbase-cloud
+openbase-coder setup --backend openbase_cloud --audio-provider openbase-cloud
 openbase-coder services start
 openbase-coder doctor
 ```

@@ -25,7 +25,7 @@ def test_returns_full_text_when_nothing_was_delivered():
 
 
 def test_model_name_for_role_ignores_env_model_fallback(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("OPENBASE_CODEX_BACKEND", "claude-agent-sdk")
+    monkeypatch.setenv("OPENBASE_CODING_BACKEND", "claude-code")
     monkeypatch.setenv("CODEX_MODEL", "gpt-5.5")
     config_path = tmp_path / "missing-dispatcher-config.json"
 

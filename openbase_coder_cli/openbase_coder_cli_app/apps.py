@@ -19,14 +19,9 @@ class OpenbaseCoderCliAppConfig(AppConfig):
     verbose_name = "Openbase Coder Cli"
 
     def ready(self):
-        from openbase_coder_cli import dispatcher_config
-        from openbase_coder_cli.openbase_coder_cli_app.skills import (
-            _auto_link_normal_codex_skills_sync,
-        )
+        from openbase_coder_cli import skills_autolink
 
-        if not dispatcher_config.auto_link_normal_codex_skills():
-            return
         try:
-            _auto_link_normal_codex_skills_sync()
+            skills_autolink.sync_auto_linked_skills()
         except OSError:
-            logger.exception("Unable to auto-link normal Codex skills on startup.")
+            logger.exception("Unable to auto-link personal skills on startup.")

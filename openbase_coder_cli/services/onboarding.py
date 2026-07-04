@@ -19,9 +19,9 @@ from openbase_coder_cli.paths import (
     DEFAULT_ENV_FILE_PATH,
     ONBOARDING_JSON_PATH,
 )
-from openbase_coder_cli.services.definitions import default_services
 from openbase_coder_cli.services.installation import InstallationConfig
 from openbase_coder_cli.services.launchd import launchctl_status
+from openbase_coder_cli.services.selection import configured_default_services
 from openbase_coder_cli.services.tailnet_devices import tailscale_self_identity
 from openbase_coder_cli.services.tailscale_serve import tailscale_serve_health
 
@@ -40,7 +40,7 @@ def cli_configured_checks() -> dict[str, bool]:
             env_file = os.path.isfile(os.path.expanduser(env_path))
 
     services_installed = installation_config and all(
-        launchctl_status(svc).get("installed") for svc in default_services()
+        launchctl_status(svc).get("installed") for svc in configured_default_services()
     )
 
     return {

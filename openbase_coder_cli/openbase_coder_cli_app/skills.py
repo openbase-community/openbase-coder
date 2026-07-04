@@ -14,7 +14,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from openbase_coder_cli import dispatcher_config
+from openbase_coder_cli import dispatcher_config, skills_autolink
 from openbase_coder_cli.paths import CODEX_HOME_DIR, OPENBASE_CLAUDE_CONFIG_DIR
 
 PRINTING_PRESS_REGISTRY_URL = "https://raw.githubusercontent.com/mvanhorn/printing-press-library/main/registry.json"
@@ -22,13 +22,10 @@ PRINTING_PRESS_SKILL_URL_TEMPLATE = (
     "https://raw.githubusercontent.com/mvanhorn/printing-press-library/main/"
     "cli-skills/pp-{name}/SKILL.md"
 )
-PRINTING_PRESS_TARGET_SCOPES = {"home", "voice_coder", "claude"}
+PRINTING_PRESS_TARGET_SCOPES = {"home", "openbase_codex", "openbase_claude"}
 GLOBAL_SKILL_SCOPES = {
     "home",
-    "normal_codex",
-    "voice_coder",
     "openbase_codex",
-    "claude",
     "openbase_claude",
 }
 PRINTING_PRESS_SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -41,11 +38,11 @@ def _home_skills_dir() -> Path:
     return Path.home() / ".agents" / "skills"
 
 
-def _voice_coder_skills_dir() -> Path:
+def _openbase_codex_skills_dir() -> Path:
     return CODEX_HOME_DIR / "skills"
 
 
-def _claude_config_skills_dir() -> Path:
+def _openbase_claude_skills_dir() -> Path:
     return OPENBASE_CLAUDE_CONFIG_DIR / "skills"
 
 
@@ -53,11 +50,11 @@ def _skills_dir(project_path: str | None, scope: str = "home") -> Path:
     """Return the skills directory for a project or global scope."""
     if project_path:
         return Path(project_path).expanduser().resolve() / ".agents" / "skills"
-    if scope in {"voice_coder", "openbase_codex"}:
-        return _voice_coder_skills_dir()
-    if scope in {"claude", "openbase_claude"}:
-        return _claude_config_skills_dir()
-    if scope in {"home", "normal_codex"}:
+    if scope == "openbase_codex":
+        return _openbase_codex_skills_dir()
+    if scope == "openbase_claude":
+        return _openbase_claude_skills_dir()
+    if scope == "home":
         return _home_skills_dir()
     raise ValueError("invalid skill scope")
 
@@ -66,18 +63,18 @@ def _skill_scope_payload() -> list[dict[str, str]]:
     return [
         {
             "key": "home",
-            "label": "Normal Codex skills",
+            "label": "Personal skills",
             "skills_dir": str(_home_skills_dir()),
         },
         {
-            "key": "voice_coder",
+            "key": "openbase_codex",
             "label": "Openbase Codex skills",
-            "skills_dir": str(_voice_coder_skills_dir()),
+            "skills_dir": str(_openbase_codex_skills_dir()),
         },
         {
-            "key": "claude",
+            "key": "openbase_claude",
             "label": "Openbase Claude skills",
-            "skills_dir": str(_claude_config_skills_dir()),
+            "skills_dir": str(_openbase_claude_skills_dir()),
         },
     ]
 
@@ -350,69 +347,16 @@ def _symlink_skill_between_scopes(
     }
 
 
-def _auto_link_normal_codex_skills_sync() -> dict:
-    results = []
-    created = 0
-    already_linked = 0
-    conflicts = 0
-    errors = 0
-
-    for skill in _list_skill_entries(_home_skills_dir()):
-        try:
-            result = _symlink_skill_between_scopes(
-                skill_name=skill["name"],
-                source_scope="home",
-                target_scope="voice_coder",
-            )
-            status_value = "linked" if result["created"] else "already_linked"
-            if result["created"]:
-                created += 1
-            else:
-                already_linked += 1
-            results.append({**result, "status": status_value})
-        except FileExistsError as exc:
-            conflicts += 1
-            results.append(
-                {
-                    "name": skill["name"],
-                    "status": "conflict",
-                    "source_scope": "home",
-                    "target_scope": "voice_coder",
-                    "source_dir": skill.get("dir_path", ""),
-                    "target_dir": str(_voice_coder_skills_dir() / skill["name"]),
-                    "error": str(exc),
-                }
-            )
-        except OSError as exc:
-            errors += 1
-            results.append(
-                {
-                    "name": skill["name"],
-                    "status": "error",
-                    "source_scope": "home",
-                    "target_scope": "voice_coder",
-                    "source_dir": skill.get("dir_path", ""),
-                    "target_dir": str(_voice_coder_skills_dir() / skill["name"]),
-                    "error": str(exc),
-                }
-            )
-
-    return {
-        "enabled": dispatcher_config.auto_link_normal_codex_skills(),
-        "created": created,
-        "already_linked": already_linked,
-        "conflicts": conflicts,
-        "errors": errors,
-        "results": results,
-    }
+def _auto_link_personal_skills_sync() -> dict:
+    return skills_autolink.sync_auto_linked_skills()
 
 
 def _auto_link_settings_payload(*, sync: bool = False) -> dict:
-    sync_result = _auto_link_normal_codex_skills_sync() if sync else None
+    sync_result = _auto_link_personal_skills_sync() if sync else None
     return {
-        "auto_link_normal_codex_skills": dispatcher_config.auto_link_normal_codex_skills(),
-        "normal_codex_skills_dir": str(_home_skills_dir()),
-        "openbase_codex_skills_dir": str(_voice_coder_skills_dir()),
+        "auto_link_personal_skills": dispatcher_config.auto_link_personal_skills(),
+        "personal_skills_dir": str(_home_skills_dir()),
+        "openbase_codex_skills_dir": str(_openbase_codex_skills_dir()),
         "config_path": str(dispatcher_config.CODEX_DISPATCHER_CONFIG_PATH),
         "config_exists": dispatcher_config.CODEX_DISPATCHER_CONFIG_PATH.is_file(),
         "sync": sync_result,
@@ -471,8 +415,8 @@ def skills_list(request):
         )
 
     auto_link_sync = (
-        _auto_link_normal_codex_skills_sync()
-        if dispatcher_config.auto_link_normal_codex_skills()
+        _auto_link_personal_skills_sync()
+        if dispatcher_config.auto_link_personal_skills()
         else None
     )
 
@@ -485,8 +429,8 @@ def skills_list(request):
             "skills": sections[0]["skills"],
             "skills_dir": sections[0]["skills_dir"],
             "sections": sections,
-            "auto_link_normal_codex_skills": _auto_link_settings_payload(),
-            "auto_link_normal_codex_skills_sync": auto_link_sync,
+            "auto_link_personal_skills": _auto_link_settings_payload(),
+            "auto_link_personal_skills_sync": auto_link_sync,
         }
     )
 
@@ -497,15 +441,15 @@ def skills_auto_link_settings(request):
         return Response(_auto_link_settings_payload())
 
     if request.method == "PATCH":
-        if "auto_link_normal_codex_skills" not in request.data:
+        if "auto_link_personal_skills" not in request.data:
             return Response(
-                {"error": "auto_link_normal_codex_skills is required"},
+                {"error": "auto_link_personal_skills is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        dispatcher_config.set_auto_link_normal_codex_skills(
-            bool(request.data.get("auto_link_normal_codex_skills"))
+        dispatcher_config.set_auto_link_personal_skills(
+            bool(request.data.get("auto_link_personal_skills"))
         )
-        sync = dispatcher_config.auto_link_normal_codex_skills()
+        sync = dispatcher_config.auto_link_personal_skills()
         return Response(_auto_link_settings_payload(sync=sync))
 
     return Response(_auto_link_settings_payload(sync=True))
@@ -513,7 +457,7 @@ def skills_auto_link_settings(request):
 
 @api_view(["POST"])
 def skills_symlink(request):
-    """Symlink a global skill between normal Codex and Openbase Codex homes."""
+    """Symlink a global skill between the personal home and Openbase agent homes."""
     skill_name = request.data.get("name", "").strip()
     source_scope = request.data.get("source_scope", "").strip()
     target_scope = request.data.get("target_scope", "").strip()

@@ -88,27 +88,6 @@ def test_coding_backend_settings_persists_openbase_cloud_selection(
     assert "[model_providers.openbase_cloud]" in config
 
 
-def test_coding_backend_settings_reads_legacy_backend(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    env_file = tmp_path / ".env"
-    env_file.write_text("OPENBASE_CODEX_BACKEND=claude-agent-sdk\n", encoding="utf-8")
-    monkeypatch.setattr(backend_settings, "DEFAULT_ENV_FILE_PATH", env_file)
-
-    response = backend_settings.coding_backend_settings(
-        _authenticated_request("GET", "/api/settings/coding-backend/")
-    )
-
-    assert response.status_code == 200
-    assert response.data["backend"] == "claude_code"
-    assert [option["id"] for option in response.data["supported_backends"]] == [
-        "codex",
-        "openbase_cloud",
-        "claude_code",
-    ]
-
-
 def test_backend_model_settings_lists_claude_fable(
     monkeypatch,
     tmp_path: Path,

@@ -6,9 +6,9 @@ from openbase_coder_cli.paths import LAUNCHD_DOMAIN
 from openbase_coder_cli.services.definitions import (
     SERVICES,
     ServiceDefinition,
-    default_services,
 )
 from openbase_coder_cli.services.installation import InstallationConfig
+from openbase_coder_cli.services.selection import configured_default_services
 
 
 def require_installation() -> InstallationConfig:
@@ -28,7 +28,9 @@ def find_service(service_name: str) -> ServiceDefinition:
 
 
 def target_services(service_name: str | None) -> list[ServiceDefinition]:
-    return [find_service(service_name)] if service_name else default_services()
+    if service_name:
+        return [find_service(service_name)]
+    return configured_default_services()
 
 
 def service_label(service: ServiceDefinition) -> str:

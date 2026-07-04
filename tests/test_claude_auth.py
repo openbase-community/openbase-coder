@@ -22,34 +22,41 @@ def test_openbase_claude_keychain_service_uses_config_dir_hash(tmp_path: Path) -
     )
 
 
-def test_sync_normal_claude_state_merges_state_and_mcp(tmp_path) -> None:
+def test_sync_normal_claude_state_merges_into_config_dir_state(tmp_path) -> None:
     normal_state = tmp_path / ".claude.json"
-    openbase_state = tmp_path / "openbase" / "claude_config.json"
-    mcp_config = tmp_path / "openbase" / "claude_config" / ".claude.json"
+    openbase_state = tmp_path / "openbase" / "claude_config" / ".claude.json"
     normal_state.write_text(
         json.dumps(
             {
                 "oauthAccount": {"emailAddress": "test@example.com"},
+                "hasCompletedOnboarding": True,
                 "mcpServers": {"normal": {"command": "normal"}},
             }
         ),
         encoding="utf-8",
     )
-    mcp_config.parent.mkdir(parents=True)
-    mcp_config.write_text(
-        json.dumps({"mcpServers": {"super-agents": {"command": "super-agents-mcp"}}}),
+    openbase_state.parent.mkdir(parents=True)
+    openbase_state.write_text(
+        json.dumps(
+            {
+                "machineID": "openbase-machine",
+                "mcpServers": {"super-agents": {"command": "super-agents-mcp"}},
+            }
+        ),
         encoding="utf-8",
     )
 
     result = claude_auth.sync_normal_claude_state(
         normal_state_path=normal_state,
         openbase_state_path=openbase_state,
-        mcp_config_path=mcp_config,
     )
 
     assert result.state_updated is True
     payload = json.loads(openbase_state.read_text(encoding="utf-8"))
     assert payload["oauthAccount"] == {"emailAddress": "test@example.com"}
+    assert payload["hasCompletedOnboarding"] is True
+    # Existing Openbase values win; mcpServers are unioned.
+    assert payload["machineID"] == "openbase-machine"
     assert payload["mcpServers"] == {
         "normal": {"command": "normal"},
         "super-agents": {"command": "super-agents-mcp"},

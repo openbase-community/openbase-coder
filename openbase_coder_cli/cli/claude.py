@@ -4,6 +4,7 @@ import click
 
 from openbase_coder_cli.claude_auth import (
     claude_auth_status,
+    copy_normal_claude_keychain,
     run_claude_login,
     sync_normal_claude_state,
 )
@@ -34,6 +35,9 @@ def sync_state() -> None:
         click.echo("Updated Openbase Claude Code state.")
     click.echo(result.message)
     status_result = claude_auth_status()
+    if not status_result.logged_in and copy_normal_claude_keychain():
+        click.echo("Copied normal Claude Code login into Openbase's keychain entry.")
+        status_result = claude_auth_status()
     if status_result.logged_in:
         click.echo("Openbase Claude Code auth is ready.")
         return

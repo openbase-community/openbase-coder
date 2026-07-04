@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from openbase_coder_cli.backend_config import CODEX_BACKEND, OPENBASE_CLOUD_BACKEND
+
 
 @dataclass
 class ServiceDefinition:
@@ -13,6 +15,11 @@ class ServiceDefinition:
     port: int | None = None
     cleanup_ports: tuple[int, ...] = ()
     cleanup_command_substrings: tuple[str, ...] = ()
+    # Coding backends this service applies to; None means all backends.
+    backends: tuple[str, ...] | None = None
+
+    def supports_backend(self, coding_backend: str) -> bool:
+        return self.backends is None or coding_backend in self.backends
 
 
 SERVICES: list[ServiceDefinition] = [
@@ -120,6 +127,7 @@ SERVICES: list[ServiceDefinition] = [
         ),
         workdir_template="{workspace}",
         port=4500,
+        backends=(CODEX_BACKEND, OPENBASE_CLOUD_BACKEND),
     ),
     ServiceDefinition(
         name="codex-thread-sync",
@@ -244,5 +252,9 @@ SERVICES: list[ServiceDefinition] = [
 ]
 
 
-def default_services() -> list[ServiceDefinition]:
-    return [service for service in SERVICES if service.install_by_default]
+def default_services(coding_backend: str | None = None) -> list[ServiceDefinition]:
+    """Services installed by default, optionally filtered to a coding backend."""
+    services = [service for service in SERVICES if service.install_by_default]
+    if coding_backend is None:
+        return services
+    return [service for service in services if service.supports_backend(coding_backend)]

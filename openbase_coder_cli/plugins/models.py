@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 
 
 @dataclass
@@ -19,23 +19,14 @@ class StackSpec:
 
 @dataclass
 class ConsolePageSpec:
+    """An iframe console page: prebuilt static assets served by the CLI."""
+
     key: str
     title: str
     route: str
-    import_module: str = ""
-    export: str = "default"
     sidebar: bool = True
-    render: str = "component"
     asset_dir: str = ""
     entrypoint: str = "index.html"
-
-
-@dataclass
-class ProjectViewSpec:
-    stack: str
-    import_module: str
-    export: str = "default"
-    title: str = ""
 
 
 @dataclass
@@ -49,10 +40,15 @@ class PluginCapabilities:
     bootstrappers: list[BootstrapperSpec] = field(default_factory=list)
     stacks: list[StackSpec] = field(default_factory=list)
     console_pages: list[ConsolePageSpec] = field(default_factory=list)
-    project_views: list[ProjectViewSpec] = field(default_factory=list)
     skills: list[SkillSpec] = field(default_factory=list)
     django_url_modules: list[str] = field(default_factory=list)
-    console_npm_packages: list[str] = field(default_factory=list)
+
+
+def _known_fields(cls, data: dict) -> dict:
+    """Drop unknown keys so registries written by older versions still load
+    (e.g. component-page fields like import_module/render)."""
+    names = {item.name for item in fields(cls)}
+    return {key: value for key, value in data.items() if key in names}
 
 
 @dataclass
@@ -80,21 +76,25 @@ class PluginRecord:
         caps_data = data.get("capabilities", {})
         caps = PluginCapabilities(
             bootstrappers=[
-                BootstrapperSpec(**item) for item in caps_data.get("bootstrappers", [])
+                BootstrapperSpec(**_known_fields(BootstrapperSpec, item))
+                for item in caps_data.get("bootstrappers", [])
             ],
-            stacks=[StackSpec(**item) for item in caps_data.get("stacks", [])],
+            stacks=[
+                StackSpec(**_known_fields(StackSpec, item))
+                for item in caps_data.get("stacks", [])
+            ],
             console_pages=[
-                ConsolePageSpec(**item) for item in caps_data.get("console_pages", [])
+                ConsolePageSpec(**_known_fields(ConsolePageSpec, item))
+                for item in caps_data.get("console_pages", [])
             ],
-            project_views=[
-                ProjectViewSpec(**item) for item in caps_data.get("project_views", [])
+            skills=[
+                SkillSpec(**_known_fields(SkillSpec, item))
+                for item in caps_data.get("skills", [])
             ],
-            skills=[SkillSpec(**item) for item in caps_data.get("skills", [])],
             django_url_modules=list(caps_data.get("django_url_modules", [])),
-            console_npm_packages=list(caps_data.get("console_npm_packages", [])),
         )
         payload = {**data, "capabilities": caps}
-        return cls(**payload)
+        return cls(**_known_fields(cls, payload))
 
 
 @dataclass

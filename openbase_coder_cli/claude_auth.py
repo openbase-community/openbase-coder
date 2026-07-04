@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -13,7 +14,6 @@ from openbase_coder_cli.paths import (
     NORMAL_CLAUDE_STATE_PATH,
     OPENBASE_CLAUDE_CONFIG_DIR,
     OPENBASE_CLAUDE_JSON_PATH,
-    OPENBASE_CLAUDE_STATE_PATH,
 )
 
 NORMAL_CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
@@ -48,13 +48,17 @@ def claude_env(config_dir: Path = OPENBASE_CLAUDE_CONFIG_DIR) -> dict[str, str]:
 def sync_normal_claude_state(
     *,
     normal_state_path: Path = NORMAL_CLAUDE_STATE_PATH,
-    openbase_state_path: Path = OPENBASE_CLAUDE_STATE_PATH,
-    mcp_config_path: Path = OPENBASE_CLAUDE_JSON_PATH,
+    openbase_state_path: Path = OPENBASE_CLAUDE_JSON_PATH,
 ) -> ClaudeAuthBridgeResult:
+    """Merge normal Claude Code state into Openbase's managed state file.
+
+    The target is ``$CLAUDE_CONFIG_DIR/.claude.json`` — the file Claude Code
+    actually reads and writes when ``CLAUDE_CONFIG_DIR`` is set. Existing
+    Openbase values win; ``mcpServers`` entries are unioned.
+    """
     state_updated = _merge_claude_state(
         normal_state_path=normal_state_path,
         openbase_state_path=openbase_state_path,
-        mcp_config_path=mcp_config_path,
     )
     message = (
         "Synced normal Claude Code state into Openbase."
@@ -65,6 +69,76 @@ def sync_normal_claude_state(
         state_updated=state_updated,
         message=message,
     )
+
+
+def copy_normal_claude_keychain(
+    *, config_dir: Path = OPENBASE_CLAUDE_CONFIG_DIR
+) -> bool:
+    """Copy the normal Claude Code OAuth keychain item to Openbase's service.
+
+    Claude Code stores tokens under a per-``CLAUDE_CONFIG_DIR`` keychain
+    service, so the JSON state merge alone never transfers a login. Copying
+    the keychain item lets non-interactive installs inherit the user's normal
+    Claude login instead of requiring a second browser OAuth flow.
+    """
+    if platform.system() != "Darwin":
+        return False
+    secret = _read_keychain_secret(NORMAL_CLAUDE_KEYCHAIN_SERVICE)
+    if not secret:
+        return False
+    account = _keychain_account(NORMAL_CLAUDE_KEYCHAIN_SERVICE) or os.environ.get(
+        "USER", ""
+    )
+    target_service = openbase_claude_keychain_service(config_dir)
+    result = subprocess.run(
+        [
+            "security",
+            "add-generic-password",
+            "-U",
+            "-s",
+            target_service,
+            "-a",
+            account,
+            "-w",
+            secret,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def _read_keychain_secret(service: str) -> str | None:
+    result = subprocess.run(
+        ["security", "find-generic-password", "-s", service, "-w"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    secret = result.stdout.strip()
+    return secret or None
+
+
+def _keychain_account(service: str) -> str | None:
+    result = subprocess.run(
+        ["security", "find-generic-password", "-s", service],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('"acct"'):
+            _key, _sep, value = stripped.partition("=")
+            value = value.strip()
+            if value.startswith('"') and value.endswith('"'):
+                return value[1:-1]
+    return None
 
 
 def claude_auth_status(
@@ -123,17 +197,15 @@ def _merge_claude_state(
     *,
     normal_state_path: Path,
     openbase_state_path: Path,
-    mcp_config_path: Path,
 ) -> bool:
     normal_state = _read_json_object(normal_state_path)
     if not normal_state:
         return False
 
     existing_state = _read_json_object(openbase_state_path)
-    mcp_config = _read_json_object(mcp_config_path)
     merged: dict[str, Any] = {**normal_state, **existing_state}
     mcp_servers: dict[str, Any] = {}
-    for payload in (normal_state, existing_state, mcp_config):
+    for payload in (normal_state, existing_state):
         value = payload.get("mcpServers")
         if isinstance(value, dict):
             mcp_servers.update(value)

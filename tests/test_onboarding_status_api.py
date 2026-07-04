@@ -58,7 +58,7 @@ def test_onboarding_status_payload_composes_checks(monkeypatch, tmp_path) -> Non
         classmethod(lambda cls: SimpleNamespace(env_file=str(env_file))),
     )
     monkeypatch.setattr(
-        onboarding, "default_services", lambda: [SimpleNamespace(name="svc")]
+        onboarding, "configured_default_services", lambda: [SimpleNamespace(name="svc")]
     )
     monkeypatch.setattr(onboarding, "launchctl_status", lambda svc: {"installed": True})
     monkeypatch.setattr(
@@ -124,7 +124,7 @@ def test_cli_configured_false_when_service_not_installed(
         classmethod(lambda cls: SimpleNamespace(env_file=str(env_file))),
     )
     monkeypatch.setattr(
-        onboarding, "default_services", lambda: [SimpleNamespace(name="svc")]
+        onboarding, "configured_default_services", lambda: [SimpleNamespace(name="svc")]
     )
     monkeypatch.setattr(
         onboarding, "launchctl_status", lambda svc: {"installed": False}

@@ -63,7 +63,11 @@ def _resolved_schedule_type(
     schedule_time: str | None,
     interval_seconds: int | None,
 ) -> str:
-    if schedule_type == "daily" and interval_seconds is not None and schedule_time is None:
+    if (
+        schedule_type == "daily"
+        and interval_seconds is not None
+        and schedule_time is None
+    ):
         return "interval"
     return schedule_type
 
@@ -159,10 +163,14 @@ def show_routine(name: str) -> None:
 
 @routines.command("create")
 @click.argument("name")
-@click.option("--kind", type=click.Choice(ROUTINE_KINDS), default="agent", show_default=True)
+@click.option(
+    "--kind", type=click.Choice(ROUTINE_KINDS), default="agent", show_default=True
+)
 @click.option("--prompt", help="Prompt to send when an agent routine runs.")
 @click.option("--command", help="Local shell command to run for a command routine.")
-@click.option("--command-timeout-seconds", type=int, help="Command routine timeout in seconds.")
+@click.option(
+    "--command-timeout-seconds", type=int, help="Command routine timeout in seconds."
+)
 @click.option("--time", "schedule_time", help="Daily HH:MM local time.")
 @click.option(
     "--schedule-type",
@@ -170,7 +178,9 @@ def show_routine(name: str) -> None:
     default="daily",
     show_default=True,
 )
-@click.option("--interval-seconds", type=int, help="Interval schedule frequency in seconds.")
+@click.option(
+    "--interval-seconds", type=int, help="Interval schedule frequency in seconds."
+)
 @click.option("--timezone", default="America/New_York", show_default=True)
 @click.option("--target-name", help="Existing Super Agents thread name to target.")
 @click.option("--thread-id", help="Existing Codex app-server thread id to target.")
@@ -265,13 +275,17 @@ def create_routine(
 @click.option("--command-timeout-seconds", type=int)
 @click.option("--time", "schedule_time", help="Daily HH:MM local time.")
 @click.option("--schedule-type", type=click.Choice(SCHEDULE_TYPES))
-@click.option("--interval-seconds", type=int, help="Interval schedule frequency in seconds.")
+@click.option(
+    "--interval-seconds", type=int, help="Interval schedule frequency in seconds."
+)
 @click.option("--timezone")
 @click.option("--enable", "enabled", flag_value=True, default=None)
 @click.option("--disable", "enabled", flag_value=False)
 @click.option("--target-name")
 @click.option("--thread-id")
-@click.option("--fresh-thread-per-run", "fresh_thread_per_run", flag_value=True, default=None)
+@click.option(
+    "--fresh-thread-per-run", "fresh_thread_per_run", flag_value=True, default=None
+)
 @click.option("--reuse-target-thread", "fresh_thread_per_run", flag_value=False)
 @click.option("--cwd", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--approval-policy")
@@ -317,7 +331,9 @@ def update_routine(
         command=command,
         command_timeout_seconds=command_timeout_seconds,
         schedule_time=schedule_time,
-        schedule_type=resolved_schedule_type if schedule_type or interval_seconds is not None else None,
+        schedule_type=resolved_schedule_type
+        if schedule_type or interval_seconds is not None
+        else None,
         interval_seconds=interval_seconds,
         timezone=timezone,
         enabled=enabled,
@@ -355,11 +371,16 @@ def run_due_routines(name: str | None, force: bool) -> None:
     )
 
 
+SKILLS_AUTO_LINK_SYNC_SECONDS = 300.0
+
+
 @routines.command("run-loop")
 @click.option("--interval", default=60.0, show_default=True, type=float)
 @click.option("--verbose", is_flag=True)
 def run_loop(interval: float, verbose: bool) -> None:
     """Poll forever and run due routines."""
+    from openbase_coder_cli import skills_autolink
+
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(levelname)s %(asctime)s %(name)s %(message)s",
@@ -367,6 +388,7 @@ def run_loop(interval: float, verbose: bool) -> None:
     logger = logging.getLogger(__name__)
     poll_interval = max(interval, 1.0)
     logger.info("routine_runner service_started interval=%s", poll_interval)
+    next_skills_sync = time.monotonic()
     while True:
         started = time.monotonic()
         try:
@@ -378,5 +400,25 @@ def run_loop(interval: float, verbose: bool) -> None:
             )
         except click.ClickException:
             logger.exception("routine_runner sweep_failed")
+
+        # Periodically re-link personal skills so new ones reach the
+        # Openbase agent homes without a service restart.
+        if time.monotonic() >= next_skills_sync:
+            next_skills_sync = time.monotonic() + max(
+                SKILLS_AUTO_LINK_SYNC_SECONDS, poll_interval
+            )
+            try:
+                summary = skills_autolink.sync_auto_linked_skills()
+            except OSError:
+                logger.exception("skills_autolink sweep_failed")
+            else:
+                if summary["enabled"] and (summary["created"] or summary["errors"]):
+                    logger.info(
+                        "skills_autolink sweep_complete created=%s conflicts=%s errors=%s",
+                        summary["created"],
+                        summary["conflicts"],
+                        summary["errors"],
+                    )
+
         elapsed = time.monotonic() - started
         time.sleep(max(poll_interval - elapsed, 1.0))

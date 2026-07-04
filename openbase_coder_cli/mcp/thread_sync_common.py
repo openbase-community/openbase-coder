@@ -9,6 +9,7 @@ import platform
 import tempfile
 import time
 import uuid
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -283,3 +284,283 @@ def fingerprint_matches(
     return isinstance(value, dict) and all(
         value.get(key) == fingerprint.get(key) for key in keys
     )
+
+
+def ledger_sync_decision(
+    previous: Any,
+    *,
+    left_key: str,
+    right_key: str,
+    left_fingerprint: dict[str, Any],
+    right_fingerprint: dict[str, Any],
+    fingerprint_keys: tuple[str, ...],
+) -> str:
+    """Classify a home pair against its previous ledger entry.
+
+    Returns one of ``both_changed``, ``conflict_unresolved``, ``left_changed``,
+    ``right_changed``, or ``ledger_current``.
+    """
+    if not isinstance(previous, dict):
+        return "both_changed"
+    if previous.get("status") == "conflict":
+        return "conflict_unresolved"
+    left_changed = not fingerprint_matches(
+        previous.get(left_key), left_fingerprint, keys=fingerprint_keys
+    )
+    right_changed = not fingerprint_matches(
+        previous.get(right_key), right_fingerprint, keys=fingerprint_keys
+    )
+    if left_changed and right_changed:
+        return "both_changed"
+    if left_changed:
+        return "left_changed"
+    if right_changed:
+        return "right_changed"
+    return "ledger_current"
+
+
+def sync_cutoff_ms(max_age_days: int | None) -> int | None:
+    if max_age_days is None:
+        return None
+    return int((time.time() - max(max_age_days, 0) * 24 * 60 * 60) * 1000)
+
+
+def path_stable(path: Path, delay_seconds: float) -> bool:
+    before = path.stat()
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
+    after = path.stat()
+    return before.st_size == after.st_size and before.st_mtime_ns == after.st_mtime_ns
+
+
+def device_snapshot_dirs(exchange_dir: Path) -> list[Path]:
+    root = exchange_dir / "devices"
+    if not root.exists():
+        return []
+    return sorted(
+        path
+        for path in root.glob("*/snapshots/*/*")
+        if path.is_dir() and (path / "metadata.json").exists()
+    )
+
+
+@dataclass(frozen=True)
+class SnapshotExportCandidate:
+    """One exportable entity, or a skip decision made by the session source."""
+
+    entity_id: str
+    skip_reason: str | None = None
+    fingerprint_id: str | None = None
+    write_snapshot: Callable[[str | None], Path] | None = None
+
+
+@dataclass(frozen=True)
+class LocalSnapshotState:
+    """Local counterpart of an incoming snapshot, as seen by a session source."""
+
+    exists: bool
+    fingerprint_id: str | None
+    context: Any = None
+
+
+@dataclass(frozen=True)
+class SnapshotImportSource:
+    """Session-source callbacks that parameterize the shared import loop."""
+
+    scope_key: str
+    entity_id_key: str
+    read_metadata: Callable[[Path], dict[str, Any]]
+    metadata_error: type[Exception]
+    validate_snapshot: Callable[[Path, dict[str, Any]], str | None]
+    load_local: Callable[[dict[str, Any]], LocalSnapshotState]
+    import_blocked_reason: Callable[[dict[str, Any], LocalSnapshotState], str | None]
+    perform_import: Callable[[Path, dict[str, Any], LocalSnapshotState], str | None]
+    conflict_includes_snapshot_path: bool = False
+
+
+def run_snapshot_export(
+    *,
+    candidates: Iterable[SnapshotExportCandidate],
+    device_id: str,
+    ledger: dict[str, Any],
+    scope_key: str,
+    result_factory: Callable[..., Any],
+) -> list[Any]:
+    return [
+        _export_one_candidate(
+            candidate,
+            device_id=device_id,
+            ledger=ledger,
+            scope_key=scope_key,
+            result_factory=result_factory,
+        )
+        for candidate in candidates
+    ]
+
+
+def _export_one_candidate(
+    candidate: SnapshotExportCandidate,
+    *,
+    device_id: str,
+    ledger: dict[str, Any],
+    scope_key: str,
+    result_factory: Callable[..., Any],
+) -> Any:
+    if candidate.skip_reason is not None:
+        return result_factory(candidate.entity_id, "skipped", candidate.skip_reason)
+    fingerprint_id = candidate.fingerprint_id
+    entry_ledger = device_ledger_entry(
+        ledger, scope_key=scope_key, entity_id=candidate.entity_id
+    )
+    if fingerprint_id in device_exported_fingerprints(entry_ledger, device_id):
+        entry_ledger["local_fingerprint"] = fingerprint_id
+        return result_factory(
+            candidate.entity_id,
+            "already_exported",
+            "fingerprint_current",
+            None,
+            fingerprint_id,
+        )
+    parent_fingerprint = parent_fingerprint_for_export(entry_ledger, fingerprint_id)
+    snapshot_path = candidate.write_snapshot(parent_fingerprint)
+    record_device_snapshot(
+        entry_ledger,
+        device_id=device_id,
+        fingerprint_id=fingerprint_id,
+        snapshot_path=snapshot_path,
+        status="exported",
+    )
+    entry_ledger["local_fingerprint"] = fingerprint_id
+    return result_factory(
+        candidate.entity_id,
+        "exported",
+        "snapshot_written",
+        str(snapshot_path),
+        fingerprint_id,
+        device_id,
+    )
+
+
+def run_snapshot_import(
+    *,
+    exchange_dir: Path,
+    device_id: str,
+    ledger: dict[str, Any],
+    source: SnapshotImportSource,
+    result_factory: Callable[..., Any],
+) -> list[Any]:
+    return [
+        _import_one_snapshot(
+            snapshot_dir,
+            device_id=device_id,
+            ledger=ledger,
+            source=source,
+            result_factory=result_factory,
+        )
+        for snapshot_dir in device_snapshot_dirs(exchange_dir)
+    ]
+
+
+def _import_one_snapshot(
+    snapshot_dir: Path,
+    *,
+    device_id: str,
+    ledger: dict[str, Any],
+    source: SnapshotImportSource,
+    result_factory: Callable[..., Any],
+) -> Any:
+    try:
+        metadata = source.read_metadata(snapshot_dir / "metadata.json")
+    except source.metadata_error as exc:
+        return result_factory(
+            snapshot_dir.parent.name, "skipped", str(exc), str(snapshot_dir)
+        )
+
+    entity_id = metadata[source.entity_id_key]
+    source_device_id = metadata["source_device_id"]
+    fingerprint_id = metadata["fingerprint"]
+
+    def result(status: str, reason: str) -> Any:
+        return result_factory(
+            entity_id,
+            status,
+            reason,
+            str(snapshot_dir),
+            fingerprint_id,
+            source_device_id,
+        )
+
+    if source_device_id == device_id:
+        return result("skipped", "same_device")
+
+    entry_ledger = device_ledger_entry(
+        ledger, scope_key=source.scope_key, entity_id=entity_id
+    )
+    if snapshot_already_imported(
+        entry_ledger, device_id=source_device_id, fingerprint_id=fingerprint_id
+    ):
+        return result("already_imported", "fingerprint_seen")
+    if entry_ledger.get("conflict"):
+        record_device_snapshot(
+            entry_ledger,
+            device_id=source_device_id,
+            fingerprint_id=fingerprint_id,
+            snapshot_path=snapshot_dir,
+            status="seen_after_conflict",
+        )
+        return result("conflict", "conflict_unresolved")
+
+    validation_error = source.validate_snapshot(snapshot_dir, metadata)
+    if validation_error:
+        return result("skipped", validation_error)
+
+    local = source.load_local(metadata)
+    parent_fingerprint = metadata.get("parent_fingerprint")
+    if not isinstance(parent_fingerprint, str) or not parent_fingerprint:
+        parent_fingerprint = None
+    decision = import_snapshot_decision(
+        has_local=local.exists,
+        local_fingerprint=local.fingerprint_id,
+        incoming_fingerprint=fingerprint_id,
+        parent_fingerprint=parent_fingerprint,
+        entry_ledger=entry_ledger,
+    )
+    if decision == "same_content":
+        record_device_snapshot(
+            entry_ledger,
+            device_id=source_device_id,
+            fingerprint_id=fingerprint_id,
+            snapshot_path=snapshot_dir,
+            status="same_content",
+        )
+        return result("already_imported", "same_content")
+    if decision == "conflict":
+        record_device_conflict(
+            entry_ledger,
+            local_fingerprint=local.fingerprint_id,
+            incoming_fingerprint=fingerprint_id,
+            source_device_id=source_device_id,
+            reason="divergent_fingerprint",
+            snapshot_path=snapshot_dir
+            if source.conflict_includes_snapshot_path
+            else None,
+        )
+        return result("conflict", "divergent_fingerprint")
+
+    blocked_reason = source.import_blocked_reason(metadata, local)
+    if blocked_reason:
+        return result("skipped", blocked_reason)
+
+    error_reason = source.perform_import(snapshot_dir, metadata, local)
+    if error_reason:
+        return result("error", error_reason)
+
+    record_device_snapshot(
+        entry_ledger,
+        device_id=source_device_id,
+        fingerprint_id=fingerprint_id,
+        snapshot_path=snapshot_dir,
+        status="imported",
+    )
+    entry_ledger["local_fingerprint"] = fingerprint_id
+    return result("imported", "snapshot_imported")

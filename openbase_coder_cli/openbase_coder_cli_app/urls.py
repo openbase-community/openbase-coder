@@ -23,6 +23,7 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     brain_readiness,
     cartesia_voice_settings,
     coding_backend_settings,
+    dangerous_confirmation_settings,
     devices_list,
     dispatcher_voice_settings,
     env_settings,
@@ -187,9 +188,9 @@ urlpatterns = [
     ),
     path("skills/", skills_list, name="skills-list"),
     path(
-        "skills/auto-link-normal-codex/",
+        "skills/auto-link-personal/",
         skills_auto_link_settings,
-        name="skills-auto-link-normal-codex",
+        name="skills-auto-link-personal",
     ),
     path("skills/symlink/", skills_symlink, name="skills-symlink"),
     path(
@@ -228,6 +229,11 @@ urlpatterns = [
         "settings/agents-generation/",
         agents_generation_settings,
         name="agents-generation-settings",
+    ),
+    path(
+        "settings/dangerous-confirmation/",
+        dangerous_confirmation_settings,
+        name="dangerous-confirmation-settings",
     ),
     path(
         "settings/openbase-services/",

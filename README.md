@@ -33,25 +33,40 @@ runtime.
 
 ## Quick Start
 
-Recommended standalone setup on macOS:
+Openbase Coder has exactly two deployment modes: a standalone (production)
+install for end users, and a development-workspace install for contributors.
+
+Recommended standalone setup on macOS — either install the Openbase Coder
+desktop app (which bundles and activates the CLI package for you), or run:
 
 ```bash
 curl -fsSL https://github.com/openbase-community/openbase-coder/releases/latest/download/install.sh | sh
 openbase-coder setup
 ```
 
-The standalone installer bundles Python, Openbase Coder dependencies, the web
-console, and LiveKit server.
+The standalone runtime package bundles Python, Openbase Coder dependencies,
+the prebuilt web console, agent instructions and skills, and LiveKit server.
+It is detected automatically via its `openbase-coder-package.json`.
 
 Local Kokoro/MLX audio is installed on demand when setup is run with
 `--audio-provider local`. Release packages should be built with Python 3.12 so
 that Kokoro's current Python `<3.13` package metadata is satisfied.
 
-For source-based development, use the legacy `uv` flow:
+For source-based development, clone the workspace repo and run its setup
+script from the workspace root:
 
 ```bash
-uvx --python 3.13 openbase-coder setup --dev-workspace
+git clone https://github.com/openbase-community/openbase-coder-workspace
+cd openbase-coder-workspace
+./scripts/setup
 ```
+
+The script runs `multi sync --install-set default` and then
+`openbase-coder setup --workspace-dir <workspace-root>` against your checkout.
+The CLI is typically installed editable (`uv tool install -e ./cli`) or run
+via `uv run` from the `cli` repo. `openbase-coder setup` never clones or
+git-updates a workspace itself; when `--workspace-dir` is omitted it discovers
+the workspace from the recorded installation or an editable CLI install.
 
 Verify a persistent install:
 
@@ -73,10 +88,11 @@ For fully local speech-to-text and text-to-speech:
 openbase-coder setup --audio-provider local
 ```
 
-Setup uses the bundled runtime package, generates `~/.openbase/.env` if needed,
-installs launchd services, and prepares the local Codex home used by voice
-sessions. Source development mode can still clone and sync the public workspace
-with `--dev-workspace`.
+Setup uses the bundled runtime package, generates `~/.openbase/.env` if needed
+(prompting for a coding backend — codex, claude-code, or openbase-cloud — when
+`--backend` is omitted), installs launchd services, and prepares the local
+Codex home used by voice sessions. In development mode, run `./scripts/setup`
+from your workspace checkout instead.
 
 After setup, check the local runtime:
 
@@ -112,8 +128,8 @@ openbase-coder plugins list
 openbase-coder bootstrap --help
 ```
 
-For source development without a persistent install, prefix commands with
-`uvx --python 3.13`.
+For source development without a persistent install, run commands from the
+`cli` repo with `uv run` (for example `uv run openbase-coder doctor`).
 
 ## Documentation
 
@@ -139,8 +155,10 @@ uv run openbase-coder --version
 uv run pytest
 ```
 
-The CLI is part of the larger Openbase Coder multi-workspace. The public setup
-flow only syncs the runtime install set required by end users.
+The CLI is part of the larger Openbase Coder multi-workspace. For the full
+development setup, clone the workspace repo and run `./scripts/setup` from the
+workspace root; install the CLI editable with `uv tool install -e ./cli` to
+get a persistent `openbase-coder` command backed by your checkout.
 
 ## License
 

@@ -61,11 +61,15 @@ def _show_properties(unit: str, properties: tuple[str, ...]) -> dict[str, str]:
 
 
 def generate_unit(svc: ServiceDefinition, config: InstallationConfig) -> Path:
-    from openbase_coder_cli.services.launchd import _log_path, _wrapper_path
+    from openbase_coder_cli.services.launchd import (
+        _log_path,
+        _runtime_workdir,
+        _wrapper_path,
+    )
 
     wrapper = _wrapper_path(svc)
     workdir = svc.workdir_template.format(
-        workspace=config.workspace_path,
+        workspace=config.workspace_path or _runtime_workdir(config),
         data_dir=str(OPENBASE_BASE_DIR),
         runtime_workdir=config.package_path
         or config.workspace_path

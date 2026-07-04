@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from livekit import rtc
 
-from openbase_coder_cli.livekit_agent import livekit
+from openbase_coder_cli.livekit_agent import audio_scoring, config, livekit, voices
 from openbase_coder_cli.livekit_agent.codex_app_client import CodexAppServerClient
 from openbase_coder_cli.livekit_agent.livekit import (
     ANNOUNCER_AUDIO_KIND,
@@ -95,9 +95,7 @@ def test_openbase_cloud_audio_token_fails_closed_when_login_missing(monkeypatch)
             raise livekit.AuthLoginRequiredError("login required")
 
     monkeypatch.setattr(livekit, "WEB_BACKEND_URL", "https://app.openbase.cloud")
-    monkeypatch.setattr(
-        livekit, "MachineTokenManager", MissingMachineTokenManager
-    )
+    monkeypatch.setattr(livekit, "MachineTokenManager", MissingMachineTokenManager)
 
     with pytest.raises(livekit.OpenbaseCloudAudioAuthenticationError) as exc_info:
         livekit._openbase_cloud_audio_token()
@@ -292,9 +290,9 @@ async def test_brain_score_audio_scorer_uploads_every_interval(tmp_path, monkeyp
                 }
             )
 
-    monkeypatch.setattr(livekit, "BRAIN_SCORE_ENABLED", True)
-    monkeypatch.setattr(livekit, "_load_brain_score_token", lambda: "token-1")
-    monkeypatch.setattr(livekit, "_upload_brain_score_chunk", fake_upload)
+    monkeypatch.setattr(audio_scoring, "BRAIN_SCORE_ENABLED", True)
+    monkeypatch.setattr(audio_scoring, "_load_brain_score_token", lambda: "token-1")
+    monkeypatch.setattr(audio_scoring, "_upload_brain_score_chunk", fake_upload)
 
     scorer = BrainScoreAudioScorer(
         interval_seconds=0.02,
@@ -329,9 +327,9 @@ async def test_brain_score_audio_scorer_skips_chunks_below_min_duration(
     async def fake_upload(**kwargs):
         uploads.append(kwargs)
 
-    monkeypatch.setattr(livekit, "BRAIN_SCORE_ENABLED", True)
-    monkeypatch.setattr(livekit, "_load_brain_score_token", lambda: "token-1")
-    monkeypatch.setattr(livekit, "_upload_brain_score_chunk", fake_upload)
+    monkeypatch.setattr(audio_scoring, "BRAIN_SCORE_ENABLED", True)
+    monkeypatch.setattr(audio_scoring, "_load_brain_score_token", lambda: "token-1")
+    monkeypatch.setattr(audio_scoring, "_upload_brain_score_chunk", fake_upload)
 
     scorer = BrainScoreAudioScorer(
         interval_seconds=0.02,
@@ -358,10 +356,10 @@ async def test_brain_score_audio_scorer_skips_chunks_during_cooldown(
     async def fake_upload(**kwargs):
         uploads.append(kwargs)
 
-    monkeypatch.setattr(livekit, "BRAIN_SCORE_ENABLED", True)
-    monkeypatch.setattr(livekit, "_load_brain_score_token", lambda: "token-1")
-    monkeypatch.setattr(livekit, "_upload_brain_score_chunk", fake_upload)
-    monkeypatch.setattr(livekit.time, "time", lambda: 1100.0)
+    monkeypatch.setattr(audio_scoring, "BRAIN_SCORE_ENABLED", True)
+    monkeypatch.setattr(audio_scoring, "_load_brain_score_token", lambda: "token-1")
+    monkeypatch.setattr(audio_scoring, "_upload_brain_score_chunk", fake_upload)
+    monkeypatch.setattr(audio_scoring.time, "time", lambda: 1100.0)
 
     scorer = BrainScoreAudioScorer(
         interval_seconds=0.02,
@@ -382,7 +380,7 @@ async def test_brain_score_audio_scorer_skips_chunks_during_cooldown(
 async def test_brain_score_audio_scorer_logs_schedule_failure_without_raising(
     tmp_path, monkeypatch, caplog
 ):
-    monkeypatch.setattr(livekit, "BRAIN_SCORE_ENABLED", True)
+    monkeypatch.setattr(audio_scoring, "BRAIN_SCORE_ENABLED", True)
     scorer = BrainScoreAudioScorer(
         interval_seconds=0.01,
         min_duration_seconds=0,
@@ -395,7 +393,9 @@ async def test_brain_score_audio_scorer_logs_schedule_failure_without_raising(
         raise RuntimeError(f"schedule failed: {reason}")
 
     monkeypatch.setattr(scorer, "_schedule_current_chunk", fail_schedule)
-    caplog.set_level(logging.WARNING, logger="openbase_coder_cli.livekit_agent.livekit")
+    caplog.set_level(
+        logging.WARNING, logger="openbase_coder_cli.livekit_agent.audio_scoring"
+    )
 
     scorer.push_frame(rtc.AudioFrame.create(48000, 1, 480))
 
@@ -437,15 +437,17 @@ async def test_upload_brain_score_chunk_logs_missing_score_without_writing(
         def post(self, *args, **kwargs):
             return FakeResponse()
 
-    monkeypatch.setattr(livekit.aiohttp, "ClientSession", FakeSession)
+    monkeypatch.setattr(audio_scoring.aiohttp, "ClientSession", FakeSession)
     monkeypatch.setattr(
-        livekit,
+        audio_scoring,
         "_write_brain_score_json",
         lambda path, payload: writes.append((path, payload)),
     )
-    caplog.set_level(logging.WARNING, logger="openbase_coder_cli.livekit_agent.livekit")
+    caplog.set_level(
+        logging.WARNING, logger="openbase_coder_cli.livekit_agent.audio_scoring"
+    )
 
-    await livekit._upload_brain_score_chunk(
+    await audio_scoring._upload_brain_score_chunk(
         wav_path=wav_path,
         token="token-1",
         endpoint="http://example.invalid/score",
@@ -526,30 +528,32 @@ def test_direct_livekit_instruction_loader_priority(tmp_path):
 
 def test_super_agent_voices_use_builtin_catalog_pool(monkeypatch):
     monkeypatch.setattr(
-        livekit,
+        voices,
         "selected_tts_provider_id",
         lambda: livekit.CARTESIA_PROVIDER_ID,
     )
-    voices = livekit._current_super_agent_voices()
+    voice_pool = livekit._current_super_agent_voices()
 
-    assert len(voices) > 1
-    assert livekit.DEFAULT_CARTESIA_VOICE_ID not in {voice.voice_id for voice in voices}
-    assert any(voice.name == "Katie" for voice in voices)
+    assert len(voice_pool) > 1
+    assert livekit.DEFAULT_CARTESIA_VOICE_ID not in {
+        voice.voice_id for voice in voice_pool
+    }
+    assert any(voice.name == "Katie" for voice in voice_pool)
 
 
 def test_kokoro_super_agent_voices_are_english_only(monkeypatch):
     monkeypatch.setattr(
-        livekit,
+        voices,
         "selected_tts_provider_id",
         lambda: KOKORO_PROVIDER_ID,
     )
 
-    voices = livekit._current_super_agent_voices()
+    voice_pool = livekit._current_super_agent_voices()
 
-    assert len(voices) > 1
-    assert {voice.voice_id[:1] for voice in voices} <= {"a", "b"}
-    assert "jf_tebukuro" not in {voice.voice_id for voice in voices}
-    assert "zm_yunjian" not in {voice.voice_id for voice in voices}
+    assert len(voice_pool) > 1
+    assert {voice.voice_id[:1] for voice in voice_pool} <= {"a", "b"}
+    assert "jf_tebukuro" not in {voice.voice_id for voice in voice_pool}
+    assert "zm_yunjian" not in {voice.voice_id for voice in voice_pool}
 
 
 class FakeSpeechHandle:
@@ -713,7 +717,9 @@ def test_voice_selecting_tts_formats_synthesize_text(monkeypatch, caplog):
         api_key="key",
     )
 
-    caplog.set_level(logging.INFO, logger="openbase_coder_cli.livekit_agent.livekit")
+    caplog.set_level(
+        logging.INFO, logger="openbase_coder_cli.livekit_agent.tts_selection"
+    )
     tts.synthesize("Run `uv run pytest` and update README.md")
 
     assert RecordingCartesiaTTS.created[0].synthesize_calls == [
@@ -739,7 +745,9 @@ def test_voice_selecting_tts_logs_stream_voice_and_text(monkeypatch, caplog):
         api_key="key",
     )
 
-    caplog.set_level(logging.INFO, logger="openbase_coder_cli.livekit_agent.livekit")
+    caplog.set_level(
+        logging.INFO, logger="openbase_coder_cli.livekit_agent.tts_selection"
+    )
     stream = tts.stream()
     stream.push_text("Yes, I'm here.")
     stream.flush()
@@ -763,7 +771,9 @@ def test_voice_selecting_tts_logs_default_stream_voice_and_text(monkeypatch, cap
         api_key="key",
     )
 
-    caplog.set_level(logging.INFO, logger="openbase_coder_cli.livekit_agent.livekit")
+    caplog.set_level(
+        logging.INFO, logger="openbase_coder_cli.livekit_agent.tts_selection"
+    )
     stream = tts.stream()
     stream.push_text("Yes, I'm here.")
     stream.flush()
@@ -787,7 +797,9 @@ async def test_announcer_queue_waits_and_excludes_chat_context(caplog):
         silence_grace_seconds=0,
     )
 
-    caplog.set_level(logging.INFO, logger="openbase_coder_cli.livekit_agent.livekit")
+    caplog.set_level(
+        logging.INFO, logger="openbase_coder_cli.livekit_agent.speech_queue"
+    )
     await queue._speak(
         AnnouncerMessage(
             message_id="announcer-1",
@@ -1001,19 +1013,19 @@ async def test_voice_router_transfers_to_prepared_target(monkeypatch, tmp_path):
     dispatcher = PreparedClient()
     prepared = []
     monkeypatch.setattr(
-        livekit,
+        config,
         "DEFAULT_DIRECT_LIVEKIT_INSTRUCTIONS_PATH",
         tmp_path / "missing-direct-instructions.md",
     )
     monkeypatch.setattr(
-        livekit,
+        voices,
         "SUPER_AGENT_VOICES",
         (
             livekit.CartesiaVoice("voice-a", "Alice"),
             livekit.CartesiaVoice("voice-b", "Bob"),
         ),
     )
-    monkeypatch.setattr(livekit, "SUPER_AGENT_VOICE_IDS", ("voice-a", "voice-b"))
+    monkeypatch.setattr(voices, "SUPER_AGENT_VOICE_IDS", ("voice-a", "voice-b"))
 
     async def fake_prepare(self):
         prepared.append(

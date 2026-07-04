@@ -132,7 +132,7 @@ def test_backend_status_reports_unsupported_value(tmp_path) -> None:
 
 def test_backend_status_reads_legacy_env_key(tmp_path) -> None:
     env_file = tmp_path / ".env"
-    env_file.write_text("OPENBASE_CODEX_BACKEND=claude-tui\n", encoding="utf-8")
+    env_file.write_text("OPENBASE_CODING_BACKEND=claude-code\n", encoding="utf-8")
 
     result = CliRunner().invoke(
         main, ["backend", "status", "--env-file", str(env_file)]

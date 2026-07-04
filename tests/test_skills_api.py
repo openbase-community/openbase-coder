@@ -35,12 +35,18 @@ def _patch_skill_homes(
     openbase_home: Path,
     claude_home: Path | None = None,
 ) -> None:
+    from openbase_coder_cli import skills_autolink
+
+    resolved_claude_home = claude_home or normal_home.parent / "openbase-claude"
     monkeypatch.setattr(views, "_home_skills_dir", lambda: normal_home / "skills")
     monkeypatch.setattr(views, "CODEX_HOME_DIR", openbase_home)
+    monkeypatch.setattr(views, "OPENBASE_CLAUDE_CONFIG_DIR", resolved_claude_home)
     monkeypatch.setattr(
-        views,
-        "OPENBASE_CLAUDE_CONFIG_DIR",
-        claude_home or normal_home.parent / "openbase-claude",
+        skills_autolink, "home_skills_dir", lambda: normal_home / "skills"
+    )
+    monkeypatch.setattr(skills_autolink, "CODEX_HOME_DIR", openbase_home)
+    monkeypatch.setattr(
+        skills_autolink, "OPENBASE_CLAUDE_CONFIG_DIR", resolved_claude_home
     )
     monkeypatch.setattr(
         views._skills.dispatcher_config,
@@ -63,17 +69,19 @@ def test_skills_list_uses_normal_and_openbase_codex_homes(tmp_path: Path, monkey
 
     assert response.status_code == 200
     sections = {section["key"]: section for section in response.data["sections"]}
-    assert sections["home"]["label"] == "Normal Codex skills"
+    assert sections["home"]["label"] == "Personal skills"
     assert sections["home"]["skills_dir"] == str(normal_home / "skills")
     assert [skill["name"] for skill in sections["home"]["skills"]] == ["normal-skill"]
-    assert sections["voice_coder"]["label"] == "Openbase Codex skills"
-    assert sections["voice_coder"]["skills_dir"] == str(openbase_home / "skills")
-    assert [skill["name"] for skill in sections["voice_coder"]["skills"]] == [
+    assert sections["openbase_codex"]["label"] == "Openbase Codex skills"
+    assert sections["openbase_codex"]["skills_dir"] == str(openbase_home / "skills")
+    assert [skill["name"] for skill in sections["openbase_codex"]["skills"]] == [
         "openbase-skill"
     ]
-    assert sections["claude"]["label"] == "Openbase Claude skills"
-    assert sections["claude"]["skills_dir"] == str(claude_home / "skills")
-    assert [skill["name"] for skill in sections["claude"]["skills"]] == ["claude-skill"]
+    assert sections["openbase_claude"]["label"] == "Openbase Claude skills"
+    assert sections["openbase_claude"]["skills_dir"] == str(claude_home / "skills")
+    assert [skill["name"] for skill in sections["openbase_claude"]["skills"]] == [
+        "claude-skill"
+    ]
 
 
 def test_skills_symlink_links_normal_skill_to_openbase_codex(
@@ -92,7 +100,7 @@ def test_skills_symlink_links_normal_skill_to_openbase_codex(
             {
                 "name": "shared-skill",
                 "source_scope": "home",
-                "target_scope": "voice_coder",
+                "target_scope": "openbase_codex",
             },
         )
     )
@@ -123,7 +131,7 @@ def test_skills_symlink_links_normal_skill_to_openbase_claude(
             {
                 "name": "shared-skill",
                 "source_scope": "home",
-                "target_scope": "claude",
+                "target_scope": "openbase_claude",
             },
         )
     )
@@ -131,7 +139,7 @@ def test_skills_symlink_links_normal_skill_to_openbase_claude(
     target_dir = claude_home / "skills" / "shared-skill"
     assert response.status_code == 201
     assert response.data["created"] is True
-    assert response.data["target_scope"] == "claude"
+    assert response.data["target_scope"] == "openbase_claude"
     assert target_dir.is_symlink()
     assert target_dir.resolve() == source_dir.resolve()
 
@@ -155,7 +163,7 @@ def test_skills_symlink_returns_ok_when_link_already_exists(
             {
                 "name": "shared-skill",
                 "source_scope": "home",
-                "target_scope": "voice_coder",
+                "target_scope": "openbase_codex",
             },
         )
     )
@@ -179,7 +187,7 @@ def test_skills_symlink_rejects_existing_non_link_target(tmp_path: Path, monkeyp
             {
                 "name": "shared-skill",
                 "source_scope": "home",
-                "target_scope": "voice_coder",
+                "target_scope": "openbase_codex",
             },
         )
     )
@@ -203,10 +211,9 @@ def test_skills_auto_link_setting_defaults_disabled(tmp_path: Path, monkeypatch)
 
     assert response.status_code == 200
     assert (
-        response.data["auto_link_normal_codex_skills"]["auto_link_normal_codex_skills"]
-        is False
+        response.data["auto_link_personal_skills"]["auto_link_personal_skills"] is False
     )
-    assert response.data["auto_link_normal_codex_skills_sync"] is None
+    assert response.data["auto_link_personal_skills_sync"] is None
     assert not (openbase_home / "skills" / "shared-skill").exists()
 
 
@@ -225,22 +232,21 @@ def test_skills_auto_link_setting_enables_and_links_normal_skills(
     response = views.skills_auto_link_settings(
         _request(
             "patch",
-            "/api/skills/auto-link-normal-codex/",
-            {"auto_link_normal_codex_skills": True},
+            "/api/skills/auto-link-personal/",
+            {"auto_link_personal_skills": True},
         )
     )
 
     target_dir = openbase_home / "skills" / "shared-skill"
     assert response.status_code == 200
-    assert response.data["auto_link_normal_codex_skills"] is True
-    assert response.data["sync"]["created"] == 1
+    assert response.data["auto_link_personal_skills"] is True
+    # One link per target scope (openbase codex home + claude config dir).
+    assert response.data["sync"]["created"] == 2
     assert target_dir.is_symlink()
     assert target_dir.resolve() == source_dir.resolve()
 
     list_response = views.skills_list(_request("get", "/api/skills/"))
-    assert (
-        list_response.data["auto_link_normal_codex_skills_sync"]["already_linked"] == 1
-    )
+    assert list_response.data["auto_link_personal_skills_sync"]["already_linked"] == 2
 
 
 def test_skills_auto_link_reports_conflict_without_overwriting(
@@ -259,8 +265,8 @@ def test_skills_auto_link_reports_conflict_without_overwriting(
     response = views.skills_auto_link_settings(
         _request(
             "patch",
-            "/api/skills/auto-link-normal-codex/",
-            {"auto_link_normal_codex_skills": True},
+            "/api/skills/auto-link-personal/",
+            {"auto_link_personal_skills": True},
         )
     )
 
@@ -286,7 +292,7 @@ def test_skill_delete_unlinks_symlink_without_deleting_source(
 
     request = _request(
         "delete",
-        "/api/skills/shared-skill/?scope=voice_coder",
+        "/api/skills/shared-skill/?scope=openbase_codex",
     )
     response = views.skill_detail(request, "shared-skill")
 
@@ -316,7 +322,7 @@ def test_skills_symlink_preserves_existing_source_symlink_chain(
             {
                 "name": "shared-skill",
                 "source_scope": "home",
-                "target_scope": "voice_coder",
+                "target_scope": "openbase_codex",
             },
         )
     )
@@ -396,9 +402,9 @@ def test_printing_press_catalog_filters_and_reports_install_status(
     assert [entry["name"] for entry in response.data["entries"]] == ["demo"]
     assert response.data["entries"][0]["skill_name"] == "pp-demo"
     assert response.data["entries"][0]["installed_targets"] == {
-        "claude": False,
+        "openbase_claude": False,
         "home": True,
-        "voice_coder": False,
+        "openbase_codex": False,
     }
     assert response.data["entries"][0]["mcp"]["auth_type"] == "api_key"
 
@@ -423,7 +429,7 @@ def test_printing_press_install_writes_skill_to_selected_targets(
         _request(
             "post",
             "/api/skills/printing-press/install/",
-            {"name": "demo", "targets": ["home", "claude"]},
+            {"name": "demo", "targets": ["home", "openbase_claude"]},
         )
     )
 

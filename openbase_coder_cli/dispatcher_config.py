@@ -6,6 +6,13 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from openbase_coder_cli.backend_config import (
+    CLAUDE_CODE_BACKEND,
+    CODEX_BACKEND,
+    CODING_BACKEND_ENV_KEY,
+    OPENBASE_CLOUD_BACKEND,
+    normalize_backend,
+)
 from openbase_coder_cli.paths import CODEX_DISPATCHER_CONFIG_PATH, DEFAULT_ENV_FILE_PATH
 from openbase_coder_cli.stt_providers import (
     DEFAULT_STT_PROVIDER_ID,
@@ -29,15 +36,10 @@ SUPER_AGENTS_REASONING_EFFORT_KEY = "super_agents_reasoning_effort"
 CODEX_SERVICE_TIER_KEY = "codex_service_tier"
 CODEX_SERVICE_TIERS = {"fast", "standard"}
 DEFAULT_CODEX_SERVICE_TIER = "standard"
-AUTO_LINK_NORMAL_CODEX_SKILLS_KEY = "auto_link_normal_codex_skills"
+AUTO_LINK_PERSONAL_SKILLS_KEY = "auto_link_personal_skills"
 BACKEND_MODELS_KEY = "backend_models"
 DISPATCHER_MODEL_ROLE = "dispatcher"
 SUPER_AGENTS_MODEL_ROLE = "super_agents"
-CODING_BACKEND_ENV_KEY = "OPENBASE_CODING_BACKEND"
-LEGACY_CODEX_BACKEND_ENV_KEY = "OPENBASE_CODEX_BACKEND"
-CODEX_BACKEND = "codex"
-OPENBASE_CLOUD_BACKEND = "openbase_cloud"
-CLAUDE_CODE_BACKEND = "claude_code"
 CLAUDE_CODE_MODEL_OPTIONS = (
     {
         "id": "fable",
@@ -63,27 +65,7 @@ CLAUDE_CODE_MODEL_OPTIONS = (
 BACKEND_MODEL_OPTIONS = {
     CLAUDE_CODE_BACKEND: CLAUDE_CODE_MODEL_OPTIONS,
 }
-CLAUDE_CODE_MODEL_ALIASES = {
-    option["id"] for option in CLAUDE_CODE_MODEL_OPTIONS
-}
-BACKEND_ALIASES = {
-    "": CODEX_BACKEND,
-    "openai": CODEX_BACKEND,
-    "codex": CODEX_BACKEND,
-    "openbase": OPENBASE_CLOUD_BACKEND,
-    "openbase-cloud": OPENBASE_CLOUD_BACKEND,
-    "openbase_cloud": OPENBASE_CLOUD_BACKEND,
-    "cloud": OPENBASE_CLOUD_BACKEND,
-    "claude": CLAUDE_CODE_BACKEND,
-    "claude-code": CLAUDE_CODE_BACKEND,
-    "claude_code": CLAUDE_CODE_BACKEND,
-    "claude-agent": CLAUDE_CODE_BACKEND,
-    "claude-agent-sdk": CLAUDE_CODE_BACKEND,
-    "claude_agent_sdk": CLAUDE_CODE_BACKEND,
-    "claude-sdk": CLAUDE_CODE_BACKEND,
-    "claude-tui": CLAUDE_CODE_BACKEND,
-    "claude-code-tui": CLAUDE_CODE_BACKEND,
-}
+CLAUDE_CODE_MODEL_ALIASES = {option["id"] for option in CLAUDE_CODE_MODEL_OPTIONS}
 TTS_PROVIDER_KEY = "tts_provider"
 STT_PROVIDER_KEY = "stt_provider"
 DISPATCHER_VOICE_ID_KEY = "dispatcher_voice_id"
@@ -151,15 +133,15 @@ def set_codex_service_tier(value: str, path: Path | None = None) -> Path:
     return config_path
 
 
-def auto_link_normal_codex_skills(path: Path | None = None) -> bool:
-    return read_dispatcher_config(path).get(AUTO_LINK_NORMAL_CODEX_SKILLS_KEY) is True
+def auto_link_personal_skills(path: Path | None = None) -> bool:
+    return read_dispatcher_config(path).get(AUTO_LINK_PERSONAL_SKILLS_KEY) is True
 
 
-def set_auto_link_normal_codex_skills(enabled: bool, path: Path | None = None) -> Path:
+def set_auto_link_personal_skills(enabled: bool, path: Path | None = None) -> Path:
     config_path = path or CODEX_DISPATCHER_CONFIG_PATH
     payload = {
         **read_dispatcher_config(config_path),
-        AUTO_LINK_NORMAL_CODEX_SKILLS_KEY: bool(enabled),
+        AUTO_LINK_PERSONAL_SKILLS_KEY: bool(enabled),
     }
     _write_dispatcher_config(payload, config_path)
     return config_path
@@ -401,15 +383,16 @@ def _optional_str(value: Any) -> str | None:
 def _configured_backend_from_environment() -> str:
     return (
         os.getenv(CODING_BACKEND_ENV_KEY)
-        or os.getenv(LEGACY_CODEX_BACKEND_ENV_KEY)
         or _env_file_values(DEFAULT_ENV_FILE_PATH).get(CODING_BACKEND_ENV_KEY)
-        or _env_file_values(DEFAULT_ENV_FILE_PATH).get(LEGACY_CODEX_BACKEND_ENV_KEY)
         or CODEX_BACKEND
     )
 
 
 def _normalize_backend(value: str | None) -> str:
-    return BACKEND_ALIASES.get((value or "").strip().lower(), value or CODEX_BACKEND)
+    try:
+        return normalize_backend(value)
+    except ValueError:
+        return CODEX_BACKEND
 
 
 def _execution_backend(backend: str) -> str:

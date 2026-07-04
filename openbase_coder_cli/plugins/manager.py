@@ -15,6 +15,7 @@ from openbase_coder_cli.services.restart import (
 from .console import sync_console_integration
 from .install import install_github_pinned, install_local_editable, uninstall_package
 from .models import PluginRecord, PluginRegistry
+from .site import rebuild_plugin_site, use_plugin_site
 from .skills import remove_plugin_skills, sync_plugin_skills
 from .sources import inspect_source, resolve_source
 from .spec import load_plugin_spec, normalize_capabilities, normalize_plugin_header
@@ -48,10 +49,6 @@ def _restart_services_if_installed() -> None:
     )
 
 
-def _standalone_mode() -> bool:
-    return InstallationConfig.exists() and InstallationConfig.load().standalone
-
-
 def _workspace_path_or_none() -> str | None:
     if not InstallationConfig.exists():
         return None
@@ -69,7 +66,6 @@ def _find_bootstrapper_collisions(
     existing_bootstrapper_names: dict[str, str] = {}
     existing_console_keys: dict[str, str] = {}
     existing_console_routes: dict[str, str] = {}
-    existing_view_stacks: dict[str, str] = {}
 
     for plugin in registry.plugins:
         if ignore_plugin_id and plugin.plugin_id == ignore_plugin_id:
@@ -79,8 +75,6 @@ def _find_bootstrapper_collisions(
         for page in plugin.capabilities.console_pages:
             existing_console_keys[page.key] = plugin.plugin_id
             existing_console_routes[page.route] = plugin.plugin_id
-        for view in plugin.capabilities.project_views:
-            existing_view_stacks[view.stack] = plugin.plugin_id
 
     for bootstrapper in candidate.capabilities.bootstrappers:
         owner = existing_bootstrapper_names.get(bootstrapper.name)
@@ -103,13 +97,6 @@ def _find_bootstrapper_collisions(
         if page.route in _BUILTIN_CONSOLE_ROUTES:
             collisions.append(
                 f"console page route '{page.route}' conflicts with built-in console route"
-            )
-
-    for view in candidate.capabilities.project_views:
-        owner = existing_view_stacks.get(view.stack)
-        if owner:
-            collisions.append(
-                f"project view stack '{view.stack}' already provided by {owner}"
             )
 
     return collisions
@@ -182,26 +169,12 @@ def add_plugin(source: str, ref: str | None) -> PluginRecord:
         joined = "\n".join(f"- {item}" for item in collisions)
         raise click.ClickException(f"Plugin install blocked by collisions:\n{joined}")
 
-    if _standalone_mode():
-        component_pages = [
-            page.key
-            for page in record.capabilities.console_pages
-            if page.render == "component"
-        ]
-        if component_pages:
-            uninstall_package(record.package_name)
-            joined = ", ".join(component_pages)
-            raise click.ClickException(
-                "Standalone installs support iframe console pages only. "
-                f"Plugin '{record.plugin_id}' declares legacy component pages: {joined}"
-            )
-
     registry.plugins.append(record)
     save_registry(registry)
     write_requirements_file(registry)
 
     sync_plugin_skills(record)
-    sync_console_integration(registry, _workspace_path_or_none())
+    sync_console_integration(registry)
     _restart_services_if_installed()
 
     return record
@@ -220,10 +193,14 @@ def remove_plugin(plugin_id: str) -> None:
     write_requirements_file(registry)
 
     uninstall_package(plugin.package_name)
+    if use_plugin_site():
+        rebuild_plugin_site(
+            [item.requirement for item in registry.plugins]
+        )
     remove_plugin_skills(plugin_id)
     remove_plugin_source(plugin)
 
-    sync_console_integration(registry, _workspace_path_or_none())
+    sync_console_integration(registry)
     _restart_services_if_installed()
 
 
@@ -261,22 +238,12 @@ def update_plugin(plugin_id: str | None, ref: str | None) -> list[PluginRecord]:
                 f"Plugin update blocked by collisions:\n{joined}"
             )
 
-        if _standalone_mode():
-            component_pages = [
-                page.key
-                for page in record.capabilities.console_pages
-                if page.render == "component"
-            ]
-            if component_pages:
-                uninstall_package(record.package_name)
-                joined = ", ".join(component_pages)
-                raise click.ClickException(
-                    "Standalone installs support iframe console pages only. "
-                    f"Plugin '{record.plugin_id}' declares legacy component pages: {joined}"
-                )
-
         if current.package_name != record.package_name:
             uninstall_package(current.package_name)
+            if use_plugin_site():
+                rebuild_plugin_site(
+                    [item.requirement for item in [*next_plugins, record]]
+                )
         next_plugins.append(record)
         updated.append(record)
 
@@ -289,7 +256,7 @@ def update_plugin(plugin_id: str | None, ref: str | None) -> list[PluginRecord]:
     for plugin in updated:
         sync_plugin_skills(plugin)
 
-    sync_console_integration(new_registry, _workspace_path_or_none())
+    sync_console_integration(new_registry)
     _restart_services_if_installed()
 
     return updated

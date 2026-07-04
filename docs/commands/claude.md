@@ -15,6 +15,11 @@ openbase-coder claude sync-state
 Claude Code login because Claude Code stores usable OAuth credentials in a
 config-dir-scoped credential store.
 
-`sync-state` copies normal Claude Code state from `~/.claude.json` into
-`~/.openbase/claude_config.json` while preserving Openbase MCP entries. It does
-not log Claude Code in; run `openbase-coder claude login` for that.
+`sync-state` merges normal Claude Code state from `~/.claude.json` into
+`~/.openbase/claude_config/.claude.json` — the file Claude Code reads under
+Openbase's `CLAUDE_CONFIG_DIR` — preserving existing Openbase values and
+unioning `mcpServers` entries. On macOS, when the Openbase config dir is not
+already logged in, it also copies the normal "Claude Code-credentials"
+keychain item to Openbase's config-dir-specific keychain service so managed
+Claude sessions inherit your normal Claude login without a second browser
+OAuth. If no login can be bridged, run `openbase-coder claude login`.

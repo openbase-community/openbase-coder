@@ -54,7 +54,6 @@ def test_backend_model_uses_env_file_backend(tmp_path: Path, monkeypatch) -> Non
         encoding="utf-8",
     )
     monkeypatch.delenv("OPENBASE_CODING_BACKEND", raising=False)
-    monkeypatch.delenv("OPENBASE_CODEX_BACKEND", raising=False)
     monkeypatch.setattr(dispatcher_config, "DEFAULT_ENV_FILE_PATH", env_file)
 
     assert dispatcher_config.super_agents_model(config_path) == "gpt-5.5"

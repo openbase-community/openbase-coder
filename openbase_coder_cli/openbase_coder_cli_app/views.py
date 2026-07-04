@@ -94,6 +94,7 @@ from openbase_coder_cli.openbase_coder_cli_app.service_tier_settings import (
 )
 from openbase_coder_cli.openbase_coder_cli_app.services_views import (
     agents_generation_settings,
+    dangerous_confirmation_settings,
     launchctl_ignored_settings,
     launchctl_service_action,
     launchctl_services_list,
@@ -286,6 +287,7 @@ __all__ = [
     "brain_readiness",
     "cartesia_voice_settings",
     "coding_backend_settings",
+    "dangerous_confirmation_settings",
     "devices_list",
     "dispatcher_voice_settings",
     "dispatcher_voice",

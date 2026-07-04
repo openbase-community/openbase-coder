@@ -19,8 +19,7 @@ openbase-coder backend use codex
 The command persists the selection in `~/.openbase/.env` as
 `OPENBASE_CODING_BACKEND=<backend>`, the same setting written by
 `openbase-coder setup --backend ...` and read by the local console.
-Older installs that still set `OPENBASE_CODEX_BACKEND` are supported as a
-fallback.
+
 
 The backend setting controls `super-agents-mcp` coding sessions. Codex and
 Openbase Cloud use the local `codex-app-server` service; Claude Code bypasses

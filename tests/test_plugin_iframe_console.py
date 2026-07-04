@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from openbase_coder_cli.plugins.console import sync_console_integration
-from openbase_coder_cli.plugins.manager import add_plugin
 from openbase_coder_cli.plugins.models import (
     ConsolePageSpec,
     PluginCapabilities,
@@ -32,9 +31,84 @@ def test_normalize_capabilities_accepts_iframe_console_page():
     )
 
     page = capabilities.console_pages[0]
-    assert page.render == "iframe"
     assert page.asset_dir == "web"
     assert page.route == "/dashboard/plugins/example/dashboard"
+
+
+def test_normalize_capabilities_rejects_component_console_pages():
+    with pytest.raises(Exception, match="only iframe console pages"):
+        normalize_capabilities(
+            {
+                "console_pages": [
+                    {
+                        "key": "page",
+                        "render": "component",
+                        "import_module": "legacy/Page",
+                    }
+                ]
+            },
+            "legacy",
+        )
+
+
+def test_normalize_capabilities_requires_asset_dir():
+    with pytest.raises(Exception, match="asset_dir"):
+        normalize_capabilities(
+            {"console_pages": [{"key": "page"}]},
+            "example",
+        )
+
+
+def test_normalize_capabilities_rejects_project_views():
+    with pytest.raises(Exception, match="project_views are no longer supported"):
+        normalize_capabilities(
+            {"project_views": [{"stack": "nextjs", "import_module": "legacy/View"}]},
+            "legacy",
+        )
+
+
+def test_registry_load_tolerates_legacy_component_fields(tmp_path: Path):
+    legacy_payload = {
+        "plugins": [
+            {
+                "plugin_id": "legacy",
+                "display_name": "Legacy",
+                "version": "0.1.0",
+                "package_name": "legacy",
+                "source_type": "local",
+                "source": "/tmp/legacy",
+                "source_path": "/tmp/legacy",
+                "entrypoint_name": "legacy",
+                "entrypoint_value": "legacy.spec:get_plugin_spec",
+                "requirement": "-e /tmp/legacy",
+                "capabilities": {
+                    "console_pages": [
+                        {
+                            "key": "page",
+                            "title": "Page",
+                            "route": "/dashboard/plugins/legacy/page",
+                            "render": "component",
+                            "import_module": "legacy/Page",
+                            "export": "default",
+                            "sidebar": True,
+                            "asset_dir": "",
+                            "entrypoint": "index.html",
+                        }
+                    ],
+                    "project_views": [
+                        {"stack": "nextjs", "import_module": "legacy/View"}
+                    ],
+                    "console_npm_packages": ["some-pkg"],
+                },
+            }
+        ]
+    }
+
+    registry = PluginRegistry.from_dict(legacy_payload)
+
+    page = registry.plugins[0].capabilities.console_pages[0]
+    assert page.key == "page"
+    assert not hasattr(page, "import_module")
 
 
 def test_sync_console_integration_copies_iframe_assets(monkeypatch, tmp_path: Path):
@@ -72,7 +146,6 @@ def test_sync_console_integration_copies_iframe_assets(monkeypatch, tmp_path: Pa
                             key="dashboard",
                             title="Dashboard",
                             route="/dashboard/plugins/example/dashboard",
-                            render="iframe",
                             asset_dir="web",
                         )
                     ]
@@ -81,53 +154,12 @@ def test_sync_console_integration_copies_iframe_assets(monkeypatch, tmp_path: Pa
         ]
     )
 
-    sync_console_integration(registry, workspace_path=None)
+    sync_console_integration(registry)
 
     copied = assets_root / "example" / "dashboard" / "index.html"
     assert copied.read_text(encoding="utf-8") == "<h1>Plugin</h1>"
     payload = json.loads(registry_path.read_text(encoding="utf-8"))
     page = payload["pages"][0]["pages"][0]
-    assert page["render"] == "iframe"
     assert page["iframe_url"] == (
         "/openbase-plugin-assets/example/dashboard/index.html"
     )
-
-
-def test_standalone_mode_rejects_legacy_component_console_pages(monkeypatch):
-    record = PluginRecord(
-        plugin_id="legacy",
-        display_name="Legacy",
-        version="0.1.0",
-        package_name="legacy",
-        source_type="local",
-        source="/tmp/legacy",
-        source_path="/tmp/legacy",
-        entrypoint_name="legacy",
-        entrypoint_value="legacy.spec:get_plugin_spec",
-        requirement="-e /tmp/legacy",
-        capabilities=PluginCapabilities(
-            console_pages=[
-                ConsolePageSpec(
-                    key="page",
-                    title="Page",
-                    route="/dashboard/plugins/legacy/page",
-                    import_module="legacy/Page",
-                )
-            ]
-        ),
-    )
-    monkeypatch.setattr(
-        "openbase_coder_cli.plugins.manager.load_registry", lambda: PluginRegistry()
-    )
-    monkeypatch.setattr(
-        "openbase_coder_cli.plugins.manager._build_record", lambda **_kwargs: record
-    )
-    monkeypatch.setattr(
-        "openbase_coder_cli.plugins.manager._standalone_mode", lambda: True
-    )
-    monkeypatch.setattr(
-        "openbase_coder_cli.plugins.manager.uninstall_package", lambda _name: None
-    )
-
-    with pytest.raises(Exception, match="iframe console pages only"):
-        add_plugin("/tmp/legacy", ref=None)

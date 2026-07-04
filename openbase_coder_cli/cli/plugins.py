@@ -70,10 +70,8 @@ def show(plugin_id: str) -> None:
         "bootstrappers": [item.__dict__ for item in plugin.capabilities.bootstrappers],
         "stacks": [item.__dict__ for item in plugin.capabilities.stacks],
         "console_pages": [item.__dict__ for item in plugin.capabilities.console_pages],
-        "project_views": [item.__dict__ for item in plugin.capabilities.project_views],
         "skills": [item.__dict__ for item in plugin.capabilities.skills],
         "django_url_modules": list(plugin.capabilities.django_url_modules),
-        "console_npm_packages": list(plugin.capabilities.console_npm_packages),
     }
     click.echo()
     click.echo(json.dumps(caps, indent=2))

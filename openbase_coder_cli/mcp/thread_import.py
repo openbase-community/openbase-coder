@@ -8,7 +8,6 @@ import logging
 import shutil
 import sqlite3
 import subprocess
-import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,10 +20,12 @@ from openbase_coder_cli.paths import (
 )
 
 from .thread_sync_common import (
-    fingerprint_matches,
+    ledger_sync_decision,
+    path_stable,
     read_scoped_ledger,
     record_sync_conflict,
     record_synced_pair,
+    sync_cutoff_ms,
     write_scoped_ledger,
 )
 
@@ -34,6 +35,12 @@ SYNC_LEDGER_NAME = "codex-thread-sync-ledger.json"
 TERMINAL_EVENT_TYPES = {"task_complete", "turn_aborted"}
 DEFAULT_SUPER_AGENTS_STATE_PATH = Path.home() / ".super-agents" / "state.json"
 DEFAULT_SYNC_MAX_AGE_DAYS = 15
+FINGERPRINT_MATCH_KEYS = (
+    "rollout_sha256",
+    "rollout_size",
+    "updated_at_ms",
+    "updated_at",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -288,7 +295,7 @@ def sync_codex_threads_once(
     voice_rows = {
         row["id"]: row for row in _thread_rows(voice_db) if _string(row.get("id"))
     }
-    cutoff_ms = _sync_cutoff_ms(max_age_days)
+    cutoff_ms = sync_cutoff_ms(max_age_days)
 
     results: list[CodexThreadSyncResult] = []
     for thread_id in _thread_ids_by_updated_at(normal_rows, voice_rows):
@@ -443,20 +450,23 @@ def _sync_one_thread(
     if append_only_result is not None:
         return append_only_result
 
-    previous = ledger.get(thread_id)
-    if not isinstance(previous, dict):
-        _record_conflict(ledger, thread_id, normal_fp, voice_fp, "both_homes_changed")
-        return CodexThreadSyncResult(thread_id, "conflict", None, "both_homes_changed")
-    if previous.get("status") == "conflict":
-        _record_conflict(ledger, thread_id, normal_fp, voice_fp, "conflict_unresolved")
-        return CodexThreadSyncResult(thread_id, "conflict", None, "conflict_unresolved")
-
-    normal_changed = not _fingerprint_matches(previous.get("normal"), normal_fp)
-    voice_changed = not _fingerprint_matches(previous.get("voice"), voice_fp)
-    if normal_changed and voice_changed:
-        _record_conflict(ledger, thread_id, normal_fp, voice_fp, "both_homes_changed")
-        return CodexThreadSyncResult(thread_id, "conflict", None, "both_homes_changed")
-    if normal_changed:
+    decision = ledger_sync_decision(
+        ledger.get(thread_id),
+        left_key="normal",
+        right_key="voice",
+        left_fingerprint=normal_fp,
+        right_fingerprint=voice_fp,
+        fingerprint_keys=FINGERPRINT_MATCH_KEYS,
+    )
+    if decision in {"both_changed", "conflict_unresolved"}:
+        reason = (
+            "both_homes_changed"
+            if decision == "both_changed"
+            else "conflict_unresolved"
+        )
+        _record_conflict(ledger, thread_id, normal_fp, voice_fp, reason)
+        return CodexThreadSyncResult(thread_id, "conflict", None, reason)
+    if decision == "left_changed":
         if not _target_row_safe_for_overwrite(voice_row, voice_home, thread_id):
             return CodexThreadSyncResult(
                 thread_id, "skipped", "normal_to_voice", "target_active"
@@ -475,7 +485,7 @@ def _sync_one_thread(
             stability_delay_seconds=stability_delay_seconds,
             overwrite=True,
         )
-    if voice_changed:
+    if decision == "right_changed":
         if not _target_row_safe_for_overwrite(normal_row, normal_home, thread_id):
             return CodexThreadSyncResult(
                 thread_id, "skipped", "voice_to_normal", "target_active"
@@ -706,12 +716,6 @@ def _thread_ids_by_updated_at(
     return sorted(set(normal_rows) | set(voice_rows), key=updated_at, reverse=True)
 
 
-def _sync_cutoff_ms(max_age_days: int | None) -> int | None:
-    if max_age_days is None:
-        return None
-    return int((time.time() - max(max_age_days, 0) * 24 * 60 * 60) * 1000)
-
-
 def _thread_latest_updated_ms(
     *rows: dict[str, Any] | None,
 ) -> int:
@@ -739,7 +743,7 @@ def _thread_safe_for_sync(
     rollout = _source_rollout_path(row, home, thread_id)
     if rollout is None:
         return ThreadSyncSafety(False, "rollout_not_found")
-    if not _rollout_stable(rollout, stability_delay_seconds):
+    if not path_stable(rollout, stability_delay_seconds):
         return ThreadSyncSafety(False, "skipped_unstable")
     terminal = _rollout_terminal_event(rollout)
     if terminal is None:
@@ -762,14 +766,6 @@ def _target_row_safe_for_overwrite(
         and not _rollout_open_for_write(rollout)
         and _rollout_terminal_event(rollout) in TERMINAL_EVENT_TYPES
     )
-
-
-def _rollout_stable(path: Path, delay_seconds: float) -> bool:
-    before = path.stat()
-    if delay_seconds > 0:
-        time.sleep(delay_seconds)
-    after = path.stat()
-    return before.st_size == after.st_size and before.st_mtime_ns == after.st_mtime_ns
 
 
 def _rollout_terminal_event(path: Path) -> str | None:
@@ -856,14 +852,6 @@ def _fingerprint_from_rollout_path(
         "updated_at_ms": row.get("updated_at_ms") if row else None,
         "updated_at": row.get("updated_at") if row else None,
     }
-
-
-def _fingerprint_matches(value: Any, fingerprint: dict[str, Any]) -> bool:
-    return fingerprint_matches(
-        value,
-        fingerprint,
-        keys=("rollout_sha256", "rollout_size", "updated_at_ms", "updated_at"),
-    )
 
 
 def _record_synced_pair(

@@ -1,0 +1,358 @@
+"""Announcer speech queue that serializes announcements behind agent speech."""
+
+import asyncio
+import contextlib
+import logging
+import time
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+import av
+from livekit import rtc
+from livekit.agents import AgentSession
+
+from openbase_coder_cli.livekit_agent.config import (
+    ANNOUNCER_MAX_QUEUE_SIZE,
+    ANNOUNCER_SILENCE_GRACE_SECONDS,
+    ANNOUNCER_STATE_WAIT_TIMEOUT_SECONDS,
+    SUPPORTED_AUDIO_EXTENSIONS,
+)
+from openbase_coder_cli.livekit_agent.packets import (
+    AnnouncerAudioMessage,
+    AnnouncerMessage,
+    AnnouncerQueueItem,
+    QueuedAnnouncerItem,
+)
+from openbase_coder_cli.livekit_agent.speech_formatter import format_for_speech
+from openbase_coder_cli.livekit_agent.tts_selection import VoiceSelectingTTS
+
+logger = logging.getLogger(__name__)
+
+
+class AnnouncerSpeechQueue:
+    """Serializes non-Codex announcer speech behind normal agent speech."""
+
+    def __init__(
+        self,
+        *,
+        session: AgentSession,
+        announcer_tts: VoiceSelectingTTS,
+        max_queue_size: int = ANNOUNCER_MAX_QUEUE_SIZE,
+        silence_grace_seconds: float = ANNOUNCER_SILENCE_GRACE_SECONDS,
+    ) -> None:
+        self._session = session
+        self._announcer_tts = announcer_tts
+        self._queue: asyncio.Queue[QueuedAnnouncerItem | None] = asyncio.Queue(
+            maxsize=max_queue_size
+        )
+        self._silence_grace_seconds = max(0.0, silence_grace_seconds)
+        self._state_changed = asyncio.Event()
+        self._closed = False
+        self._worker_task: asyncio.Task[None] | None = None
+
+    def start(self) -> None:
+        if self._worker_task is None:
+            self._worker_task = asyncio.create_task(
+                self._run(),
+                name="openbase-announcer-speech-queue",
+            )
+
+    def enqueue(self, message: AnnouncerQueueItem) -> bool:
+        try:
+            self._queue.put_nowait(
+                QueuedAnnouncerItem(message=message, enqueued_at=time.monotonic())
+            )
+        except asyncio.QueueFull:
+            logger.warning(
+                "dispatch_timing stage=announcer_queue_full message_id=%s "
+                "queue_size=%d max_queue_size=%d",
+                message.message_id,
+                self._queue.qsize(),
+                self._queue.maxsize,
+            )
+            return False
+        text_len = len(message.text) if isinstance(message, AnnouncerMessage) else 0
+        logger.info(
+            "dispatch_timing stage=announcer_enqueued message_id=%s kind=%s "
+            "text_len=%d audio_path=%s voice_id=%s queue_size=%d",
+            message.message_id,
+            "text" if isinstance(message, AnnouncerMessage) else "audio_file",
+            text_len,
+            message.audio_path if isinstance(message, AnnouncerAudioMessage) else "",
+            message.voice_id if isinstance(message, AnnouncerMessage) else "",
+            self._queue.qsize(),
+        )
+        return True
+
+    def notify_state_changed(self, *_args) -> None:
+        self._state_changed.set()
+
+    async def close(self) -> None:
+        self._closed = True
+        self.notify_state_changed()
+        await self._queue.put(None)
+        if self._worker_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._worker_task
+        await self._announcer_tts.aclose()
+
+    async def _run(self) -> None:
+        while True:
+            queued_message = await self._queue.get()
+            if queued_message is None:
+                return
+            try:
+                await self._speak(
+                    queued_message.message,
+                    enqueued_at=queued_message.enqueued_at,
+                )
+            except Exception:
+                logger.warning(
+                    "Unable to play announcer message %s",
+                    queued_message.message.message_id,
+                    exc_info=True,
+                )
+
+    async def _speak(
+        self,
+        message: AnnouncerQueueItem,
+        *,
+        enqueued_at: float | None = None,
+    ) -> None:
+        if isinstance(message, AnnouncerAudioMessage):
+            await self._play_audio(message, enqueued_at=enqueued_at)
+            return
+
+        started = time.monotonic()
+        if enqueued_at is None:
+            enqueued_at = started
+        logger.info(
+            "dispatch_timing stage=announcer_playout_wait_start message_id=%s",
+            message.message_id,
+        )
+        if not await self._wait_until_both_silent(
+            message_id=message.message_id,
+            enqueued_at=enqueued_at,
+        ):
+            return
+
+        spoken_text = format_for_speech(message.text)
+        if not spoken_text:
+            spoken_text = "Technical output omitted, shown on screen."
+        logger.info(
+            "dispatch_timing stage=announcer_speech_formatted message_id=%s "
+            "original_len=%d spoken_len=%d",
+            message.message_id,
+            len(message.text),
+            len(spoken_text),
+        )
+
+        if not self._both_silent() and not await self._wait_until_both_silent(
+            message_id=message.message_id,
+            enqueued_at=enqueued_at,
+        ):
+            return
+
+        logger.info(
+            "dispatch_timing stage=announcer_say_start message_id=%s wait_ms=%d "
+            "queue_age_ms=%d voice_id=%s voice_name=%s text_len=%d",
+            message.message_id,
+            int((time.monotonic() - started) * 1000),
+            int((time.monotonic() - enqueued_at) * 1000),
+            self._announcer_tts.resolve_voice_id(message.voice_id),
+            self._announcer_tts.resolve_voice_name(message.voice_id) or "",
+            len(message.text),
+        )
+
+        handle = self._session.say(
+            spoken_text,
+            audio=self._announcer_audio(spoken_text, voice_id=message.voice_id),
+            allow_interruptions=False,
+            add_to_chat_ctx=False,
+        )
+        await handle.wait_for_playout()
+        logger.info(
+            "dispatch_timing stage=announcer_playout_end message_id=%s elapsed_ms=%d",
+            message.message_id,
+            int((time.monotonic() - started) * 1000),
+        )
+
+    async def _wait_until_both_silent(
+        self,
+        *,
+        message_id: str,
+        enqueued_at: float,
+    ) -> bool:
+        wait_logged = False
+        wait_started = time.monotonic()
+        while not self._closed:
+            current_speech = self._session.current_speech
+            has_current_speech = self._speech_active(current_speech)
+            user_state = str(getattr(self._session, "user_state", "") or "")
+            if not has_current_speech and user_state != "speaking":
+                await self._wait_for_quiet_grace_period()
+                current_speech = self._session.current_speech
+                has_current_speech = self._speech_active(current_speech)
+                user_state = str(getattr(self._session, "user_state", "") or "")
+                if not has_current_speech and user_state != "speaking":
+                    if wait_logged:
+                        logger.info(
+                            "dispatch_timing stage=announcer_silence_wait_end "
+                            "message_id=%s wait_ms=%d queue_age_ms=%d",
+                            message_id,
+                            int((time.monotonic() - wait_started) * 1000),
+                            int((time.monotonic() - enqueued_at) * 1000),
+                        )
+                    return True
+                continue
+
+            if not wait_logged:
+                wait_logged = True
+                logger.info(
+                    "dispatch_timing stage=announcer_silence_wait_start "
+                    "message_id=%s queue_size=%d user_state=%s agent_state=%s "
+                    "has_current_speech=%s queue_age_ms=%d",
+                    message_id,
+                    self._queue.qsize(),
+                    user_state,
+                    getattr(self._session, "agent_state", "") or "",
+                    has_current_speech,
+                    int((time.monotonic() - enqueued_at) * 1000),
+                )
+
+            if has_current_speech:
+                await current_speech.wait_for_playout()
+                continue
+
+            await self._wait_for_state_change_or_timeout(
+                ANNOUNCER_STATE_WAIT_TIMEOUT_SECONDS
+            )
+
+        return False
+
+    def _both_silent(self) -> bool:
+        return (
+            not self._speech_active(self._session.current_speech)
+            and str(getattr(self._session, "user_state", "") or "") != "speaking"
+        )
+
+    @staticmethod
+    def _speech_active(speech_handle) -> bool:
+        return speech_handle is not None and not speech_handle.done()
+
+    async def _wait_for_quiet_grace_period(self) -> None:
+        if self._silence_grace_seconds <= 0:
+            return
+        await self._wait_for_state_change_or_timeout(self._silence_grace_seconds)
+
+    async def _wait_for_state_change_or_timeout(self, timeout_seconds: float) -> None:
+        self._state_changed.clear()
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(self._state_changed.wait(), timeout_seconds)
+
+    async def _announcer_audio(
+        self,
+        text: str,
+        *,
+        voice_id: str | None,
+    ) -> AsyncIterator[rtc.AudioFrame]:
+        # Use streaming synthesis (WebSocket) instead of non-streaming
+        # synthesize() (HTTP POST to /tts/bytes) because the Openbase Cloud
+        # audio proxy only supports the WebSocket path.
+        resolved_voice_id = self._announcer_tts.resolve_voice_id(voice_id)
+        tts_stream = self._announcer_tts._tts_for_voice(resolved_voice_id).stream()
+        spoken_text = format_for_speech(text)
+        if not spoken_text:
+            spoken_text = "Technical output omitted, shown on screen."
+        tts_stream.push_text(spoken_text)
+        tts_stream.flush()
+        tts_stream.end_input()
+        try:
+            async for event in tts_stream:
+                yield event.frame
+        finally:
+            await tts_stream.aclose()
+
+    async def _play_audio(
+        self,
+        message: AnnouncerAudioMessage,
+        *,
+        enqueued_at: float | None = None,
+    ) -> None:
+        started = time.monotonic()
+        if enqueued_at is None:
+            enqueued_at = started
+        audio_path = Path(message.audio_path).expanduser()
+        if not audio_path.is_file():
+            logger.warning(
+                "Unable to play announcer audio %s: file not found",
+                message.message_id,
+            )
+            return
+        if audio_path.suffix.lower() not in SUPPORTED_AUDIO_EXTENSIONS:
+            logger.warning(
+                "Unable to play announcer audio %s: unsupported extension %s",
+                message.message_id,
+                audio_path.suffix.lower(),
+            )
+            return
+
+        logger.info(
+            "dispatch_timing stage=announcer_audio_playout_wait_start message_id=%s",
+            message.message_id,
+        )
+        if not await self._wait_until_both_silent(
+            message_id=message.message_id,
+            enqueued_at=enqueued_at,
+        ):
+            return
+        if not self._both_silent() and not await self._wait_until_both_silent(
+            message_id=message.message_id,
+            enqueued_at=enqueued_at,
+        ):
+            return
+
+        handle = self._session.say(
+            "",
+            audio=self._audio_file_frames(audio_path),
+            allow_interruptions=False,
+            add_to_chat_ctx=False,
+        )
+        await handle.wait_for_playout()
+        logger.info(
+            "dispatch_timing stage=announcer_audio_playout_end message_id=%s "
+            "elapsed_ms=%d audio_basename=%s",
+            message.message_id,
+            int((time.monotonic() - started) * 1000),
+            audio_path.name,
+        )
+
+    async def _audio_file_frames(self, path: Path) -> AsyncIterator[rtc.AudioFrame]:
+        for frame in _decode_audio_file(path):
+            yield frame
+
+
+def _decode_audio_file(path: Path) -> list[rtc.AudioFrame]:
+    frames: list[rtc.AudioFrame] = []
+    with av.open(str(path)) as container:
+        stream = next((candidate for candidate in container.streams.audio), None)
+        if stream is None:
+            raise ValueError(f"No audio stream found in {path.name}.")
+        resampler = av.AudioResampler(format="s16", layout="mono", rate=48000)
+        for packet in container.demux(stream):
+            for decoded in packet.decode():
+                for resampled in resampler.resample(decoded):
+                    frames.append(_av_frame_to_livekit_frame(resampled))
+        for resampled in resampler.resample(None):
+            frames.append(_av_frame_to_livekit_frame(resampled))
+    return frames
+
+
+def _av_frame_to_livekit_frame(frame) -> rtc.AudioFrame:
+    data = bytes(frame.planes[0])
+    return rtc.AudioFrame(
+        data=data,
+        sample_rate=frame.sample_rate,
+        num_channels=len(frame.layout.channels),
+        samples_per_channel=frame.samples,
+    )

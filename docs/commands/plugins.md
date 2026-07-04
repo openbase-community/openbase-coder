@@ -40,18 +40,26 @@ openbase-coder plugins add https://github.com/org/openbase-plugin --ref main
 - Cloned under `~/.openbase/plugins/sources/`
 - Installed pinned to resolved commit SHA
 
+## Where Plugin Packages Install
+
+In development installs, plugin Python packages install into the workspace CLI
+venv, which persists on its own.
+
+In standalone installs, the versioned runtime package is replaced wholesale on
+upgrade, so plugin packages install into the stable plugin site directory
+`~/.openbase/plugins/site` instead. Every Openbase Coder process adds that
+directory to `sys.path` at startup, so desktop package upgrades do not lose
+installed plugins.
+
 ## What Happens on Add/Update/Remove
 
 Mutating plugin commands will:
 
 1. Update plugin registry and requirements under `~/.openbase/plugins/`
 2. Sync plugin-declared Claude skills into `${CLAUDE_CONFIG_DIR:-~/.claude}/skills`
-3. Regenerate console plugin integration artifacts
+3. Copy each console page's `asset_dir` into `~/.openbase/plugins/console-assets/`
+   and regenerate the runtime console page registry
 4. Restart managed launchd services
-
-Standalone installs support plugin console pages as iframe-backed static assets.
-React component console pages still work in dev-workspace mode, where the
-workspace console can install plugin npm packages and rebuild from source.
 
 ## Plugin Declaration Model
 
@@ -66,36 +74,45 @@ The entry point returns a plugin spec dict containing declarations such as:
 
 - `bootstrappers`
 - `stacks`
-- `project_views`
 - `console_pages`
 - `skills`
 - `django_url_modules`
-- `console_npm_packages`
 
 ### Console pages
 
-For install-anywhere plugins, declare iframe console pages with static assets:
+Plugin console pages are **iframe-only**: a page declares a directory of
+prebuilt static assets, and the console renders its entrypoint in an iframe.
+This works identically in development and standalone installs, requires no
+console rebuild, and needs no Node/npm at install time.
 
 ```python
 {
     "console_pages": [
         {
-            "key": "dashboard",
-            "title": "Dashboard",
-            "asset_dir": "web",
-            "entrypoint": "index.html",
+            "key": "dashboard",          # required, unique per plugin
+            "title": "Dashboard",        # optional, defaults to key
+            "route": "/dashboard/plugins/<plugin>/<key>",  # optional default
+            "sidebar": True,             # optional, defaults to True
+            "asset_dir": "web",          # required: prebuilt static assets
+            "entrypoint": "index.html",  # optional, defaults to index.html
         }
     ]
 }
 ```
 
 The CLI copies `asset_dir` into `~/.openbase/plugins/console-assets/` and serves
-it under `/openbase-plugin-assets/<plugin>/<page>/`. The console adds the page to
-the sidebar from the runtime plugin registry without rebuilding.
+it under `/openbase-plugin-assets/<plugin>/<page>/`. The console and desktop
+apps discover pages at runtime via `/api/plugins/console-registry/` and add
+them to the sidebar without rebuilding.
 
-Development-mode React component pages can still use `import_module`, `export`,
-and `console_npm_packages`, but those pages require a workspace console rebuild
-and are rejected by standalone installs.
+Routes must start with `/dashboard`.
+
+### Removed capabilities
+
+React component console pages (`render: "component"`, `import_module`,
+`export`), `project_views`, and `console_npm_packages` are no longer
+supported. Plugins that declare them fail validation with clear errors;
+expose plugin UI as iframe `console_pages` instead.
 
 ## Collision Rules
 
@@ -103,5 +120,4 @@ Install/update will fail if a plugin conflicts with existing plugins on:
 
 - bootstrapper name
 - console page key
-- console page route
-- project view stack
+- console page route (including built-in console routes)

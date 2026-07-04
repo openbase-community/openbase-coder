@@ -17,13 +17,9 @@ from super_agents.app_server_client import (
     CodexAppServerClient,
     extract_notification_thread_id,
     extract_notification_turn_id,
-    extract_thread_cwd,
-    extract_thread_id,
-    extract_thread_name,
     extract_threads,
     extract_turn_id,
     find_latest_turn,
-    is_permission_request,
     login_shell_config_override,
     shared_permission_requests,
     write_shared_permission_decision,
@@ -44,14 +40,26 @@ from openbase_coder_cli.paths import CODEX_SUPER_AGENT_INSTRUCTIONS_PATH
 from .models import ThreadInfo as SessionInfo
 from .models import ThreadStatus as SessionStatus
 from .models import TurnInfo as RunInfo
+from .thread_payloads import (
+    _approval_request_payload,
+    _datetime_to_iso,
+    _merge_tracked_turn_reasoning,
+    _merge_tracked_turn_summaries,
+    _next_cursor,
+    _normalize_backend_thread_payload,
+    _optional_turn_string,
+    _session_from_thread,
+    _session_sort_key,
+    _thread_history_limit,
+    _thread_payload,
+    _undelivered_suffix,
+)
 
 logger = logging.getLogger(__name__)
 
 SUPER_AGENT_INSTRUCTIONS_PATH_ENV = "CODEX_SUPER_AGENT_INSTRUCTIONS_PATH"
 SUPER_AGENT_INSTRUCTIONS_TEXT_ENV = "CODEX_SUPER_AGENT_INSTRUCTIONS"
 _USE_SUPER_AGENT_INSTRUCTIONS = object()
-THREAD_HISTORY_LIMIT_ENV = "OPENBASE_CODER_THREAD_HISTORY_LIMIT"
-DEFAULT_THREAD_HISTORY_LIMIT = 25
 
 
 @dataclass(frozen=True)
@@ -172,41 +180,6 @@ def load_super_agent_developer_instructions(
     return text or None
 
 
-def _timestamp_to_datetime(value: int | float | str | None) -> datetime:
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, tz=UTC)
-    if isinstance(value, str) and value:
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            pass
-    return datetime.now(UTC)
-
-
-def _datetime_to_iso(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return (
-        value.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-    )
-
-
-def _thread_history_limit(env: dict[str, str] | None = None) -> int:
-    raw = (env or os.environ).get(THREAD_HISTORY_LIMIT_ENV)
-    if raw is None or raw.strip() == "":
-        return DEFAULT_THREAD_HISTORY_LIMIT
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        logger.warning(
-            "Ignoring invalid %s=%r; using default limit %s",
-            THREAD_HISTORY_LIMIT_ENV,
-            raw,
-            DEFAULT_THREAD_HISTORY_LIMIT,
-        )
-        return DEFAULT_THREAD_HISTORY_LIMIT
-
-
 def _is_payload_too_large_error(exc: Exception) -> bool:
     message = str(exc).lower()
     return (
@@ -231,230 +204,6 @@ def _runtime_error_message(exc: RuntimeError) -> str:
 def _is_thread_unavailable_error(exc: RuntimeError) -> bool:
     message = _runtime_error_message(exc).lower()
     return "not found" in message or "invalid thread id" in message
-
-
-RUNNING_STATUSES = {"active", "inProgress", "in_progress", "running", "pending"}
-COMPLETED_STATUSES = {"completed", "success"}
-ERROR_STATUSES = {"failed", "error", "cancelled", "canceled", "interrupted"}
-THREAD_IDLE_STATUSES = {"notLoaded", "not_loaded", "idle", "unknown"}
-WAITING_FLAGS = {"waitingOnUserInput", "waiting_on_user_input"}
-WAITING_STATUSES = {"waiting", "waitingOnUserInput", "waiting_on_user_input"}
-
-
-def _status_type(value: Any) -> str:
-    if isinstance(value, dict):
-        candidate = value.get("type") or value.get("status")
-        return candidate if isinstance(candidate, str) else ""
-    return value if isinstance(value, str) else ""
-
-
-def _is_waiting_status(status: Any) -> bool:
-    if _status_type(status) in WAITING_STATUSES:
-        return True
-    if not isinstance(status, dict):
-        return False
-    flags = status.get("activeFlags")
-    if not isinstance(flags, list):
-        return False
-    return any(flag in WAITING_FLAGS for flag in flags if isinstance(flag, str))
-
-
-def _is_running_status(status: Any) -> bool:
-    return _status_type(status) in RUNNING_STATUSES and not _is_waiting_status(status)
-
-
-def _thread_status(status: Any) -> SessionStatus:
-    if _is_waiting_status(status):
-        return SessionStatus.waiting
-    status_type = _status_type(status)
-    if status_type in ERROR_STATUSES:
-        return SessionStatus.error
-    if status_type in RUNNING_STATUSES:
-        return SessionStatus.running
-    if status_type in COMPLETED_STATUSES:
-        return SessionStatus.completed
-    if status_type in THREAD_IDLE_STATUSES:
-        return SessionStatus.idle
-    return SessionStatus.idle
-
-
-def _turn_status(status: Any, error: Any) -> SessionStatus:
-    if error not in (None, ""):
-        return SessionStatus.error
-    if _is_waiting_status(status):
-        return SessionStatus.waiting
-    status_type = _status_type(status)
-    if status_type in COMPLETED_STATUSES:
-        return SessionStatus.completed
-    if status_type in RUNNING_STATUSES:
-        return SessionStatus.running
-    if status_type in ERROR_STATUSES:
-        return SessionStatus.error
-    return SessionStatus.error
-
-
-def _turn_sort_key(turn: dict[str, Any]) -> int:
-    for key in ("completedAt", "finishedAt", "updatedAt", "startedAt", "createdAt"):
-        value = turn.get(key)
-        if isinstance(value, (int, float)):
-            return int(value)
-        if isinstance(value, str) and value:
-            try:
-                return int(
-                    datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-                    * 1000
-                )
-            except ValueError:
-                pass
-    return 0
-
-
-def _extract_user_message(turn: dict[str, Any]) -> str:
-    text_parts: list[str] = []
-    for item in turn.get("items", []):
-        if item.get("type") != "userMessage":
-            continue
-        for content in item.get("content", []):
-            if content.get("type") == "text":
-                text = content.get("text", "").strip()
-                if text:
-                    text_parts.append(text)
-    return "\n\n".join(text_parts) or _optional_turn_string(
-        turn,
-        "prompt",
-        "promptPreview",
-    ) or ""
-
-
-def _extract_agent_output(turn: dict[str, Any]) -> str:
-    final_parts: list[str] = []
-    fallback_parts: list[str] = []
-    for item in turn.get("items", []):
-        if item.get("type") != "agentMessage":
-            continue
-        text = item.get("text", "").strip()
-        if not text:
-            continue
-        fallback_parts.append(text)
-        phase = item.get("phase")
-        if isinstance(phase, str) and phase.startswith("final"):
-            final_parts.append(text)
-    return "\n\n".join(final_parts or fallback_parts) or _optional_turn_string(
-        turn,
-        "lastUsefulMessage",
-        "lastObservedState",
-    ) or ""
-
-
-def _undelivered_suffix(delivered_text: str, current_text: str) -> str:
-    if not current_text:
-        return ""
-    if not delivered_text:
-        return current_text
-    if current_text.startswith(delivered_text):
-        return current_text[len(delivered_text) :]
-    return current_text
-
-
-def _optional_thread_string(thread: dict[str, Any], *keys: str) -> str | None:
-    for key in keys:
-        value = thread.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def _optional_turn_string(turn: dict[str, Any], *keys: str) -> str | None:
-    for key in keys:
-        value = turn.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def _request_json(request: Any) -> dict[str, Any]:
-    to_json = getattr(request, "to_json", None)
-    if callable(to_json):
-        value = to_json()
-        if isinstance(value, dict):
-            return value
-    if isinstance(request, dict):
-        return request
-    return {}
-
-
-def _approval_request_payload(request: Any) -> dict[str, Any]:
-    raw = _request_json(request)
-    params = raw.get("params") if isinstance(raw.get("params"), dict) else {}
-    method = raw.get("method")
-    if isinstance(method, str) and not is_permission_request(method):
-        raise ValueError(f"Request {raw.get('id')} is not an approval request.")
-    return {
-        "id": raw.get("id"),
-        "method": method,
-        "params": params,
-        "received_at": raw.get("receivedAt") or raw.get("received_at"),
-        "thread_id": params.get("threadId") or params.get("thread_id"),
-        "turn_id": params.get("turnId") or params.get("turn_id"),
-    }
-
-
-def _thread_payload(result: dict[str, Any]) -> dict[str, Any] | None:
-    thread = result.get("thread") if isinstance(result.get("thread"), dict) else result
-    return thread if isinstance(thread, dict) else None
-
-
-def _normalize_backend_thread_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    session = payload.get("session") if isinstance(payload.get("session"), dict) else {}
-    normalized = {**session, **payload}
-    if "threadId" not in normalized and isinstance(normalized.get("id"), str):
-        normalized["threadId"] = normalized["id"]
-    return normalized
-
-
-def _next_cursor(result: dict[str, Any]) -> str | None:
-    value = result.get("nextCursor") or result.get("next_cursor")
-    return value if isinstance(value, str) and value else None
-
-
-def _is_backend_thread_payload(thread: dict[str, Any]) -> bool:
-    return _optional_thread_string(thread, "backend") is not None
-
-
-def _run_from_turn(
-    turn: dict[str, Any], *, raw_status: SessionStatus | None = None
-) -> RunInfo:
-    turn_id = extract_turn_id(turn)
-    if not turn_id:
-        raise ValueError("Turn payload is missing an id")
-    started_at = _timestamp_to_datetime(
-        turn.get("startedAt") or turn.get("createdAt") or turn.get("updatedAt")
-    )
-    completed_at_value = turn.get("completedAt") or turn.get("finishedAt")
-    completed_at = (
-        _timestamp_to_datetime(completed_at_value) if completed_at_value else None
-    )
-    error = turn.get("error")
-    stderr = json.dumps(error) if error else ""
-    status = _turn_status(turn.get("status"), error)
-    if raw_status == SessionStatus.waiting and status == SessionStatus.running:
-        status = SessionStatus.waiting
-
-    return RunInfo(
-        run_id=turn_id,
-        started_at=started_at,
-        completed_at=completed_at,
-        status=status,
-        accumulated_output=_extract_agent_output(turn),
-        accumulated_stderr=stderr,
-        return_code=0 if status == SessionStatus.completed else -1,
-        message=_extract_user_message(turn),
-        reasoning_effort=_optional_turn_string(
-            turn,
-            "reasoningEffort",
-            "reasoning_effort",
-        ),
-    )
 
 
 class _OpenbaseSuperAgentsClient(CodexAppServerClient):
@@ -700,11 +449,10 @@ class CodexAppServerSessionManager:
         result = await self._list_thread_page_result(limit=limit, cursor=cursor)
         raw_threads = extract_threads(result)
         sessions = [
-            self._session_from_thread(thread, include_turns=False)
-            for thread in raw_threads
+            _session_from_thread(thread, include_turns=False) for thread in raw_threads
         ]
         return ThreadListPage(
-            threads=sorted(sessions, key=self._sort_key, reverse=True),
+            threads=sorted(sessions, key=_session_sort_key, reverse=True),
             next_cursor=_next_cursor(result),
         )
 
@@ -715,7 +463,7 @@ class CodexAppServerSessionManager:
         cursor: str | None,
     ) -> ThreadListPage:
         sessions = await self._backend_sessions()
-        sorted_sessions = sorted(sessions, key=self._sort_key, reverse=True)
+        sorted_sessions = sorted(sessions, key=_session_sort_key, reverse=True)
         try:
             start = int(cursor or 0)
         except ValueError:
@@ -732,7 +480,7 @@ class CodexAppServerSessionManager:
             return []
         raw_sessions = await sessions_method()
         return [
-            self._session_from_thread(
+            _session_from_thread(
                 _normalize_backend_thread_payload(session),
                 include_turns=False,
             )
@@ -811,7 +559,7 @@ class CodexAppServerSessionManager:
             if developer_instructions is not None:
                 thread_input["developerInstructions"] = developer_instructions
             started = await self._client.start_thread(thread_input)
-            return self._session_from_thread(
+            return _session_from_thread(
                 _normalize_backend_thread_payload(started),
                 include_turns=False,
             )
@@ -823,7 +571,7 @@ class CodexAppServerSessionManager:
         )
         existing = extract_threads(result)
         if existing:
-            return self._session_from_thread(existing[0], include_turns=False)
+            return _session_from_thread(existing[0], include_turns=False)
 
         thread_input = {"cwd": expanded_dir}
         developer_instructions = load_super_agent_developer_instructions()
@@ -834,7 +582,7 @@ class CodexAppServerSessionManager:
         thread = _thread_payload(started)
         if thread is None:
             raise RuntimeError("Super Agents did not return a thread")
-        return self._session_from_thread(thread, include_turns=False)
+        return _session_from_thread(thread, include_turns=False)
 
     async def close_session(self, session_id: str) -> bool:
         """Archive a persisted thread."""
@@ -947,7 +695,7 @@ class CodexAppServerSessionManager:
         result = await self._read_thread(session_id, include_turns=True)
         if result is None:
             return None
-        return self._session_from_thread(result, include_turns=True)
+        return _session_from_thread(result, include_turns=True)
 
     async def interrupt_run(self, session_id: str) -> bool:
         """Interrupt the current turn in a thread."""
@@ -978,7 +726,9 @@ class CodexAppServerSessionManager:
     async def list_sessions(self) -> list[SessionInfo]:
         """List stored Codex threads through Super Agents."""
         if self._uses_backend_session_api():
-            return sorted(await self._backend_sessions(), key=self._sort_key, reverse=True)
+            return sorted(
+                await self._backend_sessions(), key=_session_sort_key, reverse=True
+            )
 
         result = await self._client.list_threads(
             True,
@@ -999,18 +749,9 @@ class CodexAppServerSessionManager:
             raw_threads.extend(extract_threads(result))
             cursor = _next_cursor(result)
         sessions = [
-            self._session_from_thread(thread, include_turns=False)
-            for thread in raw_threads
+            _session_from_thread(thread, include_turns=False) for thread in raw_threads
         ]
-        return sorted(sessions, key=self._sort_key, reverse=True)
-
-    def _sort_key(self, session: SessionInfo) -> datetime:
-        if session.current_run is not None:
-            return session.current_run.started_at
-        if session.run_history:
-            last_run = session.run_history[-1]
-            return last_run.completed_at or last_run.started_at
-        return session.updated_at
+        return sorted(sessions, key=_session_sort_key, reverse=True)
 
     async def _active_turn_id(self, session_id: str) -> str | None:
         local_turn_id: str | None = None
@@ -1087,186 +828,10 @@ class CodexAppServerSessionManager:
             fetched_turns = False
         thread = _thread_payload(result)
         if thread is not None and fetched_turns:
-            await self._merge_tracked_turn_reasoning(thread)
+            await _merge_tracked_turn_reasoning(self._client, thread)
         elif thread is not None and include_turns:
-            await self._merge_tracked_turn_summaries(thread)
+            await _merge_tracked_turn_summaries(self._client, thread)
         return thread
-
-    async def _merge_tracked_turn_summaries(self, thread: dict[str, Any]) -> None:
-        thread_id = extract_thread_id(thread)
-        if not thread_id:
-            return
-        get_session = getattr(self._client, "get_session", None)
-        if not callable(get_session):
-            return
-        try:
-            tracked_session = await get_session(thread_id)
-        except Exception:
-            logger.debug(
-                "Unable to read Super Agents tracked session for thread %s",
-                thread_id,
-                exc_info=True,
-            )
-            return
-        tracked_turns = getattr(tracked_session, "turns", None) or {}
-        if not isinstance(tracked_turns, dict):
-            return
-
-        summaries: list[dict[str, Any]] = []
-        for turn_id, summary in tracked_turns.items():
-            status = getattr(summary, "status", None)
-            started_at = getattr(summary, "started_at", None)
-            finished_at = getattr(summary, "finished_at", None)
-            if not isinstance(status, str) or not isinstance(started_at, str):
-                continue
-            prompt_preview = getattr(summary, "prompt_preview", None)
-            last_useful_message = getattr(summary, "last_useful_message", None)
-            items: list[dict[str, Any]] = []
-            if isinstance(prompt_preview, str) and prompt_preview:
-                items.append(
-                    {
-                        "type": "userMessage",
-                        "content": [{"type": "text", "text": prompt_preview}],
-                    }
-                )
-            if isinstance(last_useful_message, str) and last_useful_message:
-                items.append(
-                    {
-                        "type": "agentMessage",
-                        "phase": "final",
-                        "text": last_useful_message,
-                    }
-                )
-            summaries.append(
-                {
-                    "id": str(getattr(summary, "turn_id", None) or turn_id),
-                    "status": status,
-                    "startedAt": started_at,
-                    "completedAt": (
-                        finished_at
-                        if status in {"completed", "failed", "cancelled"}
-                        else None
-                    ),
-                    "items": items,
-                    "reasoningEffort": getattr(summary, "reasoning_effort", None),
-                    "error": None,
-                }
-            )
-        if summaries:
-            thread["turns"] = summaries
-
-    async def _merge_tracked_turn_reasoning(self, thread: dict[str, Any]) -> None:
-        thread_id = extract_thread_id(thread)
-        if not thread_id:
-            return
-        get_session = getattr(self._client, "get_session", None)
-        if not callable(get_session):
-            return
-        try:
-            tracked_session = await get_session(thread_id)
-        except Exception:
-            logger.debug(
-                "Unable to read Super Agents tracked session for thread %s",
-                thread_id,
-                exc_info=True,
-            )
-            return
-        tracked_turns = getattr(tracked_session, "turns", None) or {}
-        if not isinstance(tracked_turns, dict):
-            return
-        for turn in thread.get("turns", []):
-            if not isinstance(turn, dict):
-                continue
-            turn_id = turn.get("id")
-            if not isinstance(turn_id, str):
-                continue
-            summary = tracked_turns.get(turn_id)
-            reasoning_effort = getattr(summary, "reasoning_effort", None)
-            if isinstance(reasoning_effort, str) and reasoning_effort:
-                turn["reasoningEffort"] = reasoning_effort
-
-    def _session_from_thread(
-        self,
-        thread: dict[str, Any],
-        *,
-        include_turns: bool,
-    ) -> SessionInfo:
-        thread_id = extract_thread_id(thread)
-        if not thread_id:
-            raise ValueError("Thread payload is missing an id")
-        raw_status = _thread_status(thread.get("status"))
-        uses_backend_active_turn_id = _is_backend_thread_payload(thread)
-        name = extract_thread_name(thread)
-        status_warning = _optional_thread_string(
-            thread,
-            "statusWarning",
-            "status_warning",
-        )
-        session = SessionInfo(
-            session_id=thread_id,
-            directory=extract_thread_cwd(thread) or "",
-            name=name,
-            agent_name=_optional_thread_string(thread, "agentName", "agent_name"),
-            title=_optional_thread_string(thread, "title", "summary"),
-            preview=_optional_thread_string(thread, "preview", "description"),
-            is_likely_stale=bool(
-                thread.get("isLikelyStale") or thread.get("is_likely_stale")
-            ),
-            status_warning=status_warning,
-            session_type="codex",
-            created_at=_timestamp_to_datetime(thread.get("createdAt")),
-            updated_at=_timestamp_to_datetime(
-                thread.get("updatedAt") or thread.get("createdAt")
-            ),
-            raw_status=raw_status,
-            status_override=raw_status if uses_backend_active_turn_id else None,
-        )
-        if not include_turns:
-            return session
-
-        run_history: list[RunInfo] = []
-        current_run: RunInfo | None = None
-        active_turn_id = _optional_thread_string(thread, "activeTurnId", "active_turn_id")
-        turns = sorted(thread.get("turns", []), key=_turn_sort_key)
-        for turn in turns:
-            turn_id = extract_turn_id(turn)
-            if not isinstance(turn, dict) or not turn_id:
-                continue
-            run = _run_from_turn(
-                {
-                    **turn,
-                    "id": turn_id,
-                },
-                raw_status=raw_status,
-            )
-            is_active_run = run.status in {SessionStatus.running, SessionStatus.waiting}
-            if uses_backend_active_turn_id and is_active_run and turn_id != active_turn_id:
-                continue
-            if status_warning == "stale_active_turn" and is_active_run:
-                run_history.append(run)
-                continue
-            if is_active_run:
-                current_run = run
-            else:
-                run_history.append(run)
-
-        history_limit = _thread_history_limit()
-        if len(run_history) > history_limit:
-            run_history = run_history[-history_limit:]
-
-        session.current_run = current_run
-        session.run_history = run_history
-        if (
-            current_run is None
-            and run_history
-            and raw_status
-            in {
-                SessionStatus.running,
-                SessionStatus.waiting,
-            }
-        ):
-            session.raw_status = run_history[-1].status
-        return session
 
     def handle_client_event(self, method: str, params: dict[str, Any]) -> None:
         try:

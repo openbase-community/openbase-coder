@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -15,37 +16,49 @@ setup_cli = importlib.import_module("openbase_coder_cli.cli.setup")
 codex_home_instructions = importlib.import_module(
     "openbase_coder_cli.codex_home_instructions"
 )
+_setup_phase_modules = tuple(
+    importlib.import_module(f"openbase_coder_cli.cli.setup.{name}")
+    for name in ("claude", "codex", "dispatcher", "env", "workspace")
+)
+
+
+def _patch_setup(monkeypatch, name, value):
+    """Patch a name on the setup package and every phase module that defines it."""
+    for module in (setup_cli, *_setup_phase_modules):
+        if hasattr(module, name):
+            monkeypatch.setattr(module, name, value)
+
 
 
 def _patch_openbase_agent_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path]:
     codex_home = tmp_path / "codex_home"
     claude_config = tmp_path / "claude_config"
     instructions = tmp_path / "openbase" / "instructions"
-    monkeypatch.setattr(setup_cli, "CODEX_HOME_DIR", codex_home)
-    monkeypatch.setattr(setup_cli, "OPENBASE_CLAUDE_CONFIG_DIR", claude_config)
+    _patch_setup(monkeypatch, "CODEX_HOME_DIR", codex_home)
+    _patch_setup(monkeypatch, "OPENBASE_CLAUDE_CONFIG_DIR", claude_config)
     monkeypatch.setattr(codex_home_instructions, "CODEX_HOME_DIR", codex_home)
     monkeypatch.setattr(
         codex_home_instructions,
         "OPENBASE_CLAUDE_MD_PATH",
         claude_config / "CLAUDE.md",
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "OPENBASE_CLAUDE_SETTINGS_PATH",
         claude_config / "settings.json",
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "NORMAL_CLAUDE_SETTINGS_PATH",
         tmp_path / "normal_claude" / "settings.json",
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "NORMAL_CLAUDE_CONFIG_DIR",
         tmp_path / "normal_claude",
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "NORMAL_CODEX_AGENTS_MD_PATH",
         tmp_path / "normal_codex" / "AGENTS.md",
     )
@@ -54,141 +67,105 @@ def _patch_openbase_agent_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path
         "NORMAL_CODEX_AGENTS_MD_PATH",
         tmp_path / "normal_codex" / "AGENTS.md",
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH",
         instructions / "VOICE_INSTRUCTIONS.md",
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "CODEX_DISPATCHER_INSTRUCTIONS_PATH",
         instructions / "DISPATCHER_INSTRUCTIONS.md",
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "CODEX_SUPER_AGENT_INSTRUCTIONS_PATH",
         instructions / "SUPER_AGENT_INSTRUCTIONS.md",
-    )
-    monkeypatch.setattr(
-        setup_cli,
-        "LEGACY_CODEX_HOME_DEFAULT_FILES",
-        (
-            (
-                instructions / "VOICE_INSTRUCTIONS.md",
-                codex_home / "VOICE_INSTRUCTIONS.md",
-            ),
-            (
-                instructions / "DISPATCHER_INSTRUCTIONS.md",
-                codex_home / "DISPATCHER_INSTRUCTIONS.md",
-            ),
-            (
-                instructions / "SUPER_AGENT_INSTRUCTIONS.md",
-                codex_home / "SUPER_AGENT_INSTRUCTIONS.md",
-            ),
-        ),
     )
     return codex_home, claude_config
 
 
-def test_update_existing_default_workspace_resets_dirty_checkout(
+def _make_workspace_checkout(root):
+    (root / "cli").mkdir(parents=True)
+    (root / "multi.json").write_text("{}", encoding="utf-8")
+    return root
+
+
+def test_resolve_dev_workspace_dir_prefers_explicit_dir(tmp_path) -> None:
+    workspace = _make_workspace_checkout(tmp_path / "workspace")
+
+    assert setup_cli.resolve_dev_workspace_dir(str(workspace)) == str(workspace)
+
+
+def test_resolve_dev_workspace_dir_rejects_non_workspace_dir(tmp_path) -> None:
+    plain_dir = tmp_path / "not-a-workspace"
+    plain_dir.mkdir()
+
+    with pytest.raises(Exception, match="does not look like"):
+        setup_cli.resolve_dev_workspace_dir(str(plain_dir))
+
+
+def test_resolve_dev_workspace_dir_uses_recorded_installation(
     tmp_path, monkeypatch
 ) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    commands = []
+    workspace = _make_workspace_checkout(tmp_path / "recorded")
+    from openbase_coder_cli.cli.setup import workspace as workspace_phase
 
-    monkeypatch.setattr(setup_cli, "DEFAULT_WORKSPACE_DIR", workspace)
-
-    def fake_run(command, **kwargs):
-        commands.append((command, kwargs))
-        if command[3:] == ["status", "--porcelain"]:
-            return subprocess.CompletedProcess(command, 0, stdout=" M pnpm-lock.yaml\n")
-        return subprocess.CompletedProcess(command, 0, stdout="")
-
-    monkeypatch.setattr(setup_cli.subprocess, "run", fake_run)
-
-    setup_cli._update_existing_workspace(workspace)
-
-    assert [command for command, _kwargs in commands] == [
-        ["git", "-C", str(workspace), "status", "--porcelain"],
-        ["git", "-C", str(workspace), "fetch", "origin", "main"],
-        ["git", "-C", str(workspace), "reset", "--hard", "origin/main"],
-    ]
-
-
-def test_update_existing_custom_workspace_uses_pull(tmp_path, monkeypatch) -> None:
-    workspace = tmp_path / "custom-workspace"
-    default_workspace = tmp_path / "default-workspace"
-    workspace.mkdir()
-    commands = []
-
-    monkeypatch.setattr(setup_cli, "DEFAULT_WORKSPACE_DIR", default_workspace)
-
-    def fake_run(command, **kwargs):
-        commands.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout="")
-
-    monkeypatch.setattr(setup_cli.subprocess, "run", fake_run)
-
-    setup_cli._update_existing_workspace(workspace)
-
-    assert [command for command, _kwargs in commands] == [
-        ["git", "-C", str(workspace), "pull", "--ff-only"],
-    ]
-
-
-def test_remove_managed_repo_symlinks_removes_selected_symlink(
-    tmp_path, monkeypatch
-) -> None:
-    workspace = tmp_path / "workspace"
-    target = tmp_path / "target"
-    workspace.mkdir()
-    target.mkdir()
-    (workspace / "multi.json").write_text(
-        json.dumps(
-            {
-                "repos": [
-                    {"name": "console", "installSets": ["default"]},
-                    {"name": "ios", "installSets": ["dev"]},
-                ],
-            }
+    monkeypatch.setattr(
+        workspace_phase.InstallationConfig, "exists", classmethod(lambda cls: True)
+    )
+    monkeypatch.setattr(
+        workspace_phase.InstallationConfig,
+        "load",
+        classmethod(
+            lambda cls: setup_cli.InstallationConfig(workspace_path=str(workspace))
         ),
-        encoding="utf-8",
     )
-    (workspace / "console").symlink_to(target)
-    (workspace / "ios").symlink_to(target)
-    monkeypatch.setattr(setup_cli, "DEFAULT_WORKSPACE_DIR", workspace)
 
-    setup_cli._remove_managed_repo_symlinks(workspace)
-
-    assert not (workspace / "console").exists()
-    assert (workspace / "ios").is_symlink()
+    assert setup_cli.resolve_dev_workspace_dir(None) == str(workspace)
 
 
-def test_update_install_set_repos_resets_managed_repos(tmp_path, monkeypatch) -> None:
-    workspace = tmp_path / "workspace"
-    repo = workspace / "console"
-    (repo / ".git").mkdir(parents=True)
-    (workspace / "multi.json").write_text(
-        json.dumps({"repos": [{"name": "console", "installSets": ["default"]}]}),
-        encoding="utf-8",
+def test_resolve_dev_workspace_dir_uses_editable_install(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = _make_workspace_checkout(tmp_path / "editable")
+    from openbase_coder_cli.cli.setup import workspace as workspace_phase
+
+    monkeypatch.setattr(
+        workspace_phase.InstallationConfig, "exists", classmethod(lambda cls: False)
     )
-    commands = []
 
-    monkeypatch.setattr(setup_cli, "DEFAULT_WORKSPACE_DIR", workspace)
+    class FakeDist:
+        def read_text(self, name):
+            assert name == "direct_url.json"
+            return json.dumps(
+                {
+                    "url": (workspace / "cli").as_uri(),
+                    "dir_info": {"editable": True},
+                }
+            )
 
-    def fake_run(command, **kwargs):
-        commands.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout="")
+    monkeypatch.setattr(workspace_phase, "distribution", lambda _name: FakeDist())
 
-    monkeypatch.setattr(setup_cli.subprocess, "run", fake_run)
+    assert setup_cli.resolve_dev_workspace_dir(None) == str(workspace)
 
-    setup_cli._update_install_set_repos(workspace)
 
-    assert [command for command, _kwargs in commands] == [
-        ["git", "-C", str(repo), "fetch", "origin", "main"],
-        ["git", "-C", str(repo), "reset", "--hard", "origin/main"],
-    ]
+def test_resolve_dev_workspace_dir_errors_without_any_workspace(
+    monkeypatch,
+) -> None:
+    from openbase_coder_cli.cli.setup import workspace as workspace_phase
+
+    monkeypatch.setattr(
+        workspace_phase.InstallationConfig, "exists", classmethod(lambda cls: False)
+    )
+
+    def missing_dist(_name):
+        raise workspace_phase.PackageNotFoundError
+
+    monkeypatch.setattr(workspace_phase, "distribution", missing_dist)
+
+    with pytest.raises(Exception, match="No Openbase Coder workspace found"):
+        setup_cli.resolve_dev_workspace_dir(None)
 
 
 def test_ensure_codex_home_default_files_links_missing_files(
@@ -215,7 +192,7 @@ def test_ensure_codex_home_default_files_links_missing_files(
             f"default {resource_name}\n",
             encoding="utf-8",
         )
-    monkeypatch.setattr(setup_cli, "CODEX_HOME_DEFAULT_FILES", targets)
+    _patch_setup(monkeypatch, "CODEX_HOME_DEFAULT_FILES", targets)
 
     setup_cli._ensure_codex_home_default_files(str(workspace))
 
@@ -226,12 +203,6 @@ def test_ensure_codex_home_default_files_links_missing_files(
         assert target_path.read_text(encoding="utf-8") == (
             f"<!-- Generated from {source_path}; edit the source template instead. -->\n\n"
             f"default {resource_name}\n"
-        )
-        legacy_path = codex_home / resource_name
-        assert legacy_path.is_file()
-        assert not legacy_path.is_symlink()
-        assert legacy_path.read_text(encoding="utf-8") == target_path.read_text(
-            encoding="utf-8"
         )
 
 
@@ -248,8 +219,8 @@ def test_ensure_codex_home_default_files_renders_template_files(
         'Require "${dangerous_confirmation_phrase}".\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "CODEX_HOME_DEFAULT_FILES",
         (("SUPER_AGENT_INSTRUCTIONS.md", target),),
     )
@@ -265,12 +236,6 @@ def test_ensure_codex_home_default_files_renders_template_files(
     assert target.read_text(encoding="utf-8") == (
         f"<!-- Generated from {instructions / 'SUPER_AGENT_INSTRUCTIONS.md'}; "
         'edit the source template instead. -->\n\nRequire "ship it".\n'
-    )
-    legacy_path = codex_home / "SUPER_AGENT_INSTRUCTIONS.md"
-    assert legacy_path.is_file()
-    assert not legacy_path.is_symlink()
-    assert legacy_path.read_text(encoding="utf-8") == target.read_text(
-        encoding="utf-8"
     )
 
 
@@ -291,8 +256,8 @@ def test_ensure_codex_home_default_files_preserves_custom_existing_files(
         "default voice\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "CODEX_HOME_DEFAULT_FILES",
         (
             ("AGENTS.md", existing_path),
@@ -317,9 +282,6 @@ def test_ensure_codex_home_default_files_preserves_custom_existing_files(
         "edit the source template instead. -->\n\n"
         "default voice\n"
     )
-    assert (codex_home / "VOICE_INSTRUCTIONS.md").read_text(
-        encoding="utf-8"
-    ) == missing_path.read_text(encoding="utf-8")
 
 
 def test_ensure_codex_home_default_files_rewrites_matching_agents_file(
@@ -333,8 +295,8 @@ def test_ensure_codex_home_default_files_rewrites_matching_agents_file(
     target_path.parent.mkdir(parents=True)
     (instructions / "AGENTS.md").write_text("default agents\n", encoding="utf-8")
     target_path.write_text("default agents\n", encoding="utf-8")
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "CODEX_HOME_DEFAULT_FILES",
         (("AGENTS.md", target_path),),
     )
@@ -364,8 +326,8 @@ def test_ensure_codex_home_default_files_converts_stale_agents_symlink(
     (instructions / "AGENTS.md").write_text("default agents\n", encoding="utf-8")
     (stale_instructions / "AGENTS.md").write_text("stale agents\n", encoding="utf-8")
     target_path.symlink_to(stale_instructions / "AGENTS.md")
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "CODEX_HOME_DEFAULT_FILES",
         (("AGENTS.md", target_path),),
     )
@@ -394,8 +356,8 @@ def test_ensure_codex_home_default_files_converts_current_agents_symlink(
     source_path = instructions / "AGENTS.md"
     source_path.write_text("default agents\n", encoding="utf-8")
     target_path.symlink_to(source_path)
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "CODEX_HOME_DEFAULT_FILES",
         (("AGENTS.md", target_path),),
     )
@@ -424,7 +386,7 @@ def test_ensure_codex_home_default_files_honors_excluding_normal_agents(
     codex_home, _claude_config = _patch_openbase_agent_paths(monkeypatch, tmp_path)
     (instructions / "AGENTS.md").write_text("- Openbase rule\n", encoding="utf-8")
     normal_agents.write_text("- Normal rule\n", encoding="utf-8")
-    monkeypatch.setattr(setup_cli, "CODEX_HOME_DEFAULT_FILES", ())
+    _patch_setup(monkeypatch, "CODEX_HOME_DEFAULT_FILES", ())
     monkeypatch.setattr(
         console_settings,
         "CONSOLE_SETTINGS_JSON_PATH",
@@ -461,7 +423,7 @@ def test_ensure_codex_home_default_files_replaces_stale_openbase_claude_symlink(
     claude_md = claude_config / "CLAUDE.md"
     claude_md.parent.mkdir(parents=True)
     claude_md.symlink_to(stale_agents)
-    monkeypatch.setattr(setup_cli, "CODEX_HOME_DEFAULT_FILES", ())
+    _patch_setup(monkeypatch, "CODEX_HOME_DEFAULT_FILES", ())
 
     setup_cli._ensure_codex_home_default_files(str(workspace))
 
@@ -479,8 +441,8 @@ def test_ensure_codex_home_default_files_skips_missing_sources(
     workspace.mkdir()
     codex_home, _claude_config = _patch_openbase_agent_paths(monkeypatch, tmp_path)
     target_path = codex_home / "AGENTS.md"
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "CODEX_HOME_DEFAULT_FILES",
         (("AGENTS.md", target_path),),
     )
@@ -548,9 +510,7 @@ def test_ensure_codex_home_dispatcher_config_creates_default(
     tmp_path, monkeypatch
 ) -> None:
     config_path = tmp_path / "dispatcher-config.json"
-    legacy_path = tmp_path / "codex_home" / "dispatcher-config.json"
-    monkeypatch.setattr(setup_cli, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
-    monkeypatch.setattr(setup_cli, "LEGACY_CODEX_DISPATCHER_CONFIG_PATH", legacy_path)
+    _patch_setup(monkeypatch, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
 
     setup_cli._ensure_codex_home_dispatcher_config()
 
@@ -572,15 +532,12 @@ def test_ensure_codex_home_dispatcher_config_creates_default(
         "super_agents_reasoning_effort": "high",
         "tts_provider": "openbase_cloud",
     }
-    assert legacy_path.is_symlink()
-    assert legacy_path.resolve() == config_path.resolve()
 
 
 def test_ensure_codex_home_dispatcher_config_preserves_existing(
     tmp_path, monkeypatch
 ) -> None:
     config_path = tmp_path / "dispatcher-config.json"
-    legacy_path = tmp_path / "codex_home" / "dispatcher-config.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         "{\n"
@@ -589,8 +546,7 @@ def test_ensure_codex_home_dispatcher_config_preserves_existing(
         "}\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(setup_cli, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
-    monkeypatch.setattr(setup_cli, "LEGACY_CODEX_DISPATCHER_CONFIG_PATH", legacy_path)
+    _patch_setup(monkeypatch, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
 
     setup_cli._ensure_codex_home_dispatcher_config()
 
@@ -598,15 +554,12 @@ def test_ensure_codex_home_dispatcher_config_preserves_existing(
         "dispatcher_reasoning_effort": "medium",
         "super_agents_reasoning_effort": "xhigh",
     }
-    assert legacy_path.is_symlink()
-    assert legacy_path.resolve() == config_path.resolve()
 
 
 def test_ensure_codex_home_dispatcher_config_updates_audio_provider_when_requested(
     tmp_path, monkeypatch
 ) -> None:
     config_path = tmp_path / "dispatcher-config.json"
-    legacy_path = tmp_path / "codex_home" / "dispatcher-config.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         "{\n"
@@ -615,8 +568,7 @@ def test_ensure_codex_home_dispatcher_config_updates_audio_provider_when_request
         "}\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(setup_cli, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
-    monkeypatch.setattr(setup_cli, "LEGACY_CODEX_DISPATCHER_CONFIG_PATH", legacy_path)
+    _patch_setup(monkeypatch, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
 
     setup_cli._ensure_codex_home_dispatcher_config(audio_provider="local")
 
@@ -628,34 +580,6 @@ def test_ensure_codex_home_dispatcher_config_updates_audio_provider_when_request
         "super_agents_reasoning_effort": "xhigh",
         "tts_provider": "kokoro",
     }
-    assert legacy_path.is_symlink()
-    assert legacy_path.resolve() == config_path.resolve()
-
-
-def test_ensure_codex_home_dispatcher_config_migrates_legacy_file(
-    tmp_path, monkeypatch
-) -> None:
-    config_path = tmp_path / "dispatcher-config.json"
-    legacy_path = tmp_path / "codex_home" / "dispatcher-config.json"
-    legacy_path.parent.mkdir(parents=True)
-    legacy_path.write_text(
-        "{\n"
-        '  "dispatcher_reasoning_effort": "medium",\n'
-        '  "super_agents_reasoning_effort": "xhigh"\n'
-        "}\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(setup_cli, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
-    monkeypatch.setattr(setup_cli, "LEGACY_CODEX_DISPATCHER_CONFIG_PATH", legacy_path)
-
-    setup_cli._ensure_codex_home_dispatcher_config()
-
-    assert json.loads(config_path.read_text(encoding="utf-8")) == {
-        "dispatcher_reasoning_effort": "medium",
-        "super_agents_reasoning_effort": "xhigh",
-    }
-    assert legacy_path.is_symlink()
-    assert legacy_path.resolve() == config_path.resolve()
 
 
 def test_symlink_codex_home_skills_links_workspace_skills(
@@ -721,7 +645,7 @@ def test_ensure_codex_home_config_creates_config(tmp_path, monkeypatch) -> None:
     codex_home = tmp_path / "codex_home"
     command.parent.mkdir(parents=True)
     command.write_text("#!/bin/sh\n", encoding="utf-8")
-    monkeypatch.setattr(setup_cli, "CODEX_HOME_DIR", codex_home)
+    _patch_setup(monkeypatch, "CODEX_HOME_DIR", codex_home)
 
     setup_cli._ensure_codex_home_config(str(workspace))
 
@@ -765,7 +689,7 @@ def test_ensure_codex_home_config_replaces_stale_values(tmp_path, monkeypatch) -
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(setup_cli, "CODEX_HOME_DIR", codex_home)
+    _patch_setup(monkeypatch, "CODEX_HOME_DIR", codex_home)
 
     setup_cli._ensure_codex_home_config(str(workspace))
 
@@ -796,9 +720,9 @@ def test_ensure_codex_home_config_falls_back_to_resolved_uv(
     cli_dir.mkdir(parents=True)
     uv_bin.parent.mkdir(parents=True)
     uv_bin.write_text("#!/bin/sh\n", encoding="utf-8")
-    monkeypatch.setattr(setup_cli, "CODEX_HOME_DIR", codex_home)
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(monkeypatch, "CODEX_HOME_DIR", codex_home)
+    _patch_setup(
+        monkeypatch,
         "which",
         lambda command: str(uv_bin) if command == "uv" else None,
     )
@@ -816,6 +740,29 @@ def test_ensure_codex_home_config_falls_back_to_resolved_uv(
         f"command = {json.dumps(str(uv_bin))}\n"
         f"args = {json.dumps(['--directory', str(cli_dir), 'run', 'super-agents-mcp'])}\n"
     )
+
+
+def test_super_agents_mcp_command_prefers_packaged_python_bin(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    package = tmp_path / "package"
+    python_path = package / "python" / "bin" / "python"
+    command = python_path.parent / "super-agents-mcp"
+    command.parent.mkdir(parents=True)
+    command.write_text("#!/bin/sh\n", encoding="utf-8")
+    python_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    _patch_setup(
+        monkeypatch,
+        "current_runtime_package",
+        lambda: SimpleNamespace(python_path=python_path),
+    )
+    _patch_setup(monkeypatch, "which", lambda _command: None)
+
+    command_path, args = setup_cli._super_agents_mcp_command(workspace)
+
+    assert command_path == command
+    assert args == []
 
 
 def test_ensure_claude_config_installs_super_agents_mcp(tmp_path, monkeypatch) -> None:
@@ -836,8 +783,8 @@ def test_ensure_claude_config_installs_super_agents_mcp(tmp_path, monkeypatch) -
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(setup_cli, "OPENBASE_CLAUDE_JSON_PATH", claude_json)
-    monkeypatch.setattr(setup_cli, "CODEX_DISPATCHER_CONFIG_PATH", dispatcher_config)
+    _patch_setup(monkeypatch, "OPENBASE_CLAUDE_JSON_PATH", claude_json)
+    _patch_setup(monkeypatch, "CODEX_DISPATCHER_CONFIG_PATH", dispatcher_config)
 
     setup_cli._ensure_claude_config(str(workspace))
 
@@ -908,6 +855,7 @@ def test_ensure_claude_settings_seeds_from_normal_claude_settings(
 
 
 def test_ensure_claude_auth_bridge_runs_login_when_requested(monkeypatch) -> None:
+    _patch_setup(monkeypatch, "copy_normal_claude_keychain", lambda: False)
     statuses = iter(
         [
             claude_auth.ClaudeAuthStatus(
@@ -920,17 +868,17 @@ def test_ensure_claude_auth_bridge_runs_login_when_requested(monkeypatch) -> Non
         ]
     )
     login_calls = []
-    monkeypatch.setattr(setup_cli, "claude_auth_status", lambda: next(statuses))
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(monkeypatch, "claude_auth_status", lambda: next(statuses))
+    _patch_setup(
+        monkeypatch,
         "sync_normal_claude_state",
         lambda: claude_auth.ClaudeAuthBridgeResult(
             state_updated=False,
             message="already synced",
         ),
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "run_claude_login",
         lambda: login_calls.append(True) or 0,
     )
@@ -941,9 +889,10 @@ def test_ensure_claude_auth_bridge_runs_login_when_requested(monkeypatch) -> Non
 
 
 def test_ensure_claude_auth_bridge_does_not_login_unless_requested(monkeypatch) -> None:
+    _patch_setup(monkeypatch, "copy_normal_claude_keychain", lambda: False)
     login_calls = []
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "claude_auth_status",
         lambda: claude_auth.ClaudeAuthStatus(
             logged_in=False,
@@ -951,16 +900,16 @@ def test_ensure_claude_auth_bridge_does_not_login_unless_requested(monkeypatch) 
             returncode=0,
         ),
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "sync_normal_claude_state",
         lambda: claude_auth.ClaudeAuthBridgeResult(
             state_updated=False,
             message="already synced",
         ),
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "run_claude_login",
         lambda: login_calls.append(True) or 0,
     )
@@ -997,8 +946,8 @@ def test_ensure_codex_home_config_can_link_normal_codex_config(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(setup_cli, "CODEX_HOME_DIR", codex_home)
-    monkeypatch.setattr(setup_cli, "NORMAL_CODEX_CONFIG_PATH", normal_config)
+    _patch_setup(monkeypatch, "CODEX_HOME_DIR", codex_home)
+    _patch_setup(monkeypatch, "NORMAL_CODEX_CONFIG_PATH", normal_config)
 
     setup_cli._ensure_codex_home_config(
         str(workspace),
@@ -1022,8 +971,8 @@ def test_symlink_codex_home_config_preserves_existing_service_config(
     normal_config = tmp_path / "codex" / "config.toml"
     service_config.parent.mkdir(parents=True)
     service_config.write_text('sandbox_mode = "danger-full-access"\n', encoding="utf-8")
-    monkeypatch.setattr(setup_cli, "CODEX_HOME_DIR", codex_home)
-    monkeypatch.setattr(setup_cli, "NORMAL_CODEX_CONFIG_PATH", normal_config)
+    _patch_setup(monkeypatch, "CODEX_HOME_DIR", codex_home)
+    _patch_setup(monkeypatch, "NORMAL_CODEX_CONFIG_PATH", normal_config)
 
     setup_cli._symlink_codex_home_config()
 
@@ -1045,7 +994,6 @@ def test_ensure_env_file_documents_coding_backend_default(tmp_path) -> None:
 
     content = env_file.read_text(encoding="utf-8")
     assert "OPENBASE_CODING_BACKEND=codex" in content
-    assert "# OPENBASE_CODEX_BACKEND is still read as a fallback" in content
     assert "# Claude Code applies to Super Agents UI-driver sessions" in content
     assert "CODEX_CLAUDE_" not in content
     assert "SUPER_AGENTS_CLAUDE_TUI_CMD" not in content
@@ -1093,8 +1041,8 @@ def test_ensure_openbase_cloud_machine_token_uses_env_backend_url(
             calls.append("minted")
             return "obmt_token"
 
-    monkeypatch.setattr(setup_cli, "TokenManager", FakeTokenManager)
-    monkeypatch.setattr(setup_cli, "MachineTokenManager", FakeMachineTokenManager)
+    _patch_setup(monkeypatch, "TokenManager", FakeTokenManager)
+    _patch_setup(monkeypatch, "MachineTokenManager", FakeMachineTokenManager)
 
     setup_cli._ensure_openbase_cloud_machine_token(env_file)
 
@@ -1130,9 +1078,9 @@ def test_ensure_thread_sync_exchange_dir_creates_syncthing_files(
 ) -> None:
     openbase_dir = tmp_path / "openbase"
     global_ignore = tmp_path / "syncthing" / "global.stignore"
-    monkeypatch.setattr(setup_cli, "OPENBASE_BASE_DIR", openbase_dir)
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(monkeypatch, "OPENBASE_BASE_DIR", openbase_dir)
+    _patch_setup(
+        monkeypatch,
         "_syncthing_global_ignore_path",
         lambda: global_ignore,
     )
@@ -1163,9 +1111,9 @@ def test_ensure_thread_sync_exchange_dir_replaces_stale_global_ignore_symlink(
     stale_global_ignore.parent.mkdir()
     stale_global_ignore.write_text("stale\n", encoding="utf-8")
     (exchange_dir / ".stglobalignore").symlink_to(stale_global_ignore)
-    monkeypatch.setattr(setup_cli, "OPENBASE_BASE_DIR", openbase_dir)
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(monkeypatch, "OPENBASE_BASE_DIR", openbase_dir)
+    _patch_setup(
+        monkeypatch,
         "_syncthing_global_ignore_path",
         lambda: global_ignore,
     )
@@ -1177,7 +1125,7 @@ def test_ensure_thread_sync_exchange_dir_replaces_stale_global_ignore_symlink(
 
 def test_ensure_bundled_sounds_installs_deactivate(tmp_path, monkeypatch) -> None:
     sounds_dir = tmp_path / "sounds"
-    monkeypatch.setattr(setup_cli, "OPENBASE_SOUNDS_DIR", sounds_dir)
+    _patch_setup(monkeypatch, "OPENBASE_SOUNDS_DIR", sounds_dir)
 
     setup_cli._ensure_bundled_sounds()
 
@@ -1193,7 +1141,7 @@ def test_ensure_bundled_sounds_preserves_custom_existing_file(
     target = sounds_dir / "deactivate.wav"
     target.parent.mkdir(parents=True)
     target.write_bytes(b"custom sound")
-    monkeypatch.setattr(setup_cli, "OPENBASE_SOUNDS_DIR", sounds_dir)
+    _patch_setup(monkeypatch, "OPENBASE_SOUNDS_DIR", sounds_dir)
 
     setup_cli._ensure_bundled_sounds()
 
@@ -1206,42 +1154,51 @@ def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
     workspace.mkdir()
     env_file = tmp_path / ".env"
 
-    monkeypatch.setattr(setup_cli, "_clone_workspace", lambda _workspace_dir: None)
-    monkeypatch.setattr(
-        setup_cli,
+    (workspace / "cli").mkdir()
+    (workspace / "multi.json").write_text("{}", encoding="utf-8")
+    _patch_setup(monkeypatch, "ensure_backend_binary", lambda _backend: None)
+    _patch_setup(monkeypatch, "_ensure_normal_codex_mcp", lambda _workspace_dir: None)
+    _patch_setup(
+        monkeypatch, "_ensure_normal_claude_mcp", lambda _workspace_dir: None
+    )
+    _patch_setup(
+        monkeypatch, "_ensure_claude_auth_bridge", lambda **_kwargs: None
+    )
+    _patch_setup(
+        monkeypatch,
         "_ensure_thread_sync_exchange_dir",
         lambda: calls.append("thread-sync"),
     )
     monkeypatch.setattr(
         setup_cli, "_ensure_bundled_sounds", lambda: calls.append("sounds")
     )
-    monkeypatch.setattr(setup_cli, "_ensure_env_file", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(setup_cli, "_symlink_codex_auth", lambda: None)
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(monkeypatch, "_ensure_env_file", lambda *_args, **_kwargs: None)
+    _patch_setup(monkeypatch, "_symlink_codex_auth", lambda: None)
+    _patch_setup(
+        monkeypatch,
         "_ensure_normal_claude_md_symlink",
         lambda: calls.append("normal-claude"),
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "_ensure_codex_home_default_files",
         lambda _workspace_dir: None,
     )
     monkeypatch.setattr(
         setup_cli, "_ensure_codex_home_dispatcher_config", lambda **_kwargs: None
     )
-    monkeypatch.setattr(setup_cli, "_download_local_audio_models", lambda: None)
+    _patch_setup(monkeypatch, "_download_local_audio_models", lambda: None)
     monkeypatch.setattr(
         setup_cli, "_symlink_codex_home_skills", lambda _workspace_dir: None
     )
-    monkeypatch.setattr(setup_cli, "_init_cli_workspace", lambda _workspace_dir: None)
+    _patch_setup(monkeypatch, "_init_cli_workspace", lambda _workspace_dir: None)
     monkeypatch.setattr(
         setup_cli, "_ensure_codex_home_config", lambda *_args, **_kwargs: None
     )
-    monkeypatch.setattr(setup_cli, "_ensure_claude_config", lambda _workspace_dir: None)
-    monkeypatch.setattr(setup_cli, "_install_cli_shim", lambda _workspace_dir: None)
-    monkeypatch.setattr(setup_cli, "_build_console", lambda _workspace_dir: None)
-    monkeypatch.setattr(setup_cli, "install_all_services", lambda _config: None)
+    _patch_setup(monkeypatch, "_ensure_claude_config", lambda _workspace_dir: None)
+    _patch_setup(monkeypatch, "_install_cli_shim", lambda _workspace_dir: None)
+    _patch_setup(monkeypatch, "_build_console", lambda _workspace_dir: None)
+    _patch_setup(monkeypatch, "install_all_services", lambda _config: None)
     monkeypatch.setattr(
         setup_cli.InstallationConfig,
         "save",
@@ -1251,13 +1208,13 @@ def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
     def fake_configure_tailscale_serve():
         calls.append("configure")
 
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "configure_tailscale_serve",
         fake_configure_tailscale_serve,
     )
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "tailscale_serve_health",
         lambda: type(
             "Health",
@@ -1280,7 +1237,6 @@ def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
             str(env_file),
             "--backend",
             "claude-code",
-            "--skip-clone",
         ],
     )
 
@@ -1307,7 +1263,7 @@ def test_ensure_local_audio_dependencies_installs_into_runtime_python(
             return subprocess.CompletedProcess(command, 1)
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(setup_cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     setup_cli._ensure_local_audio_dependencies(runtime_package)
 
@@ -1330,7 +1286,7 @@ def test_ensure_local_audio_dependencies_rejects_python_313(
     def fake_run(command, **kwargs):
         return subprocess.CompletedProcess(command, 0, stdout="3.13\n")
 
-    monkeypatch.setattr(setup_cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     with pytest.raises(Exception, match="requires a Python 3.12"):
         setup_cli._ensure_local_audio_dependencies(runtime_package)
@@ -1367,8 +1323,8 @@ def test_build_console_does_not_sync_plugin_generated_files(
     def fail_if_plugin_registry_is_loaded():
         raise AssertionError("setup should not sync plugin console integration")
 
-    monkeypatch.setattr(
-        setup_cli,
+    _patch_setup(
+        monkeypatch,
         "run_workspace_package_command",
         fake_run_workspace_package_command,
     )

@@ -7,18 +7,17 @@ import click
 from openbase_coder_cli.backend_config import (
     CODING_BACKEND_ENV_KEY,
     DEFAULT_CODING_BACKEND,
-    LEGACY_CODEX_BACKEND_ENV_KEY,
     SUPPORTED_BACKENDS,
     normalize_backend,
-)
-from openbase_coder_cli.cli.setup import (
-    _active_env_key,
-    _format_env_value,
-    _upsert_env_file_values,
 )
 from openbase_coder_cli.codex_backend_config import (
     apply_backend_to_codex_config,
     codex_config_path_for_env_file,
+)
+from openbase_coder_cli.env_file import (
+    active_env_key,
+    format_env_value,
+    upsert_env_file_values,
 )
 from openbase_coder_cli.paths import DEFAULT_ENV_FILE_PATH
 
@@ -86,8 +85,6 @@ def read_backend(env_file: Path) -> str:
         return DEFAULT_CODING_BACKEND
     values = read_env_values(env_file)
     raw_value = values.get(BACKEND_ENV_KEY)
-    if raw_value is None:
-        raw_value = values.get(LEGACY_CODEX_BACKEND_ENV_KEY)
     try:
         return normalize_backend(raw_value)
     except ValueError:
@@ -99,10 +96,10 @@ def write_backend(env_file: Path, backend_name: str) -> None:
     values = read_env_values(env_file) if env_file.is_file() else {}
     env_file.parent.mkdir(parents=True, exist_ok=True)
     if env_file.is_file():
-        _upsert_env_file_values(env_file, {BACKEND_ENV_KEY: normalized})
+        upsert_env_file_values(env_file, {BACKEND_ENV_KEY: normalized})
     else:
         env_file.write_text(
-            f"{BACKEND_ENV_KEY}={_format_env_value(normalized)}\n", encoding="utf-8"
+            f"{BACKEND_ENV_KEY}={format_env_value(normalized)}\n", encoding="utf-8"
         )
     apply_backend_to_codex_config(
         normalized,
@@ -114,7 +111,7 @@ def write_backend(env_file: Path, backend_name: str) -> None:
 def read_env_values(env_file: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     for line in env_file.read_text(encoding="utf-8").splitlines():
-        key = _active_env_key(line)
+        key = active_env_key(line)
         if key is None:
             continue
         _raw_key, raw_value = line.split("=", 1)

@@ -11,13 +11,14 @@ from typing import Any
 
 import click
 
-from openbase_coder_cli.services.definitions import SERVICES, default_services
+from openbase_coder_cli.services.definitions import SERVICES
 from openbase_coder_cli.services.launchd import (
     install_service,
     launchctl_bootout,
     launchctl_status,
 )
 from openbase_coder_cli.services.registry import find_service, require_installation
+from openbase_coder_cli.services.selection import configured_default_services
 from openbase_coder_cli.services.voice_warning import (
     any_service_action_interrupts_voice,
     warn_before_voice_interruption,
@@ -48,7 +49,7 @@ def restart_target_names() -> list[str]:
 
 def build_restart_plan(request: RestartRequest) -> RestartPlan:
     service_names = [service.name for service in SERVICES]
-    default_service_names = [service.name for service in default_services()]
+    default_service_names = [service.name for service in configured_default_services()]
     valid_targets = set(service_names)
 
     requested_targets = list(request.services) or default_service_names

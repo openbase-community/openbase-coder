@@ -27,12 +27,8 @@ def plugin_to_payload(plugin) -> dict:
             "console_pages": [
                 item.__dict__ for item in plugin.capabilities.console_pages
             ],
-            "project_views": [
-                item.__dict__ for item in plugin.capabilities.project_views
-            ],
             "skills": [item.__dict__ for item in plugin.capabilities.skills],
             "django_url_modules": list(plugin.capabilities.django_url_modules),
-            "console_npm_packages": list(plugin.capabilities.console_npm_packages),
         },
     }
 
@@ -52,7 +48,7 @@ def get_plugin_payload(plugin_id: str) -> dict | None:
 
 def get_console_registry_payload() -> dict:
     if not PLUGIN_CONSOLE_REGISTRY_PATH.is_file():
-        return {"pages": [], "project_views": []}
+        return {"pages": []}
     return json.loads(PLUGIN_CONSOLE_REGISTRY_PATH.read_text())
 
 

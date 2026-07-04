@@ -180,8 +180,8 @@ def _build_console() -> None:
     if not run_workspace_package_command(workspace_dir, console_dir, "install"):
         return
 
-    # Plugin console dependencies and generated route/component registry
-    sync_console_integration(load_registry(), config.workspace_path)
+    # Refresh iframe plugin assets and the runtime console registry
+    sync_console_integration(load_registry())
 
     run_workspace_package_command(workspace_dir, console_dir, "run", "build")
     click.echo("Console build complete.")

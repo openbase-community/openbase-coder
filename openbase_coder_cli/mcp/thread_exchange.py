@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import time
 import uuid
+from collections.abc import Callable, Iterator
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,7 +35,6 @@ from .thread_import import (
     _row_updated_ms,
     _source_rollout_path,
     _string,
-    _sync_cutoff_ms,
     _table_columns,
     _target_row_safe_for_overwrite,
     _thread_fingerprint,
@@ -43,15 +43,16 @@ from .thread_import import (
 )
 from .thread_sync_common import (
     DeviceIdentity,
-    device_exported_fingerprints,
-    device_ledger_entry,
-    import_snapshot_decision,
-    parent_fingerprint_for_export,
-    read_scoped_ledger,
+    LocalSnapshotState,
+    SnapshotExportCandidate,
+    SnapshotImportSource,
+    device_snapshot_dirs,
     read_device_ledger,
-    record_device_conflict,
+    read_scoped_ledger,
     record_device_snapshot,
-    snapshot_already_imported,
+    run_snapshot_export,
+    run_snapshot_import,
+    sync_cutoff_ms,
     write_json_atomic,
 )
 from .thread_sync_common import (
@@ -151,19 +152,48 @@ def export_thread_snapshots(
     identity = get_or_create_device_identity(device_identity_path)
     active_ids = set(active_thread_ids or set()) | _active_super_agent_thread_ids()
     ledger = _read_exchange_ledger(ledger_path)
-    cutoff_ms = _sync_cutoff_ms(max_age_days)
-    index_entries = _latest_session_index_entries(codex_home / SESSION_INDEX_NAME)
+    results = run_snapshot_export(
+        candidates=_export_candidates(
+            state_db=state_db,
+            codex_home=codex_home,
+            exchange_dir=exchange_dir,
+            identity=identity,
+            active_ids=active_ids,
+            cutoff_ms=sync_cutoff_ms(max_age_days),
+            index_entries=_latest_session_index_entries(
+                codex_home / SESSION_INDEX_NAME
+            ),
+            stability_delay_seconds=stability_delay_seconds,
+        ),
+        device_id=identity.device_id,
+        ledger=ledger,
+        scope_key="threads",
+        result_factory=ThreadSnapshotResult,
+    )
+    _write_exchange_ledger(ledger_path, ledger)
+    return results
 
-    results: list[ThreadSnapshotResult] = []
+
+def _export_candidates(
+    *,
+    state_db: Path,
+    codex_home: Path,
+    exchange_dir: Path,
+    identity: DeviceIdentity,
+    active_ids: set[str],
+    cutoff_ms: int | None,
+    index_entries: dict[str, dict[str, Any]],
+    stability_delay_seconds: float,
+) -> Iterator[SnapshotExportCandidate]:
     for row in _thread_rows(state_db):
         thread_id = _string(row.get("id"))
         if not thread_id:
             continue
         if cutoff_ms is not None and _row_updated_ms(row) < cutoff_ms:
-            results.append(ThreadSnapshotResult(thread_id, "skipped", "skipped_old"))
+            yield SnapshotExportCandidate(thread_id, skip_reason="skipped_old")
             continue
         if thread_id in active_ids:
-            results.append(ThreadSnapshotResult(thread_id, "skipped", "skipped_active"))
+            yield SnapshotExportCandidate(thread_id, skip_reason="skipped_active")
             continue
 
         safety = _thread_safe_for_sync(
@@ -173,36 +203,46 @@ def export_thread_snapshots(
             stability_delay_seconds=stability_delay_seconds,
         )
         if not safety.safe:
-            results.append(ThreadSnapshotResult(thread_id, "skipped", safety.reason))
+            yield SnapshotExportCandidate(thread_id, skip_reason=safety.reason)
             continue
 
         rollout = _source_rollout_path(row, codex_home, thread_id)
         fingerprint = _fingerprint_from_rollout_path(rollout, row)
         if rollout is None or fingerprint is None:
-            results.append(
-                ThreadSnapshotResult(thread_id, "skipped", "rollout_not_found")
-            )
+            yield SnapshotExportCandidate(thread_id, skip_reason="rollout_not_found")
             continue
         fingerprint_id = _fingerprint_id(fingerprint)
-        thread_ledger = _ledger_thread(ledger, thread_id)
-        if fingerprint_id in _device_exported_fingerprints(
-            thread_ledger, identity.device_id
-        ):
-            thread_ledger["local_fingerprint"] = fingerprint_id
-            results.append(
-                ThreadSnapshotResult(
-                    thread_id,
-                    "already_exported",
-                    "fingerprint_current",
-                    fingerprint=fingerprint_id,
-                )
-            )
-            continue
-
-        parent_fingerprint = _parent_fingerprint_for_export(
-            thread_ledger, fingerprint_id
+        yield SnapshotExportCandidate(
+            thread_id,
+            fingerprint_id=fingerprint_id,
+            write_snapshot=_snapshot_writer(
+                exchange_dir=exchange_dir,
+                identity=identity,
+                codex_home=codex_home,
+                state_db=state_db,
+                row=row,
+                rollout=rollout,
+                fingerprint=fingerprint,
+                fingerprint_id=fingerprint_id,
+                index_entry=index_entries.get(thread_id),
+            ),
         )
-        snapshot_path = _write_snapshot(
+
+
+def _snapshot_writer(
+    *,
+    exchange_dir: Path,
+    identity: DeviceIdentity,
+    codex_home: Path,
+    state_db: Path,
+    row: dict[str, Any],
+    rollout: Path,
+    fingerprint: dict[str, Any],
+    fingerprint_id: str,
+    index_entry: dict[str, Any] | None,
+) -> Callable[[str | None], Path]:
+    def write(parent_fingerprint: str | None) -> Path:
+        return _write_snapshot(
             exchange_dir=exchange_dir,
             identity=identity,
             codex_home=codex_home,
@@ -211,30 +251,11 @@ def export_thread_snapshots(
             fingerprint=fingerprint,
             fingerprint_id=fingerprint_id,
             parent_fingerprint=parent_fingerprint,
-            index_entry=index_entries.get(thread_id),
-            dynamic_tools=_thread_dynamic_tools(state_db, thread_id),
-        )
-        _record_device_snapshot(
-            thread_ledger,
-            device_id=identity.device_id,
-            fingerprint_id=fingerprint_id,
-            snapshot_path=snapshot_path,
-            status="exported",
-        )
-        thread_ledger["local_fingerprint"] = fingerprint_id
-        results.append(
-            ThreadSnapshotResult(
-                thread_id,
-                "exported",
-                "snapshot_written",
-                str(snapshot_path),
-                fingerprint_id,
-                identity.device_id,
-            )
+            index_entry=index_entry,
+            dynamic_tools=_thread_dynamic_tools(state_db, row["id"]),
         )
 
-    _write_exchange_ledger(ledger_path, ledger)
-    return results
+    return write
 
 
 def import_thread_snapshots(
@@ -250,181 +271,64 @@ def import_thread_snapshots(
 
     identity = get_or_create_device_identity(device_identity_path)
     ledger = _read_exchange_ledger(ledger_path)
-    results: list[ThreadSnapshotResult] = []
-    for snapshot_dir in _snapshot_dirs(exchange_dir):
-        metadata_path = snapshot_dir / "metadata.json"
-        try:
-            metadata = _read_snapshot_metadata(metadata_path)
-        except ThreadTransferError as exc:
-            results.append(
-                ThreadSnapshotResult(
-                    thread_id=snapshot_dir.parent.name,
-                    status="skipped",
-                    reason=str(exc),
-                    snapshot_path=str(snapshot_dir),
-                )
-            )
-            continue
+    results = run_snapshot_import(
+        exchange_dir=exchange_dir,
+        device_id=identity.device_id,
+        ledger=ledger,
+        source=_exchange_import_source(state_db=state_db, codex_home=codex_home),
+        result_factory=ThreadSnapshotResult,
+    )
+    _write_exchange_ledger(ledger_path, ledger)
+    return results
 
+
+def _exchange_import_source(
+    *,
+    state_db: Path,
+    codex_home: Path,
+) -> SnapshotImportSource:
+    def load_local(metadata: dict[str, Any]) -> LocalSnapshotState:
         thread_id = metadata["thread_id"]
-        source_device_id = metadata["source_device_id"]
-        fingerprint_id = metadata["fingerprint"]
-        if source_device_id == identity.device_id:
-            results.append(
-                ThreadSnapshotResult(
-                    thread_id,
-                    "skipped",
-                    "same_device",
-                    str(snapshot_dir),
-                    fingerprint_id,
-                    source_device_id,
-                )
-            )
-            continue
-
-        thread_ledger = _ledger_thread(ledger, thread_id)
-        if _snapshot_already_imported(thread_ledger, source_device_id, fingerprint_id):
-            results.append(
-                ThreadSnapshotResult(
-                    thread_id,
-                    "already_imported",
-                    "fingerprint_seen",
-                    str(snapshot_dir),
-                    fingerprint_id,
-                    source_device_id,
-                )
-            )
-            continue
-        if thread_ledger.get("conflict"):
-            _record_device_snapshot(
-                thread_ledger,
-                device_id=source_device_id,
-                fingerprint_id=fingerprint_id,
-                snapshot_path=snapshot_dir,
-                status="seen_after_conflict",
-            )
-            results.append(
-                ThreadSnapshotResult(
-                    thread_id,
-                    "conflict",
-                    "conflict_unresolved",
-                    str(snapshot_dir),
-                    fingerprint_id,
-                    source_device_id,
-                )
-            )
-            continue
-
-        validation_error = _validate_snapshot(snapshot_dir, metadata)
-        if validation_error:
-            results.append(
-                ThreadSnapshotResult(
-                    thread_id,
-                    "skipped",
-                    validation_error,
-                    str(snapshot_dir),
-                    fingerprint_id,
-                    source_device_id,
-                )
-            )
-            continue
-
         local_row = _exchange_thread_row(state_db, thread_id)
         local_fingerprint = (
             _fingerprint_id(_thread_fingerprint(local_row, codex_home, thread_id))
             if local_row is not None
             else None
         )
-        parent_fingerprint = _string(metadata.get("parent_fingerprint"))
-        decision = _import_decision(
-            local_row=local_row,
-            local_fingerprint=local_fingerprint,
-            incoming_fingerprint=fingerprint_id,
-            parent_fingerprint=parent_fingerprint,
-            thread_ledger=thread_ledger,
-        )
-        if decision == "same_content":
-            _record_device_snapshot(
-                thread_ledger,
-                device_id=source_device_id,
-                fingerprint_id=fingerprint_id,
-                snapshot_path=snapshot_dir,
-                status="same_content",
-            )
-            results.append(
-                ThreadSnapshotResult(
-                    thread_id,
-                    "already_imported",
-                    "same_content",
-                    str(snapshot_dir),
-                    fingerprint_id,
-                    source_device_id,
-                )
-            )
-            continue
-        if decision == "conflict":
-            _record_conflict(
-                thread_ledger,
-                local_fingerprint=local_fingerprint,
-                incoming_fingerprint=fingerprint_id,
-                source_device_id=source_device_id,
-                reason="divergent_fingerprint",
-            )
-            results.append(
-                ThreadSnapshotResult(
-                    thread_id,
-                    "conflict",
-                    "divergent_fingerprint",
-                    str(snapshot_dir),
-                    fingerprint_id,
-                    source_device_id,
-                )
-            )
-            continue
-        if local_row is not None and not _target_row_safe_for_overwrite(
-            local_row,
-            codex_home,
-            thread_id,
-        ):
-            results.append(
-                ThreadSnapshotResult(
-                    thread_id,
-                    "skipped",
-                    "target_active",
-                    str(snapshot_dir),
-                    fingerprint_id,
-                    source_device_id,
-                )
-            )
-            continue
+        return LocalSnapshotState(local_row is not None, local_fingerprint, local_row)
 
+    def import_blocked_reason(
+        metadata: dict[str, Any], local: LocalSnapshotState
+    ) -> str | None:
+        if local.context is not None and not _target_row_safe_for_overwrite(
+            local.context,
+            codex_home,
+            metadata["thread_id"],
+        ):
+            return "target_active"
+        return None
+
+    def perform_import(
+        snapshot_dir: Path, metadata: dict[str, Any], local: LocalSnapshotState
+    ) -> str | None:
         _import_snapshot_into_home(
             snapshot_dir=snapshot_dir,
             metadata=metadata,
             codex_home=codex_home,
-            overwrite=local_row is not None,
+            overwrite=local.exists,
         )
-        _record_device_snapshot(
-            thread_ledger,
-            device_id=source_device_id,
-            fingerprint_id=fingerprint_id,
-            snapshot_path=snapshot_dir,
-            status="imported",
-        )
-        thread_ledger["local_fingerprint"] = fingerprint_id
-        results.append(
-            ThreadSnapshotResult(
-                thread_id,
-                "imported",
-                "snapshot_imported",
-                str(snapshot_dir),
-                fingerprint_id,
-                source_device_id,
-            )
-        )
+        return None
 
-    _write_exchange_ledger(ledger_path, ledger)
-    return results
+    return SnapshotImportSource(
+        scope_key="threads",
+        entity_id_key="thread_id",
+        read_metadata=_read_snapshot_metadata,
+        metadata_error=ThreadTransferError,
+        validate_snapshot=_validate_snapshot,
+        load_local=load_local,
+        import_blocked_reason=import_blocked_reason,
+        perform_import=perform_import,
+    )
 
 
 def thread_snapshot_status(
@@ -440,7 +344,7 @@ def thread_snapshot_status(
         for thread_id, value in ledger.get("threads", {}).items()
         if isinstance(value, dict) and isinstance(value.get("conflict"), dict)
     ]
-    snapshots = list(_snapshot_dirs(exchange_dir))
+    snapshots = list(device_snapshot_dirs(exchange_dir))
     return {
         "device": identity.to_json() if identity else None,
         "exchange_dir": str(exchange_dir),
@@ -683,7 +587,7 @@ def resolve_thread_snapshot_conflict(
         )
         resolved_fingerprint = _string(latest["metadata"].get("fingerprint"))
         for snapshot in snapshots:
-            _record_device_snapshot(
+            record_device_snapshot(
                 thread_ledger,
                 device_id=source_device_id,
                 fingerprint_id=snapshot["metadata"]["fingerprint"],
@@ -695,7 +599,7 @@ def resolve_thread_snapshot_conflict(
             raise ThreadConflictResolutionError("local_thread_not_found")
         resolved_fingerprint = local_fingerprint
         for snapshot in snapshots:
-            _record_device_snapshot(
+            record_device_snapshot(
                 thread_ledger,
                 device_id=source_device_id,
                 fingerprint_id=snapshot["metadata"]["fingerprint"],
@@ -974,41 +878,6 @@ def _exchange_thread_row(db_path: Path, thread_id: str) -> dict[str, Any] | None
         return dict(row) if row is not None else None
 
 
-def _snapshot_dirs(exchange_dir: Path) -> list[Path]:
-    root = exchange_dir / "devices"
-    if not root.exists():
-        return []
-    return sorted(
-        path
-        for path in root.glob("*/snapshots/*/*")
-        if path.is_dir() and (path / "metadata.json").exists()
-    )
-
-
-def _import_decision(
-    *,
-    local_row: dict[str, Any] | None,
-    local_fingerprint: str | None,
-    incoming_fingerprint: str,
-    parent_fingerprint: str | None,
-    thread_ledger: dict[str, Any],
-) -> str:
-    return import_snapshot_decision(
-        has_local=local_row is not None,
-        local_fingerprint=local_fingerprint,
-        incoming_fingerprint=incoming_fingerprint,
-        parent_fingerprint=parent_fingerprint,
-        entry_ledger=thread_ledger,
-    )
-
-
-def _parent_fingerprint_for_export(
-    thread_ledger: dict[str, Any],
-    fingerprint_id: str,
-) -> str | None:
-    return parent_fingerprint_for_export(thread_ledger, fingerprint_id)
-
-
 def _fingerprint_id(fingerprint: dict[str, Any] | None) -> str | None:
     if not fingerprint:
         return None
@@ -1028,66 +897,6 @@ def _write_exchange_ledger(path: Path, ledger: dict[str, Any]) -> None:
     write_json_atomic(path, ledger)
 
 
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    write_json_atomic(path, payload)
-
-
-def _ledger_thread(ledger: dict[str, Any], thread_id: str) -> dict[str, Any]:
-    return device_ledger_entry(ledger, scope_key="threads", entity_id=thread_id)
-
-
-def _device_exported_fingerprints(
-    thread_ledger: dict[str, Any], device_id: str
-) -> set[str]:
-    return device_exported_fingerprints(thread_ledger, device_id)
-
-
-def _snapshot_already_imported(
-    thread_ledger: dict[str, Any],
-    device_id: str,
-    fingerprint_id: str,
-) -> bool:
-    return snapshot_already_imported(
-        thread_ledger,
-        device_id=device_id,
-        fingerprint_id=fingerprint_id,
-    )
-
-
-def _record_device_snapshot(
-    thread_ledger: dict[str, Any],
-    *,
-    device_id: str,
-    fingerprint_id: str,
-    snapshot_path: Path,
-    status: str,
-) -> None:
-    record_device_snapshot(
-        thread_ledger,
-        device_id=device_id,
-        fingerprint_id=fingerprint_id,
-        snapshot_path=snapshot_path,
-        status=status,
-    )
-
-
-def _record_conflict(
-    thread_ledger: dict[str, Any],
-    *,
-    local_fingerprint: str | None,
-    incoming_fingerprint: str,
-    source_device_id: str,
-    reason: str,
-) -> None:
-    record_device_conflict(
-        thread_ledger,
-        local_fingerprint=local_fingerprint,
-        incoming_fingerprint=incoming_fingerprint,
-        source_device_id=source_device_id,
-        reason=reason,
-    )
-
-
 def _snapshot_records(
     exchange_dir: Path,
     *,
@@ -1095,7 +904,7 @@ def _snapshot_records(
     source_device_id: str | None = None,
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    for snapshot_dir in _snapshot_dirs(exchange_dir):
+    for snapshot_dir in device_snapshot_dirs(exchange_dir):
         metadata_path = snapshot_dir / "metadata.json"
         try:
             metadata = _read_snapshot_metadata(metadata_path)
