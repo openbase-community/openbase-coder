@@ -52,6 +52,9 @@ Local Kokoro/MLX audio is installed on demand when setup is run with
 `--audio-provider local`. Release packages should be built with Python 3.12 so
 that Kokoro's current Python `<3.13` package metadata is satisfied.
 
+After setup (in either mode), run `openbase-coder login` to authenticate
+with Openbase Cloud — required for iOS app pairing and cloud onboarding.
+
 For source-based development, clone the workspace repo and run its setup
 script from the workspace root:
 

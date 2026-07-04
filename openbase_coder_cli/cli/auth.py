@@ -233,6 +233,10 @@ def login() -> None:
     click.echo("Opening browser for Openbase login...")
     click.echo(auth_url)
     webbrowser.open(auth_url)
+    click.echo(
+        "Waiting for you to finish logging in in the browser... "
+        "(if no tab opened, open the URL above; Ctrl-C to abort)"
+    )
 
     callback = _wait_for_callback(redirect_uri, expected_state=state)
     if callback.get("state") != state:

@@ -58,6 +58,13 @@ cd openbase-coder-workspace
 ./scripts/setup
 ```
 
+After setup completes — in either mode — authenticate with Openbase Cloud
+(required for iOS app pairing and cloud onboarding):
+
+```bash
+openbase-coder login
+```
+
 Setup never clones or git-updates a workspace itself. When run without
 `--workspace-dir` (and no bundled runtime package is present), it discovers
 the workspace from the one recorded in `~/.openbase/installation.json`, then
@@ -118,13 +125,15 @@ Uninstall is handled with normal system and package-manager commands, not the
 stop and remove launchd/systemd services, remove the CLI package, then either
 delete or archive `~/.openbase`.
 
-## Authenticate With Openbase Cloud (Optional)
+## Authenticate With Openbase Cloud
 
 ```bash
-openbase-coder login --email you@example.com
+openbase-coder login
 ```
 
-This stores tokens in `~/.openbase/auth.json` for JWT-based auth flows.
+This opens a browser OAuth flow and stores tokens in `~/.openbase/auth.json`.
+It applies to both install modes and is required for iOS app pairing and
+cloud onboarding; purely local use can skip it.
 
 ## Next Steps
 
