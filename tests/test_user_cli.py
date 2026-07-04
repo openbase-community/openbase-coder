@@ -347,6 +347,13 @@ def test_user_ios_upload_logs_posts_control_command(monkeypatch):
 
 def test_user_super_agent_name_derives_from_thread_name(monkeypatch):
     voice_route = importlib.import_module("openbase_coder_cli.livekit_voice_route")
+    # Pin the provider so the patched Cartesia voice pool is used regardless of
+    # the developer's ~/.openbase dispatcher config.
+    monkeypatch.setattr(
+        voice_route,
+        "selected_tts_provider_id",
+        lambda *args, **kwargs: voice_route.CARTESIA_PROVIDER_ID,
+    )
     monkeypatch.setattr(
         voice_route,
         "SUPER_AGENT_VOICES",
@@ -381,6 +388,13 @@ def test_user_super_agent_name_command_is_not_nested_under_user():
 
 def test_user_super_agent_name_json(monkeypatch):
     voice_route = importlib.import_module("openbase_coder_cli.livekit_voice_route")
+    # Pin the provider so the patched Cartesia voice pool is used regardless of
+    # the developer's ~/.openbase dispatcher config.
+    monkeypatch.setattr(
+        voice_route,
+        "selected_tts_provider_id",
+        lambda *args, **kwargs: voice_route.CARTESIA_PROVIDER_ID,
+    )
     monkeypatch.setattr(
         voice_route,
         "SUPER_AGENT_VOICES",
@@ -618,7 +632,9 @@ def test_default_super_agents_reasoning_sets_config_file(monkeypatch, tmp_path):
     config_path = tmp_path / "dispatcher-config.json"
     monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
 
-    result = CliRunner().invoke(defaults_cli.defaults, ["super-agents-reasoning", "medium"])
+    result = CliRunner().invoke(
+        defaults_cli.defaults, ["super-agents-reasoning", "medium"]
+    )
 
     assert result.exit_code == 0
     assert "Default Super Agents reasoning effort set to medium" in result.output
@@ -673,7 +689,9 @@ def test_reasoning_config_ignores_legacy_shared_key(tmp_path):
 
 
 def test_default_dispatcher_reasoning_rejects_invalid_level():
-    result = CliRunner().invoke(defaults_cli.defaults, ["dispatcher-reasoning", "extreme"])
+    result = CliRunner().invoke(
+        defaults_cli.defaults, ["dispatcher-reasoning", "extreme"]
+    )
 
     assert result.exit_code != 0
     assert "Reasoning effort must be one of" in result.output

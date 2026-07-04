@@ -9,12 +9,48 @@ from dataclasses import dataclass
 from livekit import rtc
 
 from openbase_coder_cli.livekit_agent.config import (
+    AGENT_STATUS_TOPIC,
     ANNOUNCER_AUDIO_KIND,
     ANNOUNCER_TOPIC,
     VOICE_ROUTE_TOPIC,
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def publish_agent_error_packet(
+    room: rtc.Room,
+    *,
+    code: str,
+    detail: str,
+) -> str:
+    """Publish an agent error status packet so room participants can show it.
+
+    Client contract (additive; old clients ignore unknown topics): a reliable
+    data packet on topic ``openbase.agent.status`` whose payload is JSON:
+    ``{"type": "agent_error", "code": <machine-readable code>,
+    "detail": <human-readable message>, "message_id": <unique id>}``.
+    """
+    message_id = f"agent-status-{uuid.uuid4().hex}"
+    payload = {
+        "type": "agent_error",
+        "code": code,
+        "detail": detail,
+        "message_id": message_id,
+    }
+    await room.local_participant.publish_data(
+        json.dumps(payload).encode("utf-8"),
+        reliable=True,
+        topic=AGENT_STATUS_TOPIC,
+    )
+    logger.error(
+        "dispatch_timing stage=agent_error_packet_published message_id=%s "
+        "code=%s detail=%r",
+        message_id,
+        code,
+        detail,
+    )
+    return message_id
 
 
 @dataclass(frozen=True)

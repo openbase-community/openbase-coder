@@ -75,7 +75,7 @@ def test_install_cli_shim_dev_mode_execs_workspace_venv(tmp_path, monkeypatch) -
     monkeypatch.setattr(workspace_phase.Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.setattr(workspace_phase, "current_runtime_package", lambda: None)
     workspace = tmp_path / "workspace"
-    venv_cli = workspace / "cli" / ".venv" / "bin" / "openbase-coder"
+    venv_cli = workspace / ".venv" / "bin" / "openbase-coder"
     venv_cli.parent.mkdir(parents=True)
     venv_cli.write_text("#!/bin/sh\n", encoding="utf-8")
 

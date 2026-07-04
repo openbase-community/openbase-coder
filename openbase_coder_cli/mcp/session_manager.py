@@ -128,12 +128,15 @@ async def _broadcast(session_id: str, event: dict[str, Any]) -> None:
         group_name = f"thread_{session_id}"
         await channel_layer.group_send(group_name, event)
 
-        if event.get("type") in ("turn_started", "turn_completed"):
+        if event.get("type") in ("turn_started", "turn_completed", "error"):
             global_event = {**event, "thread_id": session_id}
             await channel_layer.group_send("all_threads", global_event)
     except Exception:
-        logger.debug(
-            "Failed to broadcast event for thread %s", session_id, exc_info=True
+        logger.warning(
+            "Failed to broadcast %s event for thread %s",
+            event.get("type"),
+            session_id,
+            exc_info=True,
         )
 
 
@@ -204,6 +207,17 @@ def _runtime_error_message(exc: RuntimeError) -> str:
 def _is_thread_unavailable_error(exc: RuntimeError) -> bool:
     message = _runtime_error_message(exc).lower()
     return "not found" in message or "invalid thread id" in message
+
+
+def _turn_failure_message(params: dict[str, Any]) -> str:
+    error = params.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    if isinstance(error, str) and error.strip():
+        return error.strip()
+    return "The agent turn failed unexpectedly."
 
 
 class _OpenbaseSuperAgentsClient(CodexAppServerClient):
@@ -883,6 +897,25 @@ class CodexAppServerSessionManager:
                 async with self._state_lock:
                     self._turn_to_session.pop(turn_id, None)
                     self._delivered_text.pop(turn_id, None)
+            if method == "turn/failed":
+                failure_message = _turn_failure_message(params)
+                logger.error(
+                    "Codex turn %s failed for thread %s: %s",
+                    turn_id or "",
+                    thread_id,
+                    failure_message,
+                )
+                await _broadcast(
+                    thread_id,
+                    {
+                        "type": "error",
+                        "data": {
+                            "message": failure_message,
+                            "code": "turn_failed",
+                            "turn_id": turn_id or "",
+                        },
+                    },
+                )
             session_state = await self.get_session_state(thread_id)
             if session_state is not None:
                 await _broadcast(

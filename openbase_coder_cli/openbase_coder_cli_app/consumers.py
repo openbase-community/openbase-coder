@@ -46,7 +46,22 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
         await self.accept()
 
         manager = get_session_manager()
-        thread = await manager.get_thread_state(self.thread_id)
+        try:
+            thread = await manager.get_thread_state(self.thread_id)
+        except (ValueError, RuntimeError) as exc:
+            logger.error(
+                "Unable to load initial state for thread %s: %s", self.thread_id, exc
+            )
+            await self.send_json(
+                {
+                    "type": "error",
+                    "data": {
+                        "message": _friendly_error(exc),
+                        "code": "thread_state_unavailable",
+                    },
+                }
+            )
+            return
         if thread:
             await self.send_json(
                 {
@@ -130,6 +145,9 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
+    async def error(self, event):
+        await self.send_json({"type": "error", "data": event["data"]})
+
 
 class AllThreadsConsumer(AsyncJsonWebsocketConsumer):
     """Global WebSocket consumer that broadcasts turn lifecycle updates for all threads."""
@@ -143,7 +161,20 @@ class AllThreadsConsumer(AsyncJsonWebsocketConsumer):
         await self.accept()
 
         manager = get_session_manager()
-        threads = await manager.list_threads()
+        try:
+            threads = await manager.list_threads()
+        except (ValueError, RuntimeError) as exc:
+            logger.error("Unable to list threads for all-threads socket: %s", exc)
+            await self.send_json(
+                {
+                    "type": "error",
+                    "data": {
+                        "message": _friendly_error(exc),
+                        "code": "thread_list_unavailable",
+                    },
+                }
+            )
+            return
         running = [thread for thread in threads if thread.status == "running"]
         for thread in running:
             await self.send_json(
@@ -177,6 +208,15 @@ class AllThreadsConsumer(AsyncJsonWebsocketConsumer):
         await self.send_json(
             {
                 "type": "turn_completed",
+                "thread_id": event["thread_id"],
+                "data": event["data"],
+            }
+        )
+
+    async def error(self, event):
+        await self.send_json(
+            {
+                "type": "error",
                 "thread_id": event["thread_id"],
                 "data": event["data"],
             }

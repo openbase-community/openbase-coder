@@ -1508,3 +1508,48 @@ def test_resume_thread_without_explicit_instructions_uses_super_agent_instructio
     assert client.calls[1][1]["params"]["developerInstructions"] == (
         "super resume instructions"
     )
+
+
+def test_turn_failed_broadcasts_error_envelope(monkeypatch, tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    async def fake_broadcast(session_id: str, event: dict[str, Any]) -> None:
+        events.append((session_id, event))
+
+    monkeypatch.setattr(
+        "openbase_coder_cli.mcp.session_manager._broadcast",
+        fake_broadcast,
+    )
+    client = FakeSuperAgentsClient(
+        {
+            "read_thread": [
+                {"thread": _thread("thr-1", str(project_dir), status="idle")},
+            ],
+        }
+    )
+
+    asyncio.run(
+        _manager(client)._handle_client_event(
+            "turn/failed",
+            {
+                "threadId": "thr-1",
+                "turnId": "turn-1",
+                "error": {"message": "Codex turn exploded"},
+            },
+        )
+    )
+
+    error_events = [event for _sid, event in events if event["type"] == "error"]
+    assert error_events == [
+        {
+            "type": "error",
+            "data": {
+                "message": "Codex turn exploded",
+                "code": "turn_failed",
+                "turn_id": "turn-1",
+            },
+        }
+    ]
+    assert [event["type"] for _sid, event in events].count("turn_completed") == 1

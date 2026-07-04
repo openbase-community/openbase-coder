@@ -756,12 +756,19 @@ def livekit_room_token(request):
             ).rstrip("/"),
         )
     except AuthLoginRequiredError as exc:
-        return Response({"detail": str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response(
+            {"detail": str(exc), "code": "login_required"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
     except OpenbaseCloudAudioSubscriptionError as exc:
-        return Response({"detail": str(exc)}, status=status.HTTP_402_PAYMENT_REQUIRED)
+        return Response(
+            {"detail": str(exc), "code": "subscription_required"},
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
     except AuthTransientError as exc:
         return Response(
-            {"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
+            {"detail": str(exc), "code": "cloud_unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
     room_name = input_serializer.validated_data.get("room_name")
@@ -825,28 +832,33 @@ def apple_music_playback_entitlement(request):
             ).rstrip("/"),
         )
     except AuthLoginRequiredError as exc:
-        return Response({"detail": str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response(
+            {"detail": str(exc), "code": "login_required"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
     except OpenbaseCloudAudioSubscriptionError as exc:
-        return Response({"detail": str(exc)}, status=status.HTTP_402_PAYMENT_REQUIRED)
+        return Response(
+            {"detail": str(exc), "code": "subscription_required"},
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
     except AuthTransientError as exc:
         return Response(
-            {"detail": str(exc)},
+            {"detail": str(exc), "code": "cloud_unavailable"},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
-    status_code = (
-        status.HTTP_200_OK
-        if entitlement["has_active_subscription"]
-        else status.HTTP_402_PAYMENT_REQUIRED
-    )
+    has_active_subscription = bool(entitlement["has_active_subscription"])
+    payload = {
+        "feature": "apple_music_playback",
+        "available": has_active_subscription,
+        "requires_subscription": True,
+        "detail": entitlement["detail"],
+    }
+    if has_active_subscription:
+        return Response(payload, status=status.HTTP_200_OK)
     return Response(
-        {
-            "feature": "apple_music_playback",
-            "available": bool(entitlement["has_active_subscription"]),
-            "requires_subscription": True,
-            "detail": entitlement["detail"],
-        },
-        status=status_code,
+        {**payload, "code": "subscription_required"},
+        status=status.HTTP_402_PAYMENT_REQUIRED,
     )
 
 

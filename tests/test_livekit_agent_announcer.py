@@ -1078,3 +1078,92 @@ async def test_voice_router_transfers_to_prepared_target(monkeypatch, tmp_path):
             "target-1", "Renamed Project"
         ).name,
     }
+
+
+class _FakeLocalParticipant:
+    def __init__(self) -> None:
+        self.published: list[tuple[bytes, bool, str]] = []
+
+    async def publish_data(self, data, *, reliable, topic):
+        self.published.append((data, reliable, topic))
+
+
+class _FakeRoom:
+    def __init__(self) -> None:
+        self.local_participant = _FakeLocalParticipant()
+
+
+def test_publish_agent_error_packet_publishes_status_topic():
+    room = _FakeRoom()
+
+    message_id = asyncio.run(
+        livekit.publish_agent_error_packet(
+            room,
+            code="subscription_required",
+            detail="Subscribe in Openbase Cloud.",
+        )
+    )
+
+    assert len(room.local_participant.published) == 1
+    data, reliable, topic = room.local_participant.published[0]
+    assert reliable is True
+    assert topic == config.AGENT_STATUS_TOPIC
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {
+        "type": "agent_error",
+        "code": "subscription_required",
+        "detail": "Subscribe in Openbase Cloud.",
+        "message_id": message_id,
+    }
+
+
+def test_verify_cloud_audio_subscription_reports_lapsed_subscription(monkeypatch):
+    room = _FakeRoom()
+    spoken: list[str] = []
+    session = SimpleNamespace(say=lambda text: spoken.append(text))
+
+    def raise_subscription_error(**_kwargs):
+        raise livekit.OpenbaseCloudAudioSubscriptionError(
+            "Subscribe in Openbase Cloud to use managed audio."
+        )
+
+    monkeypatch.setattr(
+        livekit,
+        "ensure_openbase_cloud_audio_subscription",
+        raise_subscription_error,
+    )
+    monkeypatch.setattr(livekit, "selected_tts_provider_id", lambda: "openbase_cloud")
+    monkeypatch.setattr(livekit, "selected_stt_provider_id", lambda: "openbase_cloud")
+
+    asyncio.run(livekit._verify_cloud_audio_subscription(room, session))
+
+    assert len(room.local_participant.published) == 1
+    data, _reliable, topic = room.local_participant.published[0]
+    assert topic == config.AGENT_STATUS_TOPIC
+    payload = json.loads(data.decode("utf-8"))
+    assert payload["type"] == "agent_error"
+    assert payload["code"] == "subscription_required"
+    assert payload["detail"] == "Subscribe in Openbase Cloud to use managed audio."
+    assert spoken and "Openbase Cloud audio is unavailable" in spoken[0]
+
+
+def test_verify_cloud_audio_subscription_skips_transient_errors(monkeypatch):
+    room = _FakeRoom()
+    session = SimpleNamespace(
+        say=lambda text: pytest.fail("should not speak on transient errors")
+    )
+
+    def raise_transient_error(**_kwargs):
+        raise livekit.AuthTransientError("backend briefly unavailable")
+
+    monkeypatch.setattr(
+        livekit,
+        "ensure_openbase_cloud_audio_subscription",
+        raise_transient_error,
+    )
+    monkeypatch.setattr(livekit, "selected_tts_provider_id", lambda: "openbase_cloud")
+    monkeypatch.setattr(livekit, "selected_stt_provider_id", lambda: "openbase_cloud")
+
+    asyncio.run(livekit._verify_cloud_audio_subscription(room, session))
+
+    assert room.local_participant.published == []

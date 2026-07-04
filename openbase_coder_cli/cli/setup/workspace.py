@@ -298,10 +298,15 @@ def _install_cli_shim(workspace_dir: str) -> None:
         # survives package upgrades when it points through current/.
         shim = f'#!/bin/sh\nexec {shlex.quote(str(launcher))} "$@"\n'
     else:
-        venv_cli = Path(workspace_dir) / "cli" / ".venv" / "bin" / "openbase-coder"
-        if not venv_cli.is_file():
+        # uv-workspace layout: the venv lives at the workspace root.
+        candidates = (
+            Path(workspace_dir) / ".venv" / "bin" / "openbase-coder",
+            Path(workspace_dir) / "cli" / ".venv" / "bin" / "openbase-coder",
+        )
+        venv_cli = next((path for path in candidates if path.is_file()), None)
+        if venv_cli is None:
             click.echo(
-                f"Workspace CLI venv binary not found at {venv_cli}; "
+                f"Workspace venv binary not found at {candidates[0]}; "
                 "skipping CLI shim install."
             )
             return

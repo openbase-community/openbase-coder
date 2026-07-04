@@ -36,6 +36,10 @@ from openbase_coder_cli.brain_score import (  # noqa: F401
     brain_score_token_file,
     load_brain_score_token,
 )
+from openbase_coder_cli.config.cloud_audio import (
+    OpenbaseCloudAudioSubscriptionError,
+    ensure_openbase_cloud_audio_subscription,
+)
 from openbase_coder_cli.config.machine_token_manager import (
     MachineTokenError,
     MachineTokenManager,
@@ -72,6 +76,7 @@ from openbase_coder_cli.livekit_agent.codex_llm import (  # noqa: F401
     CodexLLMStream,
 )
 from openbase_coder_cli.livekit_agent.config import (  # noqa: F401
+    AGENT_STATUS_TOPIC,
     ANNOUNCER_AUDIO_KIND,
     ANNOUNCER_MAX_QUEUE_SIZE,
     ANNOUNCER_SILENCE_GRACE_SECONDS,
@@ -144,6 +149,7 @@ from openbase_coder_cli.livekit_agent.packets import (  # noqa: F401
     parse_announcer_audio_packet,
     parse_announcer_packet,
     parse_voice_route_packet,
+    publish_agent_error_packet,
 )
 from openbase_coder_cli.livekit_agent.room_diagnostics import (  # noqa: F401
     _participant_log_fields,
@@ -372,32 +378,91 @@ def _diagnostic_vad(vad_model):
     return LoggingVAD(vad_model)
 
 
-@server.rtc_session(agent_name=LIVEKIT_DISPATCH_AGENT_NAME)
-async def livekit_agent(ctx: JobContext):
-    _refresh_audio_credentials()
-    ctx.log_context_fields = {
-        "room": ctx.room.name,
-    }
-    logger.info(
-        "Connecting LiveKit voice session to Super Agents backend with cwd=%s",
-        LIVEKIT_CODEX_THREAD_CWD,
-    )
-    voice_backend_client = (
-        _build_voice_backend_client(persist_thread=False)
-        if LIVEKIT_CODEX_FRESH_THREAD_PER_SESSION
-        else _shared_voice_backend_client
-    )
-    prepare_task = asyncio.create_task(voice_backend_client.prepare())
-    prepare_task.add_done_callback(_log_prepare_result)
-    voice_router = LiveKitVoiceRouter(voice_backend_client)
+def _agent_error_code(exc: Exception) -> str:
+    if isinstance(exc, OpenbaseCloudAudioSubscriptionError):
+        return "subscription_required"
+    if isinstance(exc, OpenbaseCloudAudioAuthenticationError | AuthLoginRequiredError):
+        return "login_required"
+    if isinstance(exc, AuthTransientError):
+        return "cloud_unavailable"
+    return "agent_start_failed"
 
-    logger.info("Connecting to LiveKit room")
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-    logger.info("Connected to LiveKit room")
-    room_diagnostic_handlers = (
-        _register_room_diagnostics(ctx.room) if LIVEKIT_VERBOSE_LOGGING else ()
+
+def _agent_error_detail(exc: Exception) -> str:
+    if isinstance(
+        exc,
+        OpenbaseCloudAudioSubscriptionError
+        | OpenbaseCloudAudioAuthenticationError
+        | AuthLoginRequiredError
+        | AuthTransientError,
+    ):
+        return str(exc)
+    return (
+        "The Openbase voice agent joined the call but could not start its "
+        f"audio pipeline: {exc}. Check the voice settings and the Openbase "
+        "Coder service logs, then rejoin the call."
     )
 
+
+async def _report_agent_error(room: rtc.Room, exc: Exception) -> None:
+    """Best-effort: tell room participants why the agent cannot operate."""
+    try:
+        await publish_agent_error_packet(
+            room,
+            code=_agent_error_code(exc),
+            detail=_agent_error_detail(exc),
+        )
+    except Exception:
+        logger.exception("Unable to publish LiveKit agent error packet")
+
+
+def _uses_openbase_cloud_audio() -> bool:
+    return (
+        selected_tts_provider_id() == OPENBASE_CLOUD_TTS_PROVIDER_ID
+        or selected_stt_provider_id() == OPENBASE_CLOUD_STT_PROVIDER_ID
+    )
+
+
+async def _verify_cloud_audio_subscription(room: rtc.Room, session) -> None:
+    """Check the Openbase Cloud audio subscription and surface failures.
+
+    The room token endpoint gates joins on this check, but the subscription
+    can lapse (or credits run out) after the token was minted, leaving the
+    user in a silent call. Run the check again from the agent and tell the
+    participant instead of stalling."""
+    try:
+        await asyncio.to_thread(
+            ensure_openbase_cloud_audio_subscription,
+            tts_provider_id=selected_tts_provider_id(),
+            stt_provider_id=selected_stt_provider_id(),
+            web_backend_url=WEB_BACKEND_URL,
+        )
+    except (
+        OpenbaseCloudAudioSubscriptionError,
+        AuthLoginRequiredError,
+    ) as exc:
+        logger.error("Openbase Cloud audio is unusable for this voice session: %s", exc)
+        await _report_agent_error(room, exc)
+        try:
+            session.say(
+                "Openbase Cloud audio is unavailable for this call. "
+                "Check your Openbase subscription or voice settings."
+            )
+        except Exception:
+            logger.warning(
+                "Unable to speak LiveKit agent failure message", exc_info=True
+            )
+    except AuthTransientError as exc:
+        logger.warning(
+            "Skipping Openbase Cloud audio subscription check this session: %s", exc
+        )
+
+
+async def _start_voice_session(
+    ctx: JobContext,
+    voice_router: LiveKitVoiceRouter,
+) -> tuple[AgentSession, "VoiceSelectingTTS", tuple]:
+    """Build the STT/TTS pipeline and start the agent session in the room."""
     dispatcher_voice = dispatcher_voice_config()
     tts_provider = get_tts_provider(dispatcher_voice.provider)
     announcer_voice = (
@@ -472,6 +537,65 @@ async def livekit_agent(ctx: JobContext):
         "stt_provider=%s tts_role=direct",
         ctx.room.name,
         selected_stt_provider_id(),
+    )
+    return session, announcer_tts, session_diagnostic_handlers
+
+
+@server.rtc_session(agent_name=LIVEKIT_DISPATCH_AGENT_NAME)
+async def livekit_agent(ctx: JobContext):
+    _refresh_audio_credentials()
+    ctx.log_context_fields = {
+        "room": ctx.room.name,
+    }
+    logger.info(
+        "Connecting LiveKit voice session to Super Agents backend with cwd=%s",
+        LIVEKIT_CODEX_THREAD_CWD,
+    )
+    voice_backend_client = (
+        _build_voice_backend_client(persist_thread=False)
+        if LIVEKIT_CODEX_FRESH_THREAD_PER_SESSION
+        else _shared_voice_backend_client
+    )
+    prepare_task = asyncio.create_task(voice_backend_client.prepare())
+    prepare_task.add_done_callback(_log_prepare_result)
+    voice_router = LiveKitVoiceRouter(voice_backend_client)
+
+    logger.info("Connecting to LiveKit room")
+    try:
+        await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    except Exception:
+        logger.error(
+            "LiveKit agent failed to connect to room %s; participants will "
+            "stay at 'waiting for agent'",
+            ctx.room.name,
+            exc_info=True,
+        )
+        raise
+    logger.info("Connected to LiveKit room")
+    room_diagnostic_handlers = (
+        _register_room_diagnostics(ctx.room) if LIVEKIT_VERBOSE_LOGGING else ()
+    )
+
+    try:
+        (
+            session,
+            announcer_tts,
+            session_diagnostic_handlers,
+        ) = await _start_voice_session(ctx, voice_router)
+    except Exception as exc:
+        logger.error(
+            "LiveKit agent joined room %s but could not start its voice session: %s",
+            ctx.room.name,
+            exc,
+            exc_info=True,
+        )
+        await _report_agent_error(ctx.room, exc)
+        raise
+
+    subscription_check_task = (
+        asyncio.create_task(_verify_cloud_audio_subscription(ctx.room, session))
+        if _uses_openbase_cloud_audio()
+        else None
     )
 
     announcer_queue = AnnouncerSpeechQueue(
@@ -573,6 +697,8 @@ async def livekit_agent(ctx: JobContext):
     ctx.room.on("data_received", on_data_received)
 
     async def close_announcer_queue(*_args) -> None:
+        if subscription_check_task is not None:
+            subscription_check_task.cancel()
         ctx.room.off("data_received", on_data_received)
         for event_name, handler in room_diagnostic_handlers:
             ctx.room.off(event_name, handler)

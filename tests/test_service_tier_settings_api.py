@@ -54,10 +54,15 @@ def test_service_tier_settings_reads_config(monkeypatch, tmp_path: Path) -> None
     assert response.data["restart_required"] is False
 
 
-def test_service_tier_settings_persists_config_and_env(monkeypatch, tmp_path: Path) -> None:
+def test_service_tier_settings_persists_config_and_env(
+    monkeypatch, tmp_path: Path
+) -> None:
     config_path = tmp_path / "dispatcher-config.json"
     env_file = tmp_path / ".env"
     env_file.write_text("KEEP_ME=1\nCODEX_SERVICE_TIER=fast\n", encoding="utf-8")
+    # Importing livekit_agent.config elsewhere in the suite loads ~/.openbase/.env
+    # into os.environ, which outranks the env file when resolving the current tier.
+    monkeypatch.delenv("CODEX_SERVICE_TIER", raising=False)
     monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
     monkeypatch.setattr(dispatcher_config, "DEFAULT_ENV_FILE_PATH", env_file)
     monkeypatch.setattr(service_tier_settings, "DEFAULT_ENV_FILE_PATH", env_file)
@@ -75,13 +80,18 @@ def test_service_tier_settings_persists_config_and_env(monkeypatch, tmp_path: Pa
     assert response.data["changed"] is True
     assert response.data["restart_required"] is True
     assert "Codex app-server" in response.data["restart_hint"]
-    assert json.loads(config_path.read_text(encoding="utf-8"))["codex_service_tier"] == "standard"
+    assert (
+        json.loads(config_path.read_text(encoding="utf-8"))["codex_service_tier"]
+        == "standard"
+    )
     env_content = env_file.read_text(encoding="utf-8")
     assert "KEEP_ME=1" in env_content
     assert "CODEX_SERVICE_TIER=standard" in env_content
 
 
-def test_service_tier_settings_rejects_invalid_tier(monkeypatch, tmp_path: Path) -> None:
+def test_service_tier_settings_rejects_invalid_tier(
+    monkeypatch, tmp_path: Path
+) -> None:
     config_path = tmp_path / "dispatcher-config.json"
     env_file = tmp_path / ".env"
     monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)

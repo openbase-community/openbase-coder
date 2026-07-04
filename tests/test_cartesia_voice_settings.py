@@ -416,3 +416,25 @@ def test_livekit_room_token_blocks_openbase_cloud_audio_without_subscription(
     assert (
         response.data["detail"] == "Subscribe in Openbase Cloud to use managed audio."
     )
+    assert response.data["code"] == "subscription_required"
+
+
+def test_apple_music_playback_entitlement_reports_subscription_required(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        views._livekit,
+        "openbase_cloud_subscription_entitlement",
+        lambda **_kwargs: {
+            "has_active_subscription": False,
+            "detail": "Apple Music playback requires an active Openbase Cloud subscription.",
+        },
+    )
+
+    response = views.apple_music_playback_entitlement(
+        _authenticated_request("GET", "/api/features/apple-music-playback/")
+    )
+
+    assert response.status_code == 402
+    assert response.data["available"] is False
+    assert response.data["code"] == "subscription_required"
