@@ -169,6 +169,9 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: "22"
+          # No lockfile at the synthesized build-workspace root; disable
+          # setup-node's automatic packageManager cache probing.
+          package-manager-cache: false
 
       - name: Install LiveKit server
         run: |
