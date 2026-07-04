@@ -111,16 +111,12 @@ jobs:
       - name: Prepare public build workspace
         run: |
           cp -R workspace-seed/instructions instructions
-          cat > package.json <<'JSON'
-          {"name":"openbase-coder-release-workspace","private":true,"packageManager":"pnpm@10.18.0"}
-          JSON
-          cat > pnpm-workspace.yaml <<'YAML'
-          packages:
-            - "console"
-            - "coder-react"
-            - "multi-react"
-            - "boilersync-react"
-          YAML
+          # Single source of truth for the build workspace, including a pinned
+          # lockfile so third-party npm deps don't float between releases.
+          # Regenerate with cli/scripts/update-release-lockfile.sh.
+          cp cli/scripts/release-workspace/package.json .
+          cp cli/scripts/release-workspace/pnpm-workspace.yaml .
+          cp cli/scripts/release-workspace/pnpm-lock.yaml .
 
       - name: Resolve version and target
         id: release
