@@ -573,11 +573,21 @@ def _run_setup_phases(
         # before declaring the external route unhealthy (fresh installs
         # otherwise warn with a transient 502).
         deadline = time.monotonic() + 30
+        waited = False
         while (
             not health.healthy
             and health.openbase_configured
             and time.monotonic() < deadline
         ):
+            if not waited:
+                click.echo(
+                    "  Waiting up to 30s for services to come up before "
+                    "checking the external route..."
+                )
+                progress.step(
+                    "tailscale_serve", "start", "waiting for services to boot"
+                )
+                waited = True
             time.sleep(3)
             health = tailscale_serve_health()
         serve_healthy = health.healthy
