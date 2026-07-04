@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import time
 import sys
 from pathlib import Path
 from shutil import which  # noqa: F401
@@ -297,6 +298,13 @@ class _SetupProgress:
     ),
 )
 @click.option(
+    "--link-claude-config",
+    is_flag=True,
+    help=(
+        "Symlink Openbase's Claude settings to the normal ~/.claude/settings.json."
+    ),
+)
+@click.option(
     "--backend",
     "coding_backend",
     type=str,
@@ -331,6 +339,7 @@ def setup(
     cartesia_api_key: str,
     skip_services: bool,
     link_codex_config: bool,
+    link_claude_config: bool,
     coding_backend: str | None,
     audio_provider: str | None,
     json_progress: bool,
@@ -357,6 +366,7 @@ def setup(
             cartesia_api_key=cartesia_api_key,
             skip_services=skip_services,
             link_codex_config=link_codex_config,
+            link_claude_config=link_claude_config,
             coding_backend=coding_backend,
             audio_provider=audio_provider,
         )
@@ -412,6 +422,7 @@ def _run_setup_phases(
     cartesia_api_key: str,
     skip_services: bool,
     link_codex_config: bool,
+    link_claude_config: bool,
     coding_backend: str | None,
     audio_provider: str | None,
 ) -> bool:
@@ -503,7 +514,10 @@ def _run_setup_phases(
             workspace_dir if use_dev_workspace else "",
             coding_backend=selected_coding_backend,
         )
-    _ensure_claude_config(workspace_dir if use_dev_workspace else "")
+    _ensure_claude_config(
+        workspace_dir if use_dev_workspace else "",
+        link_claude_config=link_claude_config,
+    )
     _ensure_claude_auth_bridge(
         login_if_needed=selected_coding_backend == CLAUDE_CODE_BACKEND,
         required=selected_coding_backend == CLAUDE_CODE_BACKEND,
@@ -555,6 +569,17 @@ def _run_setup_phases(
         progress.step("tailscale_serve", "warn", str(exc))
     else:
         health = tailscale_serve_health()
+        # Services were installed seconds ago; give django time to boot
+        # before declaring the external route unhealthy (fresh installs
+        # otherwise warn with a transient 502).
+        deadline = time.monotonic() + 30
+        while (
+            not health.healthy
+            and health.openbase_configured
+            and time.monotonic() < deadline
+        ):
+            time.sleep(3)
+            health = tailscale_serve_health()
         serve_healthy = health.healthy
         if health.healthy:
             click.echo(f"  OK    Openbase is reachable at {health.openbase_url}")

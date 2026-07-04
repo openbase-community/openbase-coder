@@ -1195,7 +1195,9 @@ def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         setup_cli, "_ensure_codex_home_config", lambda *_args, **_kwargs: None
     )
-    _patch_setup(monkeypatch, "_ensure_claude_config", lambda _workspace_dir: None)
+    _patch_setup(
+        monkeypatch, "_ensure_claude_config", lambda _workspace_dir, **_kwargs: None
+    )
     _patch_setup(monkeypatch, "_install_cli_shim", lambda _workspace_dir: None)
     _patch_setup(monkeypatch, "_build_console", lambda _workspace_dir: None)
     _patch_setup(monkeypatch, "install_all_services", lambda _config: None)

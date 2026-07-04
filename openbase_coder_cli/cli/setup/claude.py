@@ -89,9 +89,13 @@ def _ensure_normal_claude_md_symlink() -> None:
     click.echo(f"Linked normal Claude CLAUDE.md at {target_path}")
 
 
-def _ensure_claude_config(workspace_dir: str) -> None:
+def _ensure_claude_config(
+    workspace_dir: str, *, link_claude_config: bool = False
+) -> None:
     """Configure Openbase's Claude Code config dir."""
     OPENBASE_CLAUDE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if link_claude_config:
+        _symlink_claude_settings()
     _ensure_claude_settings()
     command_path, args = _super_agents_mcp_command(Path(workspace_dir))
     if not command_path.is_file():
@@ -174,6 +178,48 @@ def _ensure_normal_claude_mcp(workspace_dir: str) -> None:
         f"Registered super-agents MCP in normal Claude config "
         f"{NORMAL_CLAUDE_STATE_PATH}"
     )
+
+
+def _symlink_claude_settings() -> None:
+    """Point the service Claude settings at the user's normal settings file.
+
+    Mirror of the Codex config share: Openbase's full-permission settings are
+    then written through the symlink into the shared ~/.claude/settings.json,
+    which affects normal Claude Code sessions.
+    """
+    service_settings = OPENBASE_CLAUDE_SETTINGS_PATH
+    normal_settings = NORMAL_CLAUDE_SETTINGS_PATH
+
+    service_settings.parent.mkdir(parents=True, exist_ok=True)
+    normal_settings.parent.mkdir(parents=True, exist_ok=True)
+
+    if normal_settings.exists() and not normal_settings.is_file():
+        raise click.ClickException(
+            f"Normal Claude settings exists but is not a file: {normal_settings}"
+        )
+
+    if service_settings.is_symlink():
+        if service_settings.resolve() == normal_settings.resolve():
+            click.echo(f"Claude settings already linked to {normal_settings}")
+            return
+        service_settings.unlink()
+    elif service_settings.exists():
+        if not service_settings.is_file():
+            raise click.ClickException(
+                f"Claude settings exists but is not a file: {service_settings}"
+            )
+        if not normal_settings.exists():
+            normal_settings.write_text(
+                service_settings.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+        service_settings.unlink()
+
+    if not normal_settings.exists():
+        normal_settings.write_text("{}\n", encoding="utf-8")
+
+    service_settings.symlink_to(normal_settings)
+    click.echo(f"Symlinked Claude settings -> {normal_settings}")
 
 
 def _ensure_claude_settings() -> None:
