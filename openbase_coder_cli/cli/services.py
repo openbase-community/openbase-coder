@@ -12,6 +12,7 @@ from openbase_coder_cli.services.launchd import (
     launchctl_bootout,
     launchctl_status,
     regenerate_all_services,
+    remove_service,
 )
 from openbase_coder_cli.services.registry import (
     find_service,
@@ -103,6 +104,28 @@ def stop(name: str | None) -> None:
             click.echo(f"  Stopped {svc.name}")
         else:
             click.echo(f"  {svc.name} not loaded")
+
+
+@services.command()
+@click.argument("name", required=False)
+def uninstall(name: str | None) -> None:
+    """Stop services and remove their launchd plists and wrapper scripts.
+
+    Works without an installation so a wiped Openbase home can still be
+    cleaned up; sweeps every known service regardless of backend gating.
+    """
+    targets = (
+        [svc for svc in SERVICES if svc.name == name] if name else list(SERVICES)
+    )
+    if name and not targets:
+        raise click.ClickException(f"Unknown service: {name}")
+    if any_service_action_interrupts_voice(targets, "stop"):
+        warn_before_voice_interruption(reason="services uninstall")
+    for svc in targets:
+        if remove_service(svc):
+            click.echo(f"  Uninstalled {svc.name}")
+        else:
+            click.echo(f"  {svc.name} not installed")
 
 
 @services.command()

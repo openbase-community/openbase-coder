@@ -8,16 +8,11 @@ from click.testing import CliRunner
 services_cli = importlib.import_module("openbase_coder_cli.cli.services")
 
 
-def test_services_uninstall_command_is_not_registered():
-    runner = CliRunner()
-
-    help_result = runner.invoke(services_cli.services, ["--help"])
-    missing_result = runner.invoke(services_cli.services, ["uninstall"])
+def test_services_uninstall_command_is_registered():
+    help_result = CliRunner().invoke(services_cli.services, ["--help"])
 
     assert help_result.exit_code == 0
-    assert "uninstall" not in help_result.output
-    assert missing_result.exit_code != 0
-    assert "No such command 'uninstall'" in missing_result.output
+    assert "uninstall" in help_result.output
 
 
 def test_services_status_fails_when_tailscale_serve_health_fails(monkeypatch):
@@ -168,3 +163,18 @@ def test_services_status_allows_optional_stopped_service(monkeypatch):
     assert "codex-thread-device-sync optional (not running, last exit: None)" in (
         result.output
     )
+
+
+def test_uninstall_sweeps_all_services_without_installation(monkeypatch):
+    removed = []
+    monkeypatch.setattr(
+        services_cli, "remove_service", lambda svc: removed.append(svc.name) or True
+    )
+    monkeypatch.setattr(
+        services_cli, "any_service_action_interrupts_voice", lambda *_: False
+    )
+
+    result = CliRunner().invoke(services_cli.services, ["uninstall"])
+
+    assert result.exit_code == 0
+    assert set(removed) == {svc.name for svc in services_cli.SERVICES}
