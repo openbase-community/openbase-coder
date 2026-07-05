@@ -72,7 +72,7 @@ def main() -> int:
         repo_shas=parse_repo_shas(args.repo_shas),
     )
     ad_hoc_sign_macos_package(package_dir)
-    validate_package(package_dir)
+    validate_package(package_dir, args.version)
 
     if args.archive_output:
         write_archive(package_dir, args.archive_output.resolve(), force=args.force)
@@ -253,7 +253,7 @@ def write_metadata(
     )
 
 
-def validate_package(package_dir: Path) -> None:
+def validate_package(package_dir: Path, version: str) -> None:
     required = [
         package_dir / METADATA_FILENAME,
         package_dir / "bin" / "openbase-coder",
