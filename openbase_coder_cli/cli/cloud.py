@@ -37,16 +37,26 @@ def _web_backend_url() -> str:
 
 
 def _dcv_connection_active(session_name: str) -> bool:
-    """True when the DCV session has at least one connected client."""
-    result = subprocess.run(
-        ["dcv", "describe-session", session_name, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """True when the DCV session has at least one connected client.
+
+    Headless workspaces have no `dcv` binary or session; any failure here just
+    means "no desktop activity".
+    """
+    try:
+        result = subprocess.run(
+            ["dcv", "describe-session", session_name, "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
     if result.returncode != 0 or not result.stdout.strip():
         return False
-    data = json.loads(result.stdout)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
     return int(data.get("num-of-connections", 0)) > 0
 
 
@@ -77,13 +87,20 @@ def heartbeat(interval: int, session_name: str | None) -> None:
 
     while True:
         active = _dcv_connection_active(session)
-        token = manager.get_access_token()
-        httpx.post(
-            f"{url}{HEARTBEAT_PATH}",
-            json={"active": active},
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=15,
-        )
+        # A long-running service must survive network blips and token-refresh
+        # hiccups: skipping one beat and retrying next interval is the fallback.
+        try:
+            token = manager.get_access_token()
+            httpx.post(
+                f"{url}{HEARTBEAT_PATH}",
+                json={"active": active},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=15,
+            )
+        except (httpx.HTTPError, RuntimeError) as exc:
+            click.echo(f"Heartbeat skipped: {exc}", err=True)
+            if interval <= 0:
+                raise
         if interval <= 0:
             break
         time.sleep(interval)

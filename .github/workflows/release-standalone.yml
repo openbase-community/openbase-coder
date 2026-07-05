@@ -179,7 +179,9 @@ jobs:
 
       - name: Build package directory
         env:
-          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPENBASE_CODER: ${{ steps.release.outputs.version }}
+          # hatch-vcs only honors the unsuffixed form; the _FOR_<dist> variant
+          # is silently ignored and the build falls back to a dev version.
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.release.outputs.version }}
         run: |
           package_dir="$RUNNER_TEMP/openbase-coder-package-${{ steps.release.outputs.target }}"
           python_bin="$(uv python find --managed-python 3.12)"
