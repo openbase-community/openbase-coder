@@ -28,6 +28,7 @@ REPORT_PATH = "/api/openbase/activity/report/"
 MAX_REPOS = 20
 MAX_FILES_PER_REPO = 40
 GIT_TIMEOUT_SECONDS = 5
+MAX_TASK_LENGTH = 200
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,9 @@ def _active_threads() -> list[dict[str, Any]]:
         status = str(thread.get("status") or "")
         if status in ("completed", "error"):
             continue
+        current_run = thread.get("current_run") or {}
+        task = str(current_run.get("prompt") or current_run.get("message") or "")
+        task = " ".join(task.split())[:MAX_TASK_LENGTH]
         collected.append(
             {
                 "thread_id": str(
@@ -122,6 +126,7 @@ def _active_threads() -> list[dict[str, Any]]:
                 "name": str(thread.get("name") or thread.get("display_name") or ""),
                 "agent_name": str(thread.get("agent_name") or ""),
                 "status": status,
+                "task": task,
                 "directory": str(thread.get("directory") or ""),
             }
         )

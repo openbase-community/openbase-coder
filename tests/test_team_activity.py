@@ -48,6 +48,7 @@ def test_snapshot_is_paths_only(monkeypatch, tmp_path):
                 "name": "fix-login",
                 "agent_name": "coding",
                 "status": "running",
+                "task": "Fix the login redirect loop",
                 "directory": "/work/openbase-cli/sub",
             }
         ],
@@ -65,6 +66,7 @@ def test_snapshot_is_paths_only(monkeypatch, tmp_path):
             "name": "fix-login",
             "agent_name": "coding",
             "status": "running",
+            "task": "Fix the login redirect loop",
             "repo": "openbase-cli",
         }
     ]
