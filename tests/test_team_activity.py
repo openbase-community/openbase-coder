@@ -39,6 +39,7 @@ def test_snapshot_is_paths_only(monkeypatch, tmp_path):
     monkeypatch.setattr(
         svc, "changed_file_paths", lambda directory: ["a.py", "sub/b.py"]
     )
+    monkeypatch.setattr(svc, "_ahead_of_upstream", lambda directory: 2)
     monkeypatch.setattr(
         svc,
         "_active_threads",
@@ -58,7 +59,12 @@ def test_snapshot_is_paths_only(monkeypatch, tmp_path):
     payload = svc.collect_activity_snapshot()
 
     assert payload["repos"] == [
-        {"name": "openbase-cli", "changed_files": ["a.py", "sub/b.py"]}
+        {
+            "name": "openbase-cli",
+            "changed_files": ["a.py", "sub/b.py"],
+            "ahead": 2,
+            "state": "in_progress",
+        }
     ]
     assert payload["threads"] == [
         {
@@ -162,3 +168,10 @@ def test_fetch_team_activity_degrades(monkeypatch):
     )
     data = svc.fetch_team_activity()
     assert data["supported"] is False
+
+
+def test_repo_state_transitions():
+    assert svc.repo_state(["a.py"], 0) == "in_progress"
+    assert svc.repo_state([], 3) == "committed"
+    assert svc.repo_state([], None) == "committed"
+    assert svc.repo_state([], 0) == "pushed"

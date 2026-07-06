@@ -93,6 +93,36 @@ def changed_file_paths(directory: str) -> list[str]:
     return paths
 
 
+def _ahead_of_upstream(directory: str) -> int | None:
+    """Commits ahead of the upstream branch; None when there is no upstream."""
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["git", "rev-list", "--count", "@{u}..HEAD"],  # noqa: S607
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def repo_state(changed_files: list[str], ahead: int | None) -> str:
+    """in_progress (dirty) / committed (clean, unpushed) / pushed (clean, level)."""
+    if changed_files:
+        return "in_progress"
+    if ahead is None or ahead > 0:
+        return "committed"
+    return "pushed"
+
+
 def _active_threads() -> list[dict[str, Any]]:
     # Imported lazily: cli.local_server pulls in the click command tree,
     # which imports this module (circular at import time).
@@ -143,8 +173,15 @@ def collect_activity_snapshot() -> dict[str, Any]:
         name = Path(project_path).name
         repo_name_by_path[project_path] = name
         files = changed_file_paths(project_path)
-        if files:
-            repos.append({"name": name, "changed_files": files})
+        ahead = _ahead_of_upstream(project_path)
+        repos.append(
+            {
+                "name": name,
+                "changed_files": files,
+                "ahead": ahead if ahead is not None else 0,
+                "state": repo_state(files, ahead),
+            }
+        )
 
     threads = []
     for thread in _active_threads():
