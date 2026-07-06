@@ -5,7 +5,7 @@ import time
 import uuid
 from pathlib import Path
 
-from openbase_coder_cli.dispatcher_config import super_agents_service_tier
+from openbase_coder_cli.dispatcher_config import codex_service_tier
 from openbase_coder_cli.livekit_agent.config import (
     LIVEKIT_CODEX_APPROVAL_POLICY,
     LIVEKIT_CODEX_SANDBOX,
@@ -72,9 +72,7 @@ class LiveKitVoiceRouter:
                 state_path=None,
                 approval_policy=LIVEKIT_CODEX_APPROVAL_POLICY,
                 sandbox=LIVEKIT_CODEX_SANDBOX,
-                service_tier=super_agents_service_tier(
-                    Path(LIVEKIT_DISPATCHER_CONFIG_PATH)
-                ),
+                service_tier=codex_service_tier(Path(LIVEKIT_DISPATCHER_CONFIG_PATH)),
                 persist_thread=False,
                 initial_thread_id=thread_id,
                 super_agent_name=label,

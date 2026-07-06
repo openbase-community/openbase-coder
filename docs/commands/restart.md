@@ -2,10 +2,6 @@
 
 Restart Openbase-managed services.
 
-In the apps: **Settings → Openbase Services** in the
-[desktop app](../desktop-app.md) and [console](../console.md) offers the same
-restart controls.
-
 ## Usage
 
 ```bash

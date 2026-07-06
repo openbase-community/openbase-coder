@@ -2,10 +2,6 @@
 
 View or switch the selected coding backend.
 
-In the apps: **Settings → Coding Backend** in the
-[desktop app](../desktop-app.md) and [console](../console.md) switches the
-same setting; the desktop onboarding flow chooses it during first-time setup.
-
 ## Usage
 
 ```bash

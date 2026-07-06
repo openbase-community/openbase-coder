@@ -9,16 +9,6 @@ Download the Openbase Coder apps for your devices.
 | iOS | [Join the iOS beta on TestFlight](https://testflight.apple.com/join/DVTh9CMH) |
 | Android | [Download the Android APK](https://openbase.cloud/downloads/openbase-coder-android.apk) |
 
-What each one is for:
-
-- The **Mac app** is the recommended starting point: it bundles the CLI,
-  runs guided setup, and hosts the full dashboard. See
-  [Desktop App](desktop-app.md).
-- The **iOS app** is the phone client for voice calls, threads, approvals,
-  reports, and diffs. See [iOS App](ios-tabs.md).
-- The **CLI installer** sets up the same local runtime without the desktop
-  app. See [Getting Started](getting-started.md).
-
 Install the standalone CLI on macOS with:
 
 ```bash

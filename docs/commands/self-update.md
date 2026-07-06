@@ -4,11 +4,6 @@ Update a standalone Openbase Coder install to the latest release for its
 channel. The full contract (feed, atomicity, rollback, quiescing, channels,
 signing) lives in the workspace `AUTO_UPDATE.md` guide.
 
-In the apps: the [desktop app](../desktop-app.md#auto-update) updates itself
-separately via Electron auto-update and shows a footer indicator when a CLI
-update is available; the [iOS app](../ios-tabs.md) updates through
-TestFlight/App Store.
-
 ## Usage
 
 ```bash

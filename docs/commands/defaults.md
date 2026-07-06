@@ -2,10 +2,6 @@
 
 Manage default dispatcher and Super Agents model/reasoning settings.
 
-In the apps: **Settings → Backend Model / Service Tier / Reasoning** in the
-[desktop app](../desktop-app.md) and [console](../console.md) edit the same
-settings.
-
 ## Usage
 
 ```bash

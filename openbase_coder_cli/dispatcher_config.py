@@ -36,14 +36,9 @@ DISPATCHER_CONFIG_SCHEMA_VERSION = 1
 REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 DISPATCHER_REASONING_EFFORT_KEY = "dispatcher_reasoning_effort"
 SUPER_AGENTS_REASONING_EFFORT_KEY = "super_agents_reasoning_effort"
-DISPATCHER_SERVICE_TIER_KEY = "dispatcher_service_tier"
-SUPER_AGENTS_SERVICE_TIER_KEY = "super_agents_service_tier"
-SERVICE_TIERS = {"fast", "standard"}
-# Fast dispatcher, standard super-agents by default: voice dispatch is
-# latency-sensitive, bulk agent work defaults to the standard lane. Both
-# scopes are settable in console settings (either can be fast).
-DEFAULT_DISPATCHER_SERVICE_TIER = "fast"
-DEFAULT_SUPER_AGENTS_SERVICE_TIER = "standard"
+CODEX_SERVICE_TIER_KEY = "codex_service_tier"
+CODEX_SERVICE_TIERS = {"fast", "standard"}
+DEFAULT_CODEX_SERVICE_TIER = "standard"
 AUTO_LINK_PERSONAL_SKILLS_KEY = "auto_link_personal_skills"
 BACKEND_MODELS_KEY = "backend_models"
 DISPATCHER_MODEL_ROLE = "dispatcher"
@@ -119,60 +114,34 @@ def set_super_agents_reasoning_effort(value: str, path: Path | None = None) -> P
     return _set_reasoning_effort(SUPER_AGENTS_REASONING_EFFORT_KEY, value, path)
 
 
-def _service_tier_for_key(
-    key: str, env_var: str, default: str, path: Path | None
-) -> str:
-    configured = _optional_str(read_dispatcher_config(path).get(key))
-    if configured in SERVICE_TIERS:
+def codex_service_tier(path: Path | None = None) -> str:
+    configured = _optional_str(read_dispatcher_config(path).get(CODEX_SERVICE_TIER_KEY))
+    if configured in CODEX_SERVICE_TIERS:
         return configured
-    env_value = _optional_str(os.getenv(env_var))
-    if env_value in SERVICE_TIERS:
+    env_value = _optional_str(os.getenv("CODEX_SERVICE_TIER"))
+    if env_value in CODEX_SERVICE_TIERS:
         return env_value
-    env_file_value = _optional_str(_env_file_values(DEFAULT_ENV_FILE_PATH).get(env_var))
-    if env_file_value in SERVICE_TIERS:
+    env_file_value = _optional_str(
+        _env_file_values(DEFAULT_ENV_FILE_PATH).get("CODEX_SERVICE_TIER")
+    )
+    if env_file_value in CODEX_SERVICE_TIERS:
         return env_file_value
-    return default
+    return DEFAULT_CODEX_SERVICE_TIER
 
 
-def dispatcher_service_tier(path: Path | None = None) -> str:
-    return _service_tier_for_key(
-        DISPATCHER_SERVICE_TIER_KEY,
-        "DISPATCHER_SERVICE_TIER",
-        DEFAULT_DISPATCHER_SERVICE_TIER,
-        path,
-    )
-
-
-def super_agents_service_tier(path: Path | None = None) -> str:
-    return _service_tier_for_key(
-        SUPER_AGENTS_SERVICE_TIER_KEY,
-        "SUPER_AGENTS_SERVICE_TIER",
-        DEFAULT_SUPER_AGENTS_SERVICE_TIER,
-        path,
-    )
-
-
-def _set_service_tier(key: str, value: str, path: Path | None) -> Path:
+def set_codex_service_tier(value: str, path: Path | None = None) -> Path:
     normalized = value.strip().lower()
-    if normalized not in SERVICE_TIERS:
-        allowed = ", ".join(sorted(SERVICE_TIERS))
-        raise ValueError(f"Service tier must be one of: {allowed}.")
+    if normalized not in CODEX_SERVICE_TIERS:
+        allowed = ", ".join(sorted(CODEX_SERVICE_TIERS))
+        raise ValueError(f"Codex service tier must be one of: {allowed}.")
 
     config_path = path or CODEX_DISPATCHER_CONFIG_PATH
     payload = {
         **read_dispatcher_config(config_path),
-        key: normalized,
+        CODEX_SERVICE_TIER_KEY: normalized,
     }
     _write_dispatcher_config(payload, config_path)
     return config_path
-
-
-def set_dispatcher_service_tier(value: str, path: Path | None = None) -> Path:
-    return _set_service_tier(DISPATCHER_SERVICE_TIER_KEY, value, path)
-
-
-def set_super_agents_service_tier(value: str, path: Path | None = None) -> Path:
-    return _set_service_tier(SUPER_AGENTS_SERVICE_TIER_KEY, value, path)
 
 
 def auto_link_personal_skills(path: Path | None = None) -> bool:

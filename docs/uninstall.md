@@ -1,8 +1,13 @@
-# Uninstall Openbase CLI
+# Uninstall Openbase Coder
 
 Uninstall does not depend on the `openbase-coder` command. Use normal macOS,
 Linux, and Python tool cleanup commands so you can remove Openbase even if the
 CLI environment is broken.
+
+Openbase Coder state lives in three places, each removed in its own section
+below: the CLI runtime state in `~/.openbase`, the desktop app's Electron
+state under `~/Library/Application Support`, and the iOS app's on-phone state
+(removed automatically when you delete the app from the iPhone).
 
 ## Service Cleanup With The CLI
 
@@ -67,6 +72,10 @@ Only remove or archive `~/.openbase` after the service jobs above are stopped
 and deleted. That directory contains logs, tokens, plugins, generated service
 wrappers, the workspace checkout, and the local database.
 
+This covers the CLI runtime state only. The desktop app keeps separate
+Electron state outside `~/.openbase` — see
+[Remove The Desktop App](#remove-the-desktop-app) below.
+
 To remove it completely:
 
 ```bash
@@ -92,6 +101,10 @@ old state:
 rm -rf "/Applications/Openbase Coder.app"
 rm -rf "$HOME/Library/Application Support/@openbase/coder-desktop"
 ```
+
+On iPhone, deleting the Openbase app removes its local state (the CLI auth
+token in the Keychain and the backend host list); there is nothing else to
+clean up on the phone.
 
 ## Optional Tailscale Cleanup
 

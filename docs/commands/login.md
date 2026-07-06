@@ -2,10 +2,6 @@
 
 Authenticate to Openbase cloud in your browser.
 
-In the apps: the [desktop app](../desktop-app.md) runs this during its
-sign-in step, and the [iOS app](../ios-tabs.md) signs in to the same Openbase
-account directly (Settings → Account).
-
 ## Usage
 
 ```bash

@@ -1,11 +1,5 @@
 # Commands Overview
 
-Many of these operations also have UI equivalents in the
-[desktop app](../desktop-app.md) and [web console](../console.md) (service
-control, backend and model selection, settings) and in the
-[iOS app](../ios-tabs.md) (threads, approvals, voice). The CLI is the layer
-underneath all of them.
-
 Openbase CLI command structure:
 
 ```bash

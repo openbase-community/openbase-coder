@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -56,7 +55,7 @@ class TailscaleServeHealth:
 def configure_tailscale_serve() -> None:
     tailscale_bin = _tailscale_bin()
     if not tailscale_bin:
-        raise RuntimeError("tailscale was not found (checked PATH and /Applications/Tailscale.app).")
+        raise RuntimeError("tailscale was not found on PATH.")
 
     _run_tailscale(
         tailscale_bin,
@@ -85,7 +84,7 @@ def tailscale_serve_health() -> TailscaleServeHealth:
             openbase_configured=False,
             livekit_configured=False,
             openbase_reachable=False,
-            error="tailscale was not found (checked PATH and /Applications/Tailscale.app).",
+            error="tailscale was not found on PATH.",
         )
 
     status = _tailscale_status(tailscale_bin)
@@ -132,18 +131,8 @@ def tailscale_serve_health() -> TailscaleServeHealth:
     )
 
 
-TAILSCALE_APP_BUNDLE_CLI = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
-
-
 def _tailscale_bin() -> str | None:
-    found = shutil.which("tailscale")
-    if found:
-        return found
-    # Direct-download and App Store installs don't put the CLI on PATH; the
-    # binary inside the app bundle speaks the same CLI.
-    if os.access(TAILSCALE_APP_BUNDLE_CLI, os.X_OK):
-        return TAILSCALE_APP_BUNDLE_CLI
-    return None
+    return shutil.which("tailscale")
 
 
 def _run_tailscale(tailscale_bin: str, *args: str) -> subprocess.CompletedProcess[str]:

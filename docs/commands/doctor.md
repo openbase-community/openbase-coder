@@ -2,11 +2,6 @@
 
 Validate Openbase local runtime health and security settings.
 
-In the apps: the **Status** page in the [desktop app](../desktop-app.md) and
-[console](../console.md) shows the same service health continuously, and the
-[iOS app](../ios-tabs.md) shows a warning banner when the runtime these
-checks cover is unreachable.
-
 ## Usage
 
 ```bash

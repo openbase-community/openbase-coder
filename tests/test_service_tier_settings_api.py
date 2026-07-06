@@ -34,12 +34,7 @@ def test_service_tier_settings_reads_config(monkeypatch, tmp_path: Path) -> None
     config_path = tmp_path / "dispatcher-config.json"
     env_file = tmp_path / ".env"
     config_path.write_text(
-        json.dumps(
-            {
-                "dispatcher_service_tier": "standard",
-                "super_agents_service_tier": "fast",
-            }
-        ),
+        json.dumps({"codex_service_tier": "standard"}),
         encoding="utf-8",
     )
     monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
@@ -50,12 +45,8 @@ def test_service_tier_settings_reads_config(monkeypatch, tmp_path: Path) -> None
     )
 
     assert response.status_code == 200
-    assert response.data["dispatcher_service_tier"] == "standard"
-    assert response.data["super_agents_service_tier"] == "fast"
-    assert response.data["effective"] == {
-        "dispatcher_service_tier": "standard",
-        "super_agents_service_tier": "fast",
-    }
+    assert response.data["codex_service_tier"] == "standard"
+    assert response.data["effective"] == {"codex_service_tier": "standard"}
     assert [option["id"] for option in response.data["options"]] == [
         "fast",
         "standard",
@@ -72,8 +63,6 @@ def test_service_tier_settings_persists_config_and_env(
     # Importing livekit_agent.config elsewhere in the suite loads ~/.openbase/.env
     # into os.environ, which outranks the env file when resolving the current tier.
     monkeypatch.delenv("CODEX_SERVICE_TIER", raising=False)
-    monkeypatch.delenv("DISPATCHER_SERVICE_TIER", raising=False)
-    monkeypatch.delenv("SUPER_AGENTS_SERVICE_TIER", raising=False)
     monkeypatch.setattr(dispatcher_config, "CODEX_DISPATCHER_CONFIG_PATH", config_path)
     monkeypatch.setattr(dispatcher_config, "DEFAULT_ENV_FILE_PATH", env_file)
     monkeypatch.setattr(service_tier_settings, "DEFAULT_ENV_FILE_PATH", env_file)
@@ -82,28 +71,22 @@ def test_service_tier_settings_persists_config_and_env(
         _authenticated_request(
             "PUT",
             "/api/settings/service-tier/",
-            {
-                "dispatcher_service_tier": "standard",
-                "super_agents_service_tier": "fast",
-            },
+            {"codex_service_tier": "standard"},
         )
     )
 
     assert response.status_code == 200
-    assert response.data["dispatcher_service_tier"] == "standard"
-    assert response.data["super_agents_service_tier"] == "fast"
+    assert response.data["codex_service_tier"] == "standard"
     assert response.data["changed"] is True
     assert response.data["restart_required"] is True
     assert "Codex app-server" in response.data["restart_hint"]
-    payload = json.loads(config_path.read_text(encoding="utf-8"))
-    assert payload["dispatcher_service_tier"] == "standard"
-    assert payload["super_agents_service_tier"] == "fast"
+    assert (
+        json.loads(config_path.read_text(encoding="utf-8"))["codex_service_tier"]
+        == "standard"
+    )
     env_content = env_file.read_text(encoding="utf-8")
     assert "KEEP_ME=1" in env_content
-    # App-server ambient default follows the Super Agents lane.
-    assert "CODEX_SERVICE_TIER=fast" in env_content
-    assert "DISPATCHER_SERVICE_TIER=standard" in env_content
-    assert "SUPER_AGENTS_SERVICE_TIER=fast" in env_content
+    assert "CODEX_SERVICE_TIER=standard" in env_content
 
 
 def test_service_tier_settings_rejects_invalid_tier(
@@ -118,11 +101,11 @@ def test_service_tier_settings_rejects_invalid_tier(
         _authenticated_request(
             "PUT",
             "/api/settings/service-tier/",
-            {"dispatcher_service_tier": "turbo"},
+            {"codex_service_tier": "turbo"},
         )
     )
 
     assert response.status_code == 400
-    assert "dispatcher_service_tier" in response.data
+    assert "codex_service_tier" in response.data
     assert not config_path.exists()
     assert not env_file.exists()

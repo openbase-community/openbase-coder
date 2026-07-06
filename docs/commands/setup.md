@@ -2,11 +2,6 @@
 
 Run the full Openbase local installation flow.
 
-In the apps: the [desktop app's](../desktop-app.md#install-and-first-run-setup)
-guided setup runs this command for you (streaming its output via
-`--json-progress`); the [iOS app](../ios-tabs.md#onboarding) waits on its
-completion during pairing.
-
 ## Usage
 
 ```bash
