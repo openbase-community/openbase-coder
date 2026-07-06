@@ -358,3 +358,7 @@ __all__ = [
     "uv_tool_executable_help",
     "uv_tools_list",
 ]
+
+from openbase_coder_cli.openbase_coder_cli_app.team_activity import (  # noqa: E402,F401
+    team_activity_feed,
+)
