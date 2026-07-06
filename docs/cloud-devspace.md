@@ -9,6 +9,11 @@ Openbase Cloud. You do not need direct Cartesia or AssemblyAI accounts for this
 path; current setup defaults voice audio to Openbase Cloud, and the commands
 below switch coding sessions to the Openbase Cloud backend.
 
+From the apps' point of view a DevSpace is just another backend host: once it
+is on your tailnet, the [iOS app](ios-tabs.md) adds it under
+**Settings → Backend Host** exactly like a Mac, and the
+[web console](console.md) is reachable at `http://<host>:18080`.
+
 ## Start the Sandbox
 
 1. Open `https://app.openbase.cloud` and sign in.

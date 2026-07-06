@@ -2,6 +2,11 @@
 
 Inspect local onboarding state and report it to Openbase cloud.
 
+In the apps: this state drives the
+[desktop app's](../desktop-app.md#install-and-first-run-setup) setup flow and
+the [iOS app's](../ios-tabs.md#onboarding) "Link Your Computer" pairing —
+`report` is what the desktop app's **Register this Mac** button runs.
+
 ## Usage
 
 ```bash

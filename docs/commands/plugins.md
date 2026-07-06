@@ -2,6 +2,10 @@
 
 Manage Openbase plugins installed into the local CLI runtime.
 
+In the apps: plugin-provided console pages appear in the
+[desktop app](../desktop-app.md) and [console](../console.md) sidebar once
+installed; plugin-provided skills show up on the Skills page.
+
 ## Usage
 
 ```bash

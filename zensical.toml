@@ -1,23 +1,40 @@
 [project]
-site_name = "Openbase CLI Documentation"
-site_description = "Set up and operate the Openbase local CLI runtime"
+site_name = "Openbase Coder Documentation"
+site_description = "Use and operate Openbase Coder: the desktop app, iOS app, web console, and local CLI runtime"
 site_url = "https://docs.openbase.cloud"
 site_author = "Openbase"
 repo_url = "https://github.com/openbase-community/openbase-coder"
 
 nav = [
   { "Home" = "index.md" },
+  { "Using the Apps" = [
+    { "Desktop App" = "desktop-app.md" },
+    { "iOS App" = "ios-tabs.md" },
+    { "Web Console & Cloud" = "console.md" },
+    { "Voice Routing" = "voice-routing.md" }
+  ]},
   { "Getting Started" = "getting-started.md" },
-  { "Cloud DevSpace" = "cloud-devspace.md" },
   { "Downloads" = "downloads.md" },
   { "Manual Setup" = "manual-installation.md" },
+  { "Cloud DevSpace" = "cloud-devspace.md" },
   { "Local-Only Mode" = "local-only.md" },
+  { "Troubleshooting" = "troubleshooting.md" },
   { "Uninstall" = "uninstall.md" },
   { "Commands" = [
     "commands/index.md",
-    { "setup" = "commands/setup.md" },
-    { "server" = "commands/server.md" },
+    { "backend" = "commands/backend.md" },
+    { "bootstrap" = "commands/bootstrap.md" },
+    { "claude" = "commands/claude.md" },
+    { "claude-sync" = "commands/claude-sync.md" },
+    { "defaults" = "commands/defaults.md" },
+    { "doctor" = "commands/doctor.md" },
+    { "login" = "commands/login.md" },
+    { "logout" = "commands/logout.md" },
+    { "onboarding" = "commands/onboarding.md" },
+    { "plugins" = "commands/plugins.md" },
     { "restart" = "commands/restart.md" },
+    { "self-update" = "commands/self-update.md" },
+    { "server" = "commands/server.md" },
     { "services" = "commands/services.md" },
     { "services install" = "commands/services-install.md" },
     { "services start" = "commands/services-start.md" },
@@ -25,11 +42,7 @@ nav = [
     { "services status" = "commands/services-status.md" },
     { "services logs" = "commands/services-logs.md" },
     { "services regenerate" = "commands/services-regenerate.md" },
-    { "doctor" = "commands/doctor.md" },
-    { "login" = "commands/login.md" },
-    { "logout" = "commands/logout.md" },
-    { "plugins" = "commands/plugins.md" },
-    { "bootstrap" = "commands/bootstrap.md" }
+    { "setup" = "commands/setup.md" }
   ]},
   { "Plugins" = [
     "plugins/index.md",
@@ -37,7 +50,7 @@ nav = [
   ]},
   { "Configuration" = "configuration.md" },
   { "Files and Paths" = "files-and-paths.md" },
-  { "iOS App" = "ios-tabs.md" }
+  { "Release" = "release.md" }
 ]
 
 [project.theme]

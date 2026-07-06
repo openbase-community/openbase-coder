@@ -135,6 +135,7 @@ from openbase_coder_cli.dispatcher_config import (
     DISPATCHER_VOICE_NAME_KEY,  # noqa: F401
     STT_PROVIDER_KEY,  # noqa: F401
     TTS_PROVIDER_KEY,  # noqa: F401
+    set_dispatcher_service_tier,
 )
 from openbase_coder_cli.paths import (
     CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,  # noqa: F401
@@ -305,6 +306,16 @@ class _SetupProgress:
     ),
 )
 @click.option(
+    "--fast-mode/--no-fast-mode",
+    "fast_mode",
+    default=True,
+    show_default=True,
+    help=(
+        "Use the fast service tier for the voice dispatcher. Super Agents "
+        "stay on the standard tier; both are adjustable in console settings."
+    ),
+)
+@click.option(
     "--backend",
     "coding_backend",
     type=str,
@@ -340,6 +351,7 @@ def setup(
     skip_services: bool,
     link_codex_config: bool,
     link_claude_config: bool,
+    fast_mode: bool,
     coding_backend: str | None,
     audio_provider: str | None,
     json_progress: bool,
@@ -367,6 +379,7 @@ def setup(
             skip_services=skip_services,
             link_codex_config=link_codex_config,
             link_claude_config=link_claude_config,
+            fast_mode=fast_mode,
             coding_backend=coding_backend,
             audio_provider=audio_provider,
         )
@@ -423,6 +436,7 @@ def _run_setup_phases(
     skip_services: bool,
     link_codex_config: bool,
     link_claude_config: bool,
+    fast_mode: bool,
     coding_backend: str | None,
     audio_provider: str | None,
 ) -> bool:
@@ -491,6 +505,11 @@ def _run_setup_phases(
     _ensure_normal_claude_md_symlink()
     _ensure_codex_home_default_files(workspace_dir if use_dev_workspace else "")
     _ensure_codex_home_dispatcher_config(audio_provider=audio_provider)
+    set_dispatcher_service_tier("fast" if fast_mode else "standard")
+    click.echo(
+        f"Voice dispatcher service tier: {'fast' if fast_mode else 'standard'} "
+        "(Super Agents: standard; both adjustable in console settings)."
+    )
     if audio_provider == AUDIO_PROVIDER_LOCAL:
         _ensure_local_audio_dependencies(runtime_package)
         _download_local_audio_models()
@@ -573,11 +592,21 @@ def _run_setup_phases(
         # before declaring the external route unhealthy (fresh installs
         # otherwise warn with a transient 502).
         deadline = time.monotonic() + 30
+        waited = False
         while (
             not health.healthy
             and health.openbase_configured
             and time.monotonic() < deadline
         ):
+            if not waited:
+                click.echo(
+                    "  Waiting up to 30s for services to come up before "
+                    "checking the external route..."
+                )
+                progress.step(
+                    "tailscale_serve", "start", "waiting for services to boot"
+                )
+                waited = True
             time.sleep(3)
             health = tailscale_serve_health()
         serve_healthy = health.healthy

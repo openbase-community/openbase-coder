@@ -1,5 +1,12 @@
 # Troubleshooting
 
+Where problems surface in the apps: the [desktop app](desktop-app.md) and
+[console](console.md) show service health on their **Status** page and a
+warning banner on the Overview page; the [iOS app](ios-tabs.md) shows a
+warning banner when the local runtime is unreachable and can upload logs from
+**Settings → Diagnostics**. The checks below are the CLI-side diagnosis for
+the most common failures.
+
 ## iPhone Stays On Connecting
 
 The iOS app reaches the Mac through Tailscale Serve, not directly through the

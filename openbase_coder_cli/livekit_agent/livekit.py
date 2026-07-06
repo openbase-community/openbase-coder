@@ -50,7 +50,7 @@ from openbase_coder_cli.config.token_manager import (  # noqa: F401
     AuthTransientError,
 )
 from openbase_coder_cli.dispatcher_config import (
-    codex_service_tier,
+    dispatcher_service_tier,
     selected_stt_provider_id,
     selected_tts_provider_id,
 )
@@ -301,7 +301,7 @@ def _build_voice_backend_client(*, persist_thread: bool) -> SuperAgentsLiveKitCl
         developer_instructions=_load_dispatcher_developer_instructions(),
         approval_policy=LIVEKIT_CODEX_APPROVAL_POLICY,
         sandbox=LIVEKIT_CODEX_SANDBOX,
-        service_tier=codex_service_tier(Path(LIVEKIT_DISPATCHER_CONFIG_PATH)),
+        service_tier=dispatcher_service_tier(Path(LIVEKIT_DISPATCHER_CONFIG_PATH)),
         persist_thread=persist_thread,
     )
 

@@ -72,7 +72,7 @@ def main() -> int:
         repo_shas=parse_repo_shas(args.repo_shas),
     )
     ad_hoc_sign_macos_package(package_dir)
-    validate_package(package_dir)
+    validate_package(package_dir, args.version)
 
     if args.archive_output:
         write_archive(package_dir, args.archive_output.resolve(), force=args.force)
@@ -253,7 +253,7 @@ def write_metadata(
     )
 
 
-def validate_package(package_dir: Path) -> None:
+def validate_package(package_dir: Path, version: str) -> None:
     required = [
         package_dir / METADATA_FILENAME,
         package_dir / "bin" / "openbase-coder",
@@ -266,9 +266,19 @@ def validate_package(package_dir: Path) -> None:
             raise RuntimeError(f"Package validation failed; missing {path}")
     _validate_no_external_python_links(package_dir)
     _validate_no_host_macos_library_links(package_dir)
-    subprocess.run(
-        [str(package_dir / "bin" / "openbase-coder"), "--version"], check=True
+    result = subprocess.run(
+        [str(package_dir / "bin" / "openbase-coder"), "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
     )
+    reported = result.stdout.strip()
+    print(reported)
+    if version not in reported:
+        raise SystemExit(
+            f"Packaged CLI reports {reported!r}, expected version {version!r}: "
+            "the release version stamp did not reach the build."
+        )
 
 
 def write_archive(package_dir: Path, archive_path: Path, *, force: bool) -> None:

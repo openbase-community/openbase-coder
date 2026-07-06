@@ -1,6 +1,11 @@
 # Getting Started
 
-This guide sets up Openbase locally using the `openbase-coder` CLI.
+This guide sets up Openbase Coder locally using the `openbase-coder` CLI.
+
+Most users do not need this page: [download the desktop app](downloads.md)
+and its guided setup runs everything below for you, including iPhone pairing
+(see [Desktop App](desktop-app.md#install-and-first-run-setup)). Use this
+guide when you prefer the terminal or are setting up a headless machine.
 
 ## Prerequisites
 
@@ -137,10 +142,13 @@ cloud onboarding; purely local use can skip it.
 
 ## Next Steps
 
+- Tour the Mac interface in [Desktop App](desktop-app.md)
+- Set up your phone with the [iOS App](ios-tabs.md) — voice calls, threads,
+  approvals, reports, and diffs from anywhere
+- Open the dashboard in a browser via the [Web Console](console.md)
 - Learn command details in [Commands](commands/index.md)
 - Install your first plugin: `openbase-coder plugins add <local-repo-or-github-url>`
 - Discover bootstrap commands: `openbase-coder plugins bootstrappers`
 - Run plugin bootstrap flow: `openbase-coder bootstrap <name> --params-file <file.json>`
 - Review environment and auth settings in [Configuration](configuration.md)
 - See all runtime artifacts in [Files and Paths](files-and-paths.md)
-- Map backend behavior to the iOS UI in [iOS App](ios-tabs.md)

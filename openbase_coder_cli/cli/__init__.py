@@ -18,6 +18,7 @@ from .bootstrap import bootstrap
 from .claude import claude
 from .claude_chrome import claude_chrome
 from .claude_sync import claude_sync
+from .cloud import cloud
 from .codex_sync import codex_sync
 from .computer_use import computer_use
 from .defaults import defaults
@@ -25,6 +26,7 @@ from .desktop import desktop
 from .doctor import doctor
 from .onboarding import onboarding
 from .plugins import plugins
+from .provision import provision
 from .reports import reports
 from .restart import restart
 from .routines import routines
@@ -72,11 +74,13 @@ main.add_command(login)
 main.add_command(logout)
 main.add_command(auth)
 main.add_command(plugins)
+main.add_command(provision)
 main.add_command(reports)
 main.add_command(bootstrap)
 main.add_command(restart)
 main.add_command(user)
 main.add_command(boilersync)
+main.add_command(cloud)
 main.add_command(codex_sync)
 main.add_command(claude_sync)
 main.add_command(claude)

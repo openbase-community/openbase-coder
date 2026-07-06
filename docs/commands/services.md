@@ -2,6 +2,11 @@
 
 Manage Openbase launchd background services.
 
+In the apps: the [desktop app](../desktop-app.md) and
+[console](../console.md) show the same services on their **Status** page and
+offer start/stop/restart under **Settings → Openbase Services**; these
+services are also what the [iOS app](../ios-tabs.md) connects to.
+
 ## Usage
 
 ```bash
