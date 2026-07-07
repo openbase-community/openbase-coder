@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--package-dir", type=Path)
     parser.add_argument("--archive-output", type=Path)
     parser.add_argument("--livekit-server-bin", type=Path, required=True)
+    parser.add_argument("--syncthing-bin", type=Path, required=True)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--skip-console-build", action="store_true")
     return parser.parse_args()
@@ -60,7 +61,12 @@ def main() -> int:
     create_runtime_python(python_dir, args.python)
     install_cli_package(python_dir)
     relocate_macos_python(python_dir)
-    stage_bin(package_dir, python_dir, args.livekit_server_bin.resolve())
+    stage_bin(
+        package_dir,
+        python_dir,
+        args.livekit_server_bin.resolve(),
+        args.syncthing_bin.resolve(),
+    )
     stage_console(package_dir, skip_build=args.skip_console_build)
     stage_optional_tree(INSTRUCTIONS_ROOT, package_dir / "instructions")
     stage_optional_tree(SKILLS_ROOT / "skills", package_dir / "skills")
@@ -180,9 +186,16 @@ def relocate_macos_python(python_dir: Path) -> None:
             )
 
 
-def stage_bin(package_dir: Path, python_dir: Path, livekit_server_bin: Path) -> None:
+def stage_bin(
+    package_dir: Path,
+    python_dir: Path,
+    livekit_server_bin: Path,
+    syncthing_bin: Path,
+) -> None:
     if not livekit_server_bin.is_file():
         raise RuntimeError(f"LiveKit binary not found: {livekit_server_bin}")
+    if not syncthing_bin.is_file():
+        raise RuntimeError(f"Syncthing binary not found: {syncthing_bin}")
     bin_dir = package_dir / "bin"
     bin_dir.mkdir()
     launcher = bin_dir / "openbase-coder"
@@ -196,6 +209,8 @@ def stage_bin(package_dir: Path, python_dir: Path, livekit_server_bin: Path) -> 
     launcher.chmod(0o755)
     shutil.copy2(livekit_server_bin, bin_dir / "livekit-server")
     (bin_dir / "livekit-server").chmod(0o755)
+    shutil.copy2(syncthing_bin, bin_dir / "syncthing")
+    (bin_dir / "syncthing").chmod(0o755)
 
 
 def stage_console(package_dir: Path, *, skip_build: bool) -> None:
@@ -245,6 +260,7 @@ def write_metadata(
         "pythonVersion": package_python_version(package_dir),
         "console": "console",
         "livekit": "bin/livekit-server",
+        "syncthing": "bin/syncthing",
         "repo_shas": repo_shas,
     }
     (package_dir / METADATA_FILENAME).write_text(
@@ -258,6 +274,7 @@ def validate_package(package_dir: Path, version: str) -> None:
         package_dir / METADATA_FILENAME,
         package_dir / "bin" / "openbase-coder",
         package_dir / "bin" / "livekit-server",
+        package_dir / "bin" / "syncthing",
         package_dir / "python" / "bin" / "python",
         package_dir / "console" / "index.html",
     ]

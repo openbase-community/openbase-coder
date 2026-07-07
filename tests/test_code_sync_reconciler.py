@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+from openbase_coder_cli.code_sync import conflicts as conflicts_module
+from openbase_coder_cli.code_sync import reconciler
+
+GIT_IDENTITY = [
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "user.name=Test",
+]
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *GIT_IDENTITY, *args],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _init_repo(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "init", "-b", "main", str(path)],
+        capture_output=True,
+        check=True,
+    )
+    return path
+
+
+def _commit(repo: Path, filename: str, content: str, message: str) -> str:
+    (repo / filename).write_text(content, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _pair(tmp_path: Path) -> tuple[Path, Path]:
+    """A local repo and a peer clone sharing one initial commit."""
+    local = _init_repo(tmp_path / "local")
+    _commit(local, "app.py", "print('v1')\n", "initial")
+    peer = tmp_path / "peer"
+    subprocess.run(
+        ["git", "clone", "--quiet", str(local), str(peer)],
+        capture_output=True,
+        check=True,
+    )
+    return local, peer
+
+
+def _reconcile(local: Path, peer: Path, conflicts_path: Path):
+    return reconciler.reconcile_repo(
+        local,
+        folder_id="cs-test",
+        repo_relpath="local",
+        remote_url=str(peer),
+        conflicts_path=conflicts_path,
+    )
+
+
+def test_fast_forward_when_ancestor_and_worktree_matches(tmp_path: Path) -> None:
+    local, peer = _pair(tmp_path)
+    peer_head = _commit(peer, "app.py", "print('v2')\n", "peer change")
+    # Simulate Syncthing having already delivered the file content.
+    (local / "app.py").write_text("print('v2')\n", encoding="utf-8")
+
+    result = _reconcile(local, peer, tmp_path / "conflicts.json")
+
+    assert result.action == reconciler.ACTION_FAST_FORWARDED
+    assert _git(local, "rev-parse", "main") == peer_head
+    assert _git(local, "status", "--porcelain") == ""
+    assert conflicts_module.unresolved_conflicts(tmp_path / "conflicts.json") == []
+
+
+def test_waits_when_ancestor_but_files_still_arriving(tmp_path: Path) -> None:
+    local, peer = _pair(tmp_path)
+    _commit(peer, "app.py", "print('v2')\n", "peer change")
+    local_head = _git(local, "rev-parse", "main")
+
+    result = _reconcile(local, peer, tmp_path / "conflicts.json")
+
+    assert result.action == reconciler.ACTION_AWAITING_FILES
+    assert _git(local, "rev-parse", "main") == local_head
+    assert conflicts_module.unresolved_conflicts(tmp_path / "conflicts.json") == []
+
+
+def test_diverged_branches_record_a_conflict(tmp_path: Path) -> None:
+    local, peer = _pair(tmp_path)
+    local_head = _commit(local, "app.py", "print('local')\n", "local change")
+    peer_head = _commit(peer, "app.py", "print('peer')\n", "peer change")
+    conflicts_path = tmp_path / "conflicts.json"
+
+    result = _reconcile(local, peer, conflicts_path)
+
+    assert result.action == reconciler.ACTION_DIVERGED
+    assert _git(local, "rev-parse", "main") == local_head
+    records = conflicts_module.unresolved_conflicts(conflicts_path)
+    assert len(records) == 1
+    record = records[0]
+    assert record["kind"] == "branch"
+    assert record["branch"] == "main"
+    assert record["local_sha"] == local_head
+    assert record["remote_sha"] == peer_head
+
+    # A second tick dedupes instead of stacking records.
+    _reconcile(local, peer, conflicts_path)
+    assert len(conflicts_module.unresolved_conflicts(conflicts_path)) == 1
+
+
+def test_mid_merge_repo_is_never_touched(tmp_path: Path) -> None:
+    local, peer = _pair(tmp_path)
+    peer_head = _commit(peer, "app.py", "print('v2')\n", "peer change")
+    git_dir = local / ".git"
+    (git_dir / "MERGE_HEAD").write_text(peer_head + "\n", encoding="utf-8")
+
+    result = _reconcile(local, peer, tmp_path / "conflicts.json")
+
+    assert result.action == reconciler.ACTION_SKIPPED_IN_PROGRESS
+
+
+def test_up_to_date_and_remote_behind(tmp_path: Path) -> None:
+    local, peer = _pair(tmp_path)
+    assert (
+        _reconcile(local, peer, tmp_path / "c.json").action
+        == reconciler.ACTION_UP_TO_DATE
+    )
+
+    _commit(local, "app.py", "print('ahead')\n", "local ahead")
+    assert (
+        _reconcile(local, peer, tmp_path / "c.json").action
+        == reconciler.ACTION_REMOTE_BEHIND
+    )
+
+
+def test_resolve_use_remote_stashes_then_resets(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    local_parent = home / "Projects" / "demo"
+    local_parent.mkdir(parents=True)
+    local = _init_repo(local_parent / "local")
+    _commit(local, "app.py", "print('v1')\n", "initial")
+    peer = tmp_path / "peer"
+    subprocess.run(
+        ["git", "clone", "--quiet", str(local), str(peer)],
+        capture_output=True,
+        check=True,
+    )
+    _commit(local, "app.py", "print('local')\n", "local change")
+    peer_head = _commit(peer, "app.py", "print('peer')\n", "peer change")
+    (local / "untracked.txt").write_text("keep me\n", encoding="utf-8")
+
+    conflicts_path = tmp_path / "conflicts.json"
+    config_path = tmp_path / "sync-config.json"
+    from openbase_coder_cli import sync_config
+
+    sync_config.set_sync_folders([{"relpath": "Projects/demo"}], config_path)
+    folder_id = sync_config.folder_id_for_relpath("Projects/demo")
+
+    result = reconciler.reconcile_repo(
+        local,
+        folder_id=folder_id,
+        repo_relpath="local",
+        remote_url=str(peer),
+        conflicts_path=conflicts_path,
+    )
+    assert result.action == reconciler.ACTION_DIVERGED
+    record = conflicts_module.unresolved_conflicts(conflicts_path)[0]
+
+    resolved = conflicts_module.resolve_conflict(
+        record["id"],
+        "use_remote",
+        path=conflicts_path,
+        home=home,
+        config_path=config_path,
+    )
+
+    assert resolved["resolved"] is True
+    assert _git(local, "rev-parse", "HEAD") == peer_head
+    # The pre-reset worktree survives in the safety stash.
+    assert "code-sync-backup" in _git(local, "stash", "list")
+    assert conflicts_module.unresolved_conflicts(conflicts_path) == []
+
+
+def test_resolve_keep_local_leaves_repo_alone(tmp_path: Path) -> None:
+    conflicts_path = tmp_path / "conflicts.json"
+    record = conflicts_module.record_branch_conflict(
+        folder_id="cs-test",
+        repo_relpath="local",
+        branch="main",
+        local_sha="a" * 40,
+        remote_sha="b" * 40,
+        path=conflicts_path,
+    )
+
+    resolved = conflicts_module.resolve_conflict(
+        record["id"], "keep_local", path=conflicts_path
+    )
+
+    assert resolved["resolved"] is True
+    assert resolved["resolution"] == "keep_local"
+
+
+def test_discover_git_repos_respects_depth_and_skips_noise(tmp_path: Path) -> None:
+    root = tmp_path / "folder"
+    _init_repo(root / "repo-a")
+    _init_repo(root / "group" / "repo-b")
+    _init_repo(root / "node_modules" / "dep")  # skipped
+    _init_repo(root / "d1" / "d2" / "d3" / "too-deep")
+
+    repos = reconciler.discover_git_repos(root)
+
+    assert root / "repo-a" in repos
+    assert root / "group" / "repo-b" in repos
+    assert all("node_modules" not in str(repo) for repo in repos)
+    assert all("too-deep" not in str(repo) for repo in repos)
+
+
+def test_scan_file_conflicts_records_sync_conflict_copies(tmp_path: Path) -> None:
+    from openbase_coder_cli.sync_config import SyncFolder
+
+    home = tmp_path / "home"
+    folder = SyncFolder(relpath="Projects/demo")
+    folder_root = folder.absolute_path(home)
+    folder_root.mkdir(parents=True)
+    (folder_root / "notes.sync-conflict-20260706-101112-ABCDEF.md").write_text(
+        "conflict copy\n", encoding="utf-8"
+    )
+
+    conflicts_path = tmp_path / "conflicts.json"
+    found = reconciler.scan_file_conflicts(folder, home, conflicts_path)
+
+    assert found == ["notes.sync-conflict-20260706-101112-ABCDEF.md"]
+    records = conflicts_module.unresolved_conflicts(conflicts_path)
+    assert len(records) == 1
+    assert records[0]["kind"] == "file"

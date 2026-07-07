@@ -159,10 +159,7 @@ def _check_livekit_client_credentials(env: dict[str, str], warn, ok) -> None:
 
 
 def _selected_backend(env: dict[str, str]) -> str:
-    raw_value = (
-        env.get(CODING_BACKEND_ENV_KEY)
-        or DEFAULT_CODING_BACKEND
-    )
+    raw_value = env.get(CODING_BACKEND_ENV_KEY) or DEFAULT_CODING_BACKEND
     try:
         return normalize_backend(raw_value)
     except ValueError:
@@ -302,6 +299,72 @@ def _check_audio_readiness(ok, warn) -> None:
             )
 
 
+_VERSIONS_WARN_BYTES = 2 * 1024**3  # 2 GiB
+_GIT_IGNORE_PATTERN = "(?d).git"
+
+
+def _syncthing_process_running() -> bool:
+    result = subprocess.run(
+        ["pgrep", "-f", "syncthing"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _check_code_sync(ok, warn, fail) -> None:
+    from openbase_coder_cli.code_sync.manager import versions_usage_bytes
+    from openbase_coder_cli.services.registry import find_service
+    from openbase_coder_cli.sync_config import code_sync_enabled
+
+    # Guard against user-managed Syncthing setups that still sync `.git`
+    # (torn git state; the reason code-sync excludes VCS metadata).
+    user_stignore = Path.home() / "Projects" / ".stignore"
+    if user_stignore.is_file() and _syncthing_process_running():
+        try:
+            content = user_stignore.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            content = ""
+        if _GIT_IGNORE_PATTERN not in content:
+            warn(
+                f"a Syncthing instance is running and {user_stignore} does not "
+                f"ignore '{_GIT_IGNORE_PATTERN}': syncing .git corrupts repos; "
+                "add the VCS patterns or migrate to 'openbase-coder sync'"
+            )
+        else:
+            ok("user-managed Syncthing ignores .git")
+
+    try:
+        enabled = code_sync_enabled()
+    except ValueError as exc:
+        fail(f"sync-config.json unreadable: {exc}")
+        return
+    if not enabled:
+        ok("code sync: disabled")
+        return
+
+    info = launchctl_status(find_service("code-sync"))
+    if not info.get("installed"):
+        fail("code-sync service: not installed (run 'openbase-coder sync enable')")
+    elif info.get("pid"):
+        ok(f"code-sync service: running (pid {info['pid']})")
+    else:
+        fail(
+            "code-sync service: not running "
+            f"(last exit: {info.get('last_exit_code', 'unknown')})"
+        )
+
+    usage = versions_usage_bytes()
+    if usage > _VERSIONS_WARN_BYTES:
+        warn(
+            f"sync version history uses {usage / 1024**3:.1f} GiB; purge it "
+            "with 'POST /api/sync/versions/purge/' or from the console"
+        )
+    else:
+        ok(f"sync version history: {usage / 1024**2:.0f} MiB")
+
+
 @click.command()
 def doctor() -> None:
     """Check service health and security configuration."""
@@ -434,6 +497,11 @@ def doctor() -> None:
     click.echo()
     click.echo(click.style("Audio", bold=True))
     _check_audio_readiness(ok, warn)
+
+    # --- Code Sync ---
+    click.echo()
+    click.echo(click.style("Code Sync", bold=True))
+    _check_code_sync(ok, warn, fail)
 
     # --- Summary ---
     click.echo()

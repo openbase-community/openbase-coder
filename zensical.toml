@@ -11,7 +11,8 @@ nav = [
     { "Desktop App" = "desktop-app.md" },
     { "iOS App" = "ios-tabs.md" },
     { "Web Console & Cloud" = "console.md" },
-    { "Voice Routing" = "voice-routing.md" }
+    { "Voice Routing" = "voice-routing.md" },
+    { "Sync Between Your Computers" = "code-sync.md" }
   ]},
   { "Getting Started" = "getting-started.md" },
   { "Downloads" = "downloads.md" },
@@ -42,7 +43,8 @@ nav = [
     { "services status" = "commands/services-status.md" },
     { "services logs" = "commands/services-logs.md" },
     { "services regenerate" = "commands/services-regenerate.md" },
-    { "setup" = "commands/setup.md" }
+    { "setup" = "commands/setup.md" },
+    { "sync" = "commands/sync.md" }
   ]},
   { "Plugins" = [
     "plugins/index.md",

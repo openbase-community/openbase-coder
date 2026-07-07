@@ -1,0 +1,188 @@
+"""Code-sync settings/status/conflicts API views for the console and apps."""
+
+from __future__ import annotations
+
+import logging
+
+from rest_framework import serializers, status
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+from openbase_coder_cli import sync_config
+from openbase_coder_cli.code_sync import CodeSyncError
+from openbase_coder_cli.code_sync import manager as sync_manager
+from openbase_coder_cli.code_sync.conflicts import (
+    read_conflicts,
+    resolve_conflict,
+    unresolved_conflicts,
+)
+from openbase_coder_cli.code_sync.eligibility import current_eligibility
+from openbase_coder_cli.code_sync.lease import local_activity_recent
+from openbase_coder_cli.code_sync.reconciler import read_reconcile_state
+from openbase_coder_cli.code_sync.syncthing import (
+    SyncthingClient,
+    stored_device_id,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class SyncFolderSerializer(serializers.Serializer):
+    relpath = serializers.CharField()
+    extra_ignores = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+
+
+class SyncSettingsSerializer(serializers.Serializer):
+    enabled = serializers.BooleanField(required=False)
+    folders = SyncFolderSerializer(many=True, required=False)
+    lease_mode = serializers.ChoiceField(
+        choices=sync_config.LEASE_MODES, required=False
+    )
+
+
+def _settings_payload(**extra) -> dict:
+    eligibility = current_eligibility()
+    return {
+        "schema_version": sync_config.SYNC_CONFIG_SCHEMA_VERSION,
+        "enabled": sync_config.code_sync_enabled(),
+        "eligible": eligibility.eligible,
+        "eligible_reason": eligibility.reason,
+        "self_device_id": stored_device_id() or "",
+        "peers": [peer.to_dict() for peer in eligibility.peers],
+        "folders": [folder.to_dict() for folder in sync_config.sync_folders()],
+        "lease_mode": sync_config.lease_mode(),
+        "versions_usage_bytes": sync_manager.versions_usage_bytes(),
+        **extra,
+    }
+
+
+@api_view(["GET", "PUT"])
+def sync_settings(request):
+    """Read or update code-sync settings (folders use full-list replace)."""
+    if request.method == "GET":
+        return Response(_settings_payload(), status=status.HTTP_200_OK)
+
+    serializer = SyncSettingsSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    if not data:
+        return Response(
+            {"error": "Provide enabled, folders, or lease_mode."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        if "folders" in data:
+            sync_config.set_sync_folders(data["folders"])
+        if "lease_mode" in data:
+            sync_config.set_lease_mode(data["lease_mode"])
+    except ValueError as exc:
+        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    warning = ""
+    try:
+        if "enabled" in data:
+            if data["enabled"] and not sync_config.code_sync_enabled():
+                sync_manager.enable_code_sync(force=True)
+            elif not data["enabled"] and sync_config.code_sync_enabled():
+                sync_manager.disable_code_sync()
+            elif data["enabled"]:
+                sync_manager.apply_settings_change()
+        elif "folders" in data or "lease_mode" in data:
+            sync_manager.apply_settings_change()
+    except CodeSyncError as exc:
+        logger.warning("code_sync apply_settings_failed: %s", exc)
+        warning = str(exc)
+
+    return Response(
+        _settings_payload(changed=True, apply_warning=warning),
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET"])
+def sync_status(request):
+    """Live sync health per folder plus reconcile/lease facts."""
+    enabled = sync_config.code_sync_enabled()
+    folders = []
+    client = None
+    if enabled:
+        try:
+            client = SyncthingClient()
+        except CodeSyncError:
+            client = None
+    for folder in sync_config.sync_folders():
+        entry = {
+            "id": folder.folder_id,
+            "relpath": folder.relpath,
+            "state": "unknown",
+            "completion": None,
+            "receive_only": False,
+            "peer_completion": {},
+        }
+        if client is not None:
+            try:
+                folder_status = client.folder_status(folder.folder_id)
+                entry["state"] = str(folder_status.get("state") or "unknown")
+                completion = client.folder_completion(folder.folder_id)
+                entry["completion"] = completion.get("completion")
+                folder_config = client.folder_config(folder.folder_id)
+                entry["receive_only"] = folder_config.get("type") == "receiveonly"
+            except CodeSyncError as exc:
+                entry["state"] = "unreachable"
+                entry["error"] = str(exc)
+        folders.append(entry)
+
+    reconcile_state = read_reconcile_state()
+    return Response(
+        {
+            "enabled": enabled,
+            "active": local_activity_recent(),
+            "lease_mode": sync_config.lease_mode(),
+            "lease_holder_device_id": sync_config.lease_holder_device_id() or "",
+            "folders": folders,
+            "last_reconcile_at": reconcile_state.get("last_reconcile_at", ""),
+            "conflicts_count": len(unresolved_conflicts()),
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET"])
+def sync_conflicts(request):
+    """All sync conflict records (branch divergences and file conflicts)."""
+    return Response(
+        {
+            "conflicts": read_conflicts(),
+            "unresolved_count": len(unresolved_conflicts()),
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+class SyncConflictResolveSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    action = serializers.ChoiceField(choices=("keep_local", "use_remote"))
+
+
+@api_view(["POST"])
+def sync_conflicts_resolve(request):
+    """Resolve one conflict with keep_local or use_remote."""
+    serializer = SyncConflictResolveSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    try:
+        record = resolve_conflict(
+            serializer.validated_data["id"], serializer.validated_data["action"]
+        )
+    except CodeSyncError as exc:
+        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"conflict": record}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+def sync_versions_purge(request):
+    """Delete all Syncthing version copies and report freed bytes."""
+    freed = sync_manager.purge_versions()
+    return Response({"freed_bytes": freed}, status=status.HTTP_200_OK)

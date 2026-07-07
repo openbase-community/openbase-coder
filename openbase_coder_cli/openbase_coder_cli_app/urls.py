@@ -7,6 +7,14 @@ from __future__ import annotations
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from openbase_coder_cli.openbase_coder_cli_app.git_http import git_http_backend
+from openbase_coder_cli.openbase_coder_cli_app.sync_settings import (
+    sync_conflicts,
+    sync_conflicts_resolve,
+    sync_settings,
+    sync_status,
+    sync_versions_purge,
+)
 from openbase_coder_cli.openbase_coder_cli_app.update import (
     update_apply,
     update_status,
@@ -342,6 +350,24 @@ urlpatterns = [
         name="bootstrap-run",
     ),
     path("git/diff/", git_diff, name="git-diff"),
+    path("sync/settings/", sync_settings, name="sync-settings"),
+    path("sync/status/", sync_status, name="sync-status"),
+    path("sync/conflicts/", sync_conflicts, name="sync-conflicts"),
+    path(
+        "sync/conflicts/resolve/",
+        sync_conflicts_resolve,
+        name="sync-conflicts-resolve",
+    ),
+    path(
+        "sync/versions/purge/",
+        sync_versions_purge,
+        name="sync-versions-purge",
+    ),
+    path(
+        "sync/git/<str:folder_id>/<path:subpath>",
+        git_http_backend,
+        name="sync-git-http",
+    ),
     path("status/", service_status, name="service-status"),
     path(
         "livekit-companion-session/",

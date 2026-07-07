@@ -76,6 +76,12 @@ def _resolve_binary_with_preferred_paths(
     return _resolve_binary(name, homebrew_fallback)
 
 
+def _resolve_syncthing() -> str:
+    from openbase_coder_cli.code_sync.syncthing import resolve_syncthing_binary
+
+    return resolve_syncthing_binary()
+
+
 def _runtime_workdir(config: InstallationConfig) -> str:
     runtime_package = current_runtime_package()
     if runtime_package is not None:
@@ -104,6 +110,7 @@ def _binary_resolvers(config: InstallationConfig) -> dict[str, Callable[[], str]
             "/opt/homebrew/bin/livekit-server",
         ),
         "python": lambda: config.python_path or sys.executable,
+        "syncthing": _resolve_syncthing,
         "openbase_coder": lambda: _resolve_binary_with_preferred_paths(
             "openbase-coder",
             [

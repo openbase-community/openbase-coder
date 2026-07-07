@@ -250,6 +250,19 @@ SERVICES: list[ServiceDefinition] = [
         port=7999,
     ),
     ServiceDefinition(
+        name="code-sync",
+        description="Code Sync (managed Syncthing)",
+        command_template=(
+            'exec {syncthing} serve --config "{data_dir}/code-sync" '
+            "--no-browser --no-restart --no-upgrade"
+        ),
+        workdir_template="{data_dir}",
+        # Installed only when code sync is enabled (openbase-coder sync
+        # enable or the sync settings API); never on plain installs.
+        install_by_default=False,
+        cleanup_command_substrings=("syncthing",),
+    ),
+    ServiceDefinition(
         name="openbase-cloud-heartbeat",
         description="Openbase Cloud idle heartbeat",
         command_template=(

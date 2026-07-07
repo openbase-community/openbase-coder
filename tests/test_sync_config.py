@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from openbase_coder_cli import sync_config
+
+
+def test_folder_id_is_deterministic_and_prefixed() -> None:
+    first = sync_config.folder_id_for_relpath("Projects/myapp")
+    second = sync_config.folder_id_for_relpath("Projects/myapp")
+    other = sync_config.folder_id_for_relpath("Projects/otherapp")
+
+    assert first == second
+    assert first != other
+    assert first.startswith("cs-")
+    assert len(first) == len("cs-") + 16
+    assert all(char in "0123456789abcdef" for char in first[len("cs-") :])
+
+
+@pytest.mark.parametrize(
+    "relpath",
+    [
+        "",
+        "   ",
+        "/Users/zoe/Projects",
+        "~/Projects",
+        "a/../..",
+        "../etc",
+        ".openbase/skills",
+    ],
+)
+def test_validate_relpath_rejects_invalid_paths(relpath: str) -> None:
+    with pytest.raises(ValueError):
+        sync_config.validate_relpath(relpath)
+
+
+def test_validate_relpath_normalizes() -> None:
+    assert sync_config.validate_relpath("Projects/myapp/") == "Projects/myapp"
+    assert sync_config.validate_relpath("/Projects/myapp"[1:]) == "Projects/myapp"
+
+
+def test_relpath_for_path_requires_home(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        sync_config.relpath_for_path(tmp_path / "outside-home")
+
+    under_home = Path.home() / "Projects" / "demo"
+    assert sync_config.relpath_for_path(under_home) == "Projects/demo"
+
+
+def test_read_sync_config_refuses_newer_schema(tmp_path: Path) -> None:
+    config_path = tmp_path / "sync-config.json"
+    config_path.write_text(json.dumps({"schema_version": 99}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="newer Openbase Coder"):
+        sync_config.read_sync_config(config_path)
+
+
+def test_enabled_and_lease_roundtrip(tmp_path: Path) -> None:
+    config_path = tmp_path / "sync-config.json"
+
+    assert sync_config.code_sync_enabled(config_path) is False
+    sync_config.set_code_sync_enabled(True, config_path)
+    assert sync_config.code_sync_enabled(config_path) is True
+
+    assert sync_config.lease_mode(config_path) == "auto"
+    sync_config.set_lease_mode("manual", config_path)
+    assert sync_config.lease_mode(config_path) == "manual"
+    with pytest.raises(ValueError):
+        sync_config.set_lease_mode("bogus", config_path)
+
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == sync_config.SYNC_CONFIG_SCHEMA_VERSION
+
+
+def test_folder_list_replace_add_remove(tmp_path: Path) -> None:
+    config_path = tmp_path / "sync-config.json"
+
+    folders = sync_config.set_sync_folders(
+        [
+            {"relpath": "Projects/one", "extra_ignores": ["*.log"]},
+            {"relpath": "Projects/two/"},
+            {"relpath": "Projects/one"},  # duplicate collapses
+        ],
+        config_path,
+    )
+    assert [folder.relpath for folder in folders] == [
+        "Projects/one",
+        "Projects/two",
+    ]
+    assert folders[0].extra_ignores == ("*.log",)
+
+    sync_config.add_sync_folder("Projects/three", config_path)
+    assert [f.relpath for f in sync_config.sync_folders(config_path)] == [
+        "Projects/one",
+        "Projects/two",
+        "Projects/three",
+    ]
+
+    assert sync_config.remove_sync_folder("Projects/two", config_path) is True
+    assert sync_config.remove_sync_folder("Projects/two", config_path) is False
+    remaining = sync_config.sync_folders(config_path)
+    assert [f.relpath for f in remaining] == ["Projects/one", "Projects/three"]
+
+    found = sync_config.folder_for_id(remaining[0].folder_id, config_path)
+    assert found is not None and found.relpath == "Projects/one"
+    assert sync_config.folder_for_id("cs-unknown", config_path) is None
+
+
+def test_set_sync_folders_rejects_invalid_entries(tmp_path: Path) -> None:
+    config_path = tmp_path / "sync-config.json"
+    with pytest.raises(ValueError):
+        sync_config.set_sync_folders([{"relpath": "../evil"}], config_path)
+    assert sync_config.sync_folders(config_path) == ()

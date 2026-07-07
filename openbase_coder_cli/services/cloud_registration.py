@@ -94,6 +94,27 @@ def _device_id() -> str:
     return generated
 
 
+def local_device_id() -> str:
+    """This device's stable cloud registration ID."""
+    return _device_id()
+
+
+def _code_sync_capabilities() -> dict[str, Any]:
+    """Advertised code-sync facts; never raises (registration must not fail)."""
+    from openbase_coder_cli.code_sync.syncthing import stored_device_id
+    from openbase_coder_cli.sync_config import code_sync_enabled
+
+    capabilities: dict[str, Any] = {}
+    try:
+        capabilities["code_sync_enabled"] = code_sync_enabled()
+    except ValueError:
+        capabilities["code_sync_enabled"] = False
+    syncthing_device_id = stored_device_id()
+    if syncthing_device_id:
+        capabilities["syncthing_device_id"] = syncthing_device_id
+    return capabilities
+
+
 def _with_capabilities(
     payload: dict[str, Any], capabilities: dict[str, Any]
 ) -> dict[str, Any]:
@@ -109,9 +130,7 @@ def _with_capabilities(
 def register_device_with_cloud() -> CloudReportResult:
     """POST this device's identity to openbase-cloud. Never raises."""
     result = _post_to_cloud(DEVICE_REGISTER_PATH, device_registration_payload())
-    write_onboarding_cache(
-        {"last_register": {"at": _timestamp(), **result.to_dict()}}
-    )
+    write_onboarding_cache({"last_register": {"at": _timestamp(), **result.to_dict()}})
     return result
 
 
@@ -131,6 +150,7 @@ def report_cli_state(
             "cli_configured": cli_configured,
             "cli_version": __version__,
             "tailscale_serve_healthy": serve_healthy,
+            **_code_sync_capabilities(),
         },
     )
     result = _post_to_cloud(
@@ -163,9 +183,7 @@ def register_and_report(
 
     Returns the first failing result so callers can surface a single warning.
     """
-    return report_cli_state(
-        cli_configured=cli_configured, serve_healthy=serve_healthy
-    )
+    return report_cli_state(cli_configured=cli_configured, serve_healthy=serve_healthy)
 
 
 def _post_to_cloud(

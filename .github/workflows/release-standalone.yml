@@ -177,6 +177,13 @@ jobs:
           "$livekit_server" --version
           echo "LIVEKIT_SERVER_BIN=${livekit_server}" >> "$GITHUB_ENV"
 
+      - name: Install Syncthing
+        run: |
+          brew install syncthing
+          syncthing_bin="$(command -v syncthing)"
+          "$syncthing_bin" --version
+          echo "SYNCTHING_BIN=${syncthing_bin}" >> "$GITHUB_ENV"
+
       - name: Build package directory
         env:
           # hatch-vcs only honors the unsuffixed form; the _FOR_<dist> variant
@@ -192,6 +199,7 @@ jobs:
             --repo-shas '${{ steps.shas.outputs.repo_shas }}' \
             --python "$python_bin" \
             --livekit-server-bin "$LIVEKIT_SERVER_BIN" \
+            --syncthing-bin "$SYNCTHING_BIN" \
             --package-dir "$package_dir" \
             --force
           echo "PACKAGE_DIR=${package_dir}" >> "$GITHUB_ENV"
@@ -219,6 +227,7 @@ jobs:
             --package-dir "$PACKAGE_DIR" \
             --identity "$identity"
           codesign --verify --deep --strict "$PACKAGE_DIR/bin/livekit-server"
+          codesign --verify --deep --strict "$PACKAGE_DIR/bin/syncthing"
           codesign --verify --deep --strict "$PACKAGE_DIR/python/bin/python3.12"
 
       - name: Archive release assets

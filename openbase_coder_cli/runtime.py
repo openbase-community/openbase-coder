@@ -36,6 +36,11 @@ class RuntimePackage:
         return self.bin_dir / name
 
     @property
+    def syncthing_path(self) -> Path:
+        name = "syncthing.exe" if os.name == "nt" else "syncthing"
+        return self.bin_dir / name
+
+    @property
     def console_build_dir(self) -> Path:
         return self.root / "console"
 

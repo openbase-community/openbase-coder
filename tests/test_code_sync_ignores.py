@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from openbase_coder_cli.code_sync import ignores
+from openbase_coder_cli.sync_config import SyncFolder
+
+
+def test_render_stignore_contains_vcs_and_default_patterns() -> None:
+    content = ignores.render_stignore()
+
+    assert content.startswith("// Managed by openbase-coder")
+    for pattern in ("(?d).git", "(?d)**/.git", "**/.jj", "**/.hg"):
+        assert pattern in content
+    for pattern in ("(?d)node_modules", "**/.venv", "**/venv"):
+        assert pattern in content
+    for pattern in (
+        "**/dist",
+        "**/build",
+        "**/out",
+        "**/release",
+        "**/DerivedData",
+        "(?d)**/__pycache__",
+        "**/.next",
+        "**/target",
+    ):
+        assert pattern in content
+    for pattern in ("(?d)**/.DS_Store", "*.sqlite3"):
+        assert pattern in content
+    # Secrets sync by design; the file must say so and never ignore .env.
+    assert "deliberately NOT ignored" in content
+    assert "\n.env\n" not in content
+
+
+def test_render_stignore_appends_extra_ignores() -> None:
+    content = ignores.render_stignore(("models/weights", "*.bin"))
+    assert "// Folder-specific ignores" in content
+    assert "models/weights" in content
+    assert "*.bin" in content
+
+
+def test_write_folder_ignores_creates_file(tmp_path: Path) -> None:
+    folder = SyncFolder(relpath="Projects/demo", extra_ignores=("*.tmp",))
+    path = ignores.write_folder_ignores(folder, home=tmp_path)
+
+    assert path == tmp_path / "Projects" / "demo" / ".stignore"
+    content = path.read_text(encoding="utf-8")
+    assert "(?d).git" in content
+    assert "*.tmp" in content
+
+    # Regeneration overwrites the whole managed file.
+    path.write_text("// hand edited\n", encoding="utf-8")
+    ignores.write_folder_ignores(folder, home=tmp_path)
+    assert "hand edited" not in path.read_text(encoding="utf-8")
