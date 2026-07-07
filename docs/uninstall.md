@@ -4,9 +4,10 @@ Uninstall does not depend on the `openbase-coder` command. Use normal macOS,
 Linux, and Python tool cleanup commands so you can remove Openbase even if the
 CLI environment is broken.
 
-Openbase Coder state lives in three places, each removed in its own section
+Openbase Coder state lives in four places, each removed in its own section
 below: the CLI runtime state in `~/.openbase`, the desktop app's Electron
-state under `~/Library/Application Support`, and the iOS app's on-phone state
+state and caches under `~/Library`, a managed Claude credential in the macOS
+Keychain (Claude Code backend only), and the iOS app's on-phone state
 (removed automatically when you delete the app from the iPhone).
 
 ## Service Cleanup With The CLI
@@ -93,18 +94,52 @@ echo "Archived Openbase state at $backup"
 ## Remove The Desktop App
 
 Delete the app itself, then its persistent storage. Electron keeps per-app
-state (window data, renderer storage) outside the app bundle, so deleting the
-app alone leaves it behind — and a later reinstall would silently pick up the
-old state:
+state (localStorage, IndexedDB, cookies, window data) outside the app bundle,
+so deleting the app alone leaves it behind — and a later reinstall would
+silently pick up the old state:
 
 ```bash
 rm -rf "/Applications/Openbase Coder.app"
+
+# Electron user data — current and older app identities:
 rm -rf "$HOME/Library/Application Support/@openbase/coder-desktop"
+rm -rf "$HOME/Library/Application Support/openbase-coder-desktop"
+rm -rf "$HOME/Library/Application Support/coder-desktop"
+```
+
+The auto-updater and the screen-share companion keep their own caches and
+preferences (downloaded updates alone can exceed 1 GB):
+
+```bash
+rm -rf "$HOME/Library/Caches/@openbasecoder-desktop-updater"
+rm -rf "$HOME/Library/Caches/tech.openbase.coder.desktop" \
+       "$HOME/Library/Caches/tech.openbase.coder.desktop.ShipIt" \
+       "$HOME/Library/Caches/tech.openbase.coder.LiveKitCompanion"
+defaults delete tech.openbase.coder.desktop 2>/dev/null || true
+defaults delete tech.openbase.coder.LiveKitCompanion 2>/dev/null || true
+rm -rf "$HOME/Library/HTTPStorages/tech.openbase.coder.desktop" \
+       "$HOME/Library/HTTPStorages/tech.openbase.coder.LiveKitCompanion" \
+       "$HOME/Library/HTTPStorages/tech.openbase.coder.LiveKitCompanion.binarycookies"
+rm -rf "$HOME/Library/Saved Application State/tech.openbase.coder.desktop.savedState"
 ```
 
 On iPhone, deleting the Openbase app removes its local state (the CLI auth
 token in the Keychain and the backend host list); there is nothing else to
 clean up on the phone.
+
+## Remove Keychain Credentials
+
+If the Claude Code backend was ever used, the CLI stored a managed Claude
+credential in the macOS Keychain under a service name derived from the
+Openbase Claude config path. Remove it with:
+
+```bash
+suffix=$(python3 -c 'import hashlib,os;print(hashlib.sha256(os.path.expanduser("~/.openbase/claude_config").encode()).hexdigest()[:8])')
+security delete-generic-password -s "Claude Code-credentials-$suffix" 2>/dev/null || true
+```
+
+This does not touch your normal Claude Code login (`Claude Code-credentials`
+without a suffix), which belongs to Claude Code itself.
 
 ## Optional Tailscale Cleanup
 
