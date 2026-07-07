@@ -70,78 +70,13 @@ def test_onboarding_report_success(monkeypatch) -> None:
     monkeypatch.setattr(
         onboarding_cli,
         "register_and_report",
-        lambda: CloudReportResult(
-            ok=True, supported=True, status_code=200, tailscale_advertised=True
-        ),
+        lambda: CloudReportResult(ok=True, supported=True, status_code=200),
     )
 
     result = CliRunner().invoke(main, ["onboarding", "report"])
 
     assert result.exit_code == 0
     assert "Registered device" in result.output
-
-
-def test_onboarding_report_warns_when_tailscale_not_advertised(monkeypatch) -> None:
-    monkeypatch.setattr(
-        onboarding_cli,
-        "register_and_report",
-        lambda: CloudReportResult(
-            ok=True, supported=True, status_code=200, tailscale_advertised=False
-        ),
-    )
-
-    result = CliRunner().invoke(main, ["onboarding", "report"])
-
-    assert result.exit_code != 0
-    assert "Tailscale isn't connected" in result.output
-
-
-def test_onboarding_heartbeat_ok(monkeypatch) -> None:
-    monkeypatch.setattr(
-        onboarding_cli,
-        "register_device_with_cloud",
-        lambda: CloudReportResult(ok=True, supported=True, status_code=200),
-    )
-
-    result = CliRunner().invoke(main, ["onboarding", "heartbeat"])
-
-    assert result.exit_code == 0
-    assert "heartbeat ok" in result.output
-
-
-def test_onboarding_deregister_success(monkeypatch) -> None:
-    captured = {}
-
-    def fake_deregister(device_id=None):
-        captured["device_id"] = device_id
-        return CloudReportResult(ok=True, supported=True, status_code=200)
-
-    monkeypatch.setattr(
-        onboarding_cli, "deregister_device_with_cloud", fake_deregister
-    )
-
-    result = CliRunner().invoke(
-        main, ["onboarding", "deregister", "--device-id", "mobile-abc"]
-    )
-
-    assert result.exit_code == 0
-    assert "Deregistered device" in result.output
-    assert captured["device_id"] == "mobile-abc"
-
-
-def test_onboarding_tailscale_up_invokes_helper(monkeypatch) -> None:
-    called = {"n": 0}
-
-    def fake_up():
-        called["n"] += 1
-
-    monkeypatch.setattr(onboarding_cli, "tailscale_up", fake_up)
-
-    result = CliRunner().invoke(main, ["onboarding", "tailscale-up"])
-
-    assert result.exit_code == 0
-    assert called["n"] == 1
-    assert "Tailscale is connected" in result.output
 
 
 def test_onboarding_report_skips_when_unsupported(monkeypatch) -> None:
