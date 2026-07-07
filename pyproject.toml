@@ -44,7 +44,7 @@ dependencies = [
     "livekit-plugins-noise-cancellation>=0.2.5",
     "aiohttp>=3.13.3",
     "multi-workspace>=3.2.3",
-    "openapprovals>=0.1.0",
+    "open-approvals>=0.1.0",
     "super-agents[claude]>=0.1.6",
     "websockets>=16.0",
     "numpy>=2.3.0",
@@ -80,7 +80,7 @@ build-backend = "hatchling.build"
 exclude-newer = "1 week"
 
 [tool.uv.sources]
-openapprovals = { path = "../openapprovals", editable = true }
+open-approvals = { path = "../open-approvals", editable = true }
 super-agents = { path = "../super-agents", editable = true }
 
 [tool.hatch.version]

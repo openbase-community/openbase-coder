@@ -1,9 +1,9 @@
-"""Skill approval requests, backed by the openapprovals package.
+"""Skill approval requests, backed by the open-approvals package.
 
 Skills are the requesters in Openbase Coder, so this module keeps the
 `skill_approval` naming as a stable surface for skills and the
 `openbase-coder user approval` CLI while delegating the lifecycle to
-openapprovals (where `skill` is the generic `requester`).
+open-approvals (where `skill` is the generic `requester`).
 """
 
 from __future__ import annotations
@@ -11,25 +11,25 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import openapprovals
-from openapprovals import (
+import open_approvals
+from open_approvals import (
     APPROVAL_DECISIONS,
     APPROVAL_METHOD,
     TERMINAL_DECISIONS,
 )
-from openapprovals import answer_approval_request as answer_skill_approval_request
-from openapprovals import consume_approval_decision as consume_skill_approval_decision
-from openapprovals import get_approval_decision as get_skill_approval_decision
-from openapprovals import get_approval_request as get_skill_approval_request
-from openapprovals import is_client_approval_request as is_skill_approval_request
-from openapprovals import (
+from open_approvals import answer_approval_request as answer_skill_approval_request
+from open_approvals import consume_approval_decision as consume_skill_approval_decision
+from open_approvals import get_approval_decision as get_skill_approval_decision
+from open_approvals import get_approval_request as get_skill_approval_request
+from open_approvals import is_client_approval_request as is_skill_approval_request
+from open_approvals import (
     is_pending_client_approval_request as is_pending_skill_approval_request,
 )
-from openapprovals import list_approval_requests as list_skill_approval_requests
-from openapprovals import (
+from open_approvals import list_approval_requests as list_skill_approval_requests
+from open_approvals import (
     normalize_approval_request as normalize_shared_approval_request,
 )
-from openapprovals import wait_for_approval as wait_for_skill_approval
+from open_approvals import wait_for_approval as wait_for_skill_approval
 
 __all__ = [
     "APPROVAL_DECISIONS",
@@ -60,7 +60,7 @@ def create_skill_approval_request(
     path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Create a skill approval in the same shared queue used by Codex requests."""
-    return openapprovals.create_approval_request(
+    return open_approvals.create_approval_request(
         requester=skill,
         action=action,
         description=description,
@@ -84,7 +84,7 @@ def request_approval(
     """Request user approval through the local Openbase Coder server."""
     from openbase_coder_cli.cli.local_server import local_server_request
 
-    return openapprovals.request_approval(
+    return open_approvals.request_approval(
         local_server_request,
         requester=skill,
         action=action,
