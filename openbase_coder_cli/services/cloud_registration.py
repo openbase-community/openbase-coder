@@ -13,7 +13,7 @@ import platform
 import socket
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 import httpx
@@ -34,6 +34,7 @@ from openbase_coder_cli.services.tailnet_devices import tailscale_self_identity
 from openbase_coder_cli.services.tailscale_serve import tailscale_serve_health
 
 DEVICE_REGISTER_PATH = "/api/openbase/devices/register/"
+DEVICE_DEREGISTER_PATH = "/api/openbase/devices/deregister/"
 REQUEST_TIMEOUT_SECONDS = 15
 
 
@@ -44,9 +45,22 @@ class CloudReportResult:
     error: str | None = None
     status_code: int | None = None
     response: dict[str, Any] | None = None
+    # Whether this registration advertised a Tailscale identity. A registration
+    # can succeed (HTTP 200) while Tailscale is disconnected, in which case the
+    # device is registered without an address and pairing cannot complete —
+    # callers surface this so the user isn't told "done" when it isn't.
+    tailscale_advertised: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _payload_advertises_tailscale(payload: dict[str, Any]) -> bool:
+    return bool(
+        payload.get("tailscale_magic_dns")
+        or payload.get("tailscale_ip")
+        or payload.get("tailscale")
+    )
 
 
 def device_registration_payload() -> dict[str, Any]:
@@ -107,12 +121,31 @@ def _with_capabilities(
 
 
 def register_device_with_cloud() -> CloudReportResult:
-    """POST this device's identity to openbase-cloud. Never raises."""
-    result = _post_to_cloud(DEVICE_REGISTER_PATH, device_registration_payload())
+    """POST this device's identity to openbase-cloud. Never raises.
+
+    Lightweight: no Tailscale-serve health probe, so it is cheap enough to run
+    on a heartbeat while an onboarding page is open.
+    """
+    payload = device_registration_payload()
+    result = replace(
+        _post_to_cloud(DEVICE_REGISTER_PATH, payload),
+        tailscale_advertised=_payload_advertises_tailscale(payload),
+    )
     write_onboarding_cache(
         {"last_register": {"at": _timestamp(), **result.to_dict()}}
     )
     return result
+
+
+def deregister_device_with_cloud(device_id: str | None = None) -> CloudReportResult:
+    """Remove a device from openbase-cloud's rendezvous registry. Never raises.
+
+    Defaults to this machine's own device id; pass an explicit id to forget a
+    sibling device (e.g. a stale phone) from the Mac.
+    """
+    return _post_to_cloud(
+        DEVICE_DEREGISTER_PATH, {"device_id": device_id or _device_id()}
+    )
 
 
 def report_cli_state(
@@ -133,9 +166,9 @@ def report_cli_state(
             "tailscale_serve_healthy": serve_healthy,
         },
     )
-    result = _post_to_cloud(
-        DEVICE_REGISTER_PATH,
-        payload,
+    result = replace(
+        _post_to_cloud(DEVICE_REGISTER_PATH, payload),
+        tailscale_advertised=_payload_advertises_tailscale(payload),
     )
     cache_update: dict[str, Any] = {
         "last_report": {

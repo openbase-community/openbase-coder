@@ -74,6 +74,23 @@ def configure_tailscale_serve() -> None:
     )
 
 
+def tailscale_up() -> None:
+    """Run ``tailscale up`` to bring this node online, opening SSO if needed.
+
+    Returns once the node is authenticated (or immediately if it already was).
+    Output is inherited rather than captured so the login URL reaches the caller,
+    and there is no short timeout since completing SSO is a manual step.
+    """
+    tailscale_bin = _tailscale_bin()
+    if not tailscale_bin:
+        raise RuntimeError(
+            "tailscale was not found (checked PATH and /Applications/Tailscale.app)."
+        )
+    result = subprocess.run([tailscale_bin, "up"], text=True)  # noqa: S603
+    if result.returncode != 0:
+        raise RuntimeError("tailscale up failed. Open Tailscale and sign in, then retry.")
+
+
 def tailscale_serve_health() -> TailscaleServeHealth:
     tailscale_bin = _tailscale_bin()
     if not tailscale_bin:
