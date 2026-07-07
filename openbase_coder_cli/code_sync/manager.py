@@ -113,6 +113,9 @@ def enable_code_sync(
     if not eligibility.eligible and not force:
         raise CodeSyncError(eligibility.reason or "Code sync is not eligible.")
 
+    from openbase_coder_cli.code_sync.install import ensure_syncthing_installed
+
+    ensure_syncthing_installed()
     rendered = render_configuration(eligibility, config_path=config_path)
     set_code_sync_enabled(True, config_path)
     SYNC_VERSIONS_DIR.mkdir(parents=True, exist_ok=True)

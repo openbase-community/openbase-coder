@@ -180,25 +180,10 @@ _SYNCTHING_ARCHES = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64"}
 
 
 def _ensure_syncthing_linux() -> None:
-    """Install syncthing on a Linux workspace (apt, else GitHub release)."""
-    import shutil
+    """Install syncthing on a Linux workspace via the managed installer."""
+    from openbase_coder_cli.code_sync.install import ensure_syncthing_installed
 
-    from openbase_coder_cli.code_sync.syncthing import resolve_syncthing_binary
-
-    try:
-        resolve_syncthing_binary()
-        return
-    except click.ClickException:
-        pass
-
-    if shutil.which("apt-get"):
-        result = subprocess.run(
-            ["sudo", "apt-get", "install", "-y", "syncthing"], check=False
-        )
-        if result.returncode == 0 and shutil.which("syncthing"):
-            return
-
-    _download_syncthing_release()
+    ensure_syncthing_installed()
 
 
 def _download_syncthing_release() -> None:

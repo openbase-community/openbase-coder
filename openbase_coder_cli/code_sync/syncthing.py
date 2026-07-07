@@ -25,7 +25,6 @@ import httpx
 
 from openbase_coder_cli.code_sync import CodeSyncError
 from openbase_coder_cli.paths import CODE_SYNC_DIR, SYNC_VERSIONS_DIR
-from openbase_coder_cli.runtime import current_runtime_package
 from openbase_coder_cli.sync_config import SyncFolder
 
 GUI_ADDRESS = "127.0.0.1:8385"
@@ -50,14 +49,12 @@ class PeerDevice:
 
 
 def resolve_syncthing_binary() -> str:
-    """Locate syncthing: standalone package bin, PATH, then Homebrew dirs."""
-    package = current_runtime_package()
-    candidates: list[Path] = []
-    if package is not None:
-        candidates.append(package.syncthing_path)
-    for candidate in candidates:
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
+    """Locate syncthing: managed install, PATH, then Homebrew dirs."""
+    from openbase_coder_cli.code_sync.install import managed_syncthing_path
+
+    managed = managed_syncthing_path()
+    if managed.is_file() and os.access(managed, os.X_OK):
+        return str(managed)
     path = shutil.which("syncthing")
     if path:
         return path
@@ -68,8 +65,8 @@ def resolve_syncthing_binary() -> str:
         if fallback.is_file():
             return str(fallback)
     raise click.ClickException(
-        "Could not find 'syncthing'. Install it (e.g. 'brew install syncthing') "
-        "or use a standalone Openbase Coder package that bundles it."
+        "Could not find 'syncthing'. Run 'openbase-coder sync enable' to "
+        "download it, or install it manually (e.g. 'brew install syncthing')."
     )
 
 
