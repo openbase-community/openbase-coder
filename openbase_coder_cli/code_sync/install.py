@@ -64,9 +64,19 @@ def syncthing_installed() -> bool:
 
 
 def ensure_syncthing_installed(*, echo=click.echo) -> Path:
-    """Download and install the pinned Syncthing release if not present."""
+    """Ensure syncthing is available; download the pinned release if not.
+
+    Honors an existing syncthing on PATH (e.g. an apt/homebrew install or a
+    DevSpace AMI that pre-baked it) — only downloads when nothing is
+    resolvable, so enabling sync never re-fetches a binary the host already
+    has.
+    """
     if syncthing_installed():
         return MANAGED_SYNCTHING_PATH
+
+    existing = shutil.which("syncthing")
+    if existing:
+        return Path(existing)
 
     key = (platform.system(), platform.machine())
     asset = _ASSETS.get(key)

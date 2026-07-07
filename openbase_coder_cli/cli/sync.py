@@ -26,6 +26,19 @@ def sync() -> None:
     """Keep code in sync between your computers (managed Syncthing)."""
 
 
+@sync.command("install-engine")
+def install_engine() -> None:
+    """Pre-fetch the pinned Syncthing engine without enabling sync.
+
+    Useful for baking the binary into a DevSpace AMI or warming a laptop so
+    that enabling sync later is instant and needs no network.
+    """
+    from openbase_coder_cli.code_sync.install import ensure_syncthing_installed
+
+    path = ensure_syncthing_installed()
+    click.echo(f"Syncthing engine ready at {path}")
+
+
 @sync.command()
 @click.option(
     "--force",

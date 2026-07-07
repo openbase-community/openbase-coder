@@ -167,6 +167,11 @@ def render_config_xml(
             fsWatcherEnabled="true",
             fsWatcherDelayS="10",
             autoNormalize="true",
+            # Keep case-conflict detection on (the default). A macOS
+            # (case-insensitive) peer syncing with a Linux DevSpace
+            # (case-sensitive) can otherwise silently collide files that
+            # differ only in case; false = Syncthing detects and flags them.
+            caseSensitiveFS="false",
         )
         for device_id in [self_device_id, *(peer.device_id for peer in peers)]:
             ET.SubElement(folder_element, "device", id=device_id)

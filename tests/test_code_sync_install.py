@@ -40,6 +40,19 @@ class _FakeStream:
 def _patch_platform(monkeypatch, system="Darwin", machine="arm64") -> None:
     monkeypatch.setattr(install.platform, "system", lambda: system)
     monkeypatch.setattr(install.platform, "machine", lambda: machine)
+    # Keep tests independent of whether the host has syncthing on PATH.
+    monkeypatch.setattr(install.shutil, "which", lambda _name: None)
+
+
+def test_install_honors_syncthing_on_path(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        install, "MANAGED_SYNCTHING_PATH", tmp_path / "managed" / "syncthing"
+    )
+    monkeypatch.setattr(install.shutil, "which", lambda _name: "/usr/bin/syncthing")
+
+    result = install.ensure_syncthing_installed(echo=lambda *_: None)
+
+    assert str(result) == "/usr/bin/syncthing"
 
 
 def test_install_verifies_checksum_and_installs(tmp_path: Path, monkeypatch) -> None:
@@ -57,9 +70,7 @@ def test_install_verifies_checksum_and_installs(tmp_path: Path, monkeypatch) -> 
     )
     target = tmp_path / "bin" / "syncthing"
     monkeypatch.setattr(install, "MANAGED_SYNCTHING_PATH", target)
-    monkeypatch.setattr(
-        install.httpx, "stream", lambda *a, **k: _FakeStream(payload)
-    )
+    monkeypatch.setattr(install.httpx, "stream", lambda *a, **k: _FakeStream(payload))
 
     result = install.ensure_syncthing_installed(echo=lambda *_: None)
 
@@ -78,9 +89,7 @@ def test_install_rejects_checksum_mismatch(tmp_path: Path, monkeypatch) -> None:
     )
     target = tmp_path / "bin" / "syncthing"
     monkeypatch.setattr(install, "MANAGED_SYNCTHING_PATH", target)
-    monkeypatch.setattr(
-        install.httpx, "stream", lambda *a, **k: _FakeStream(payload)
-    )
+    monkeypatch.setattr(install.httpx, "stream", lambda *a, **k: _FakeStream(payload))
 
     with pytest.raises(click.ClickException, match="checksum mismatch"):
         install.ensure_syncthing_installed(echo=lambda *_: None)
