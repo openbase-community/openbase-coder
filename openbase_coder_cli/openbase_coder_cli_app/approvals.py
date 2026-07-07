@@ -25,12 +25,21 @@ class ApprovalRequestActionSerializer(serializers.Serializer):
 
 
 class SkillApprovalRequestCreateSerializer(serializers.Serializer):
-    skill = serializers.CharField()
+    requester = serializers.CharField(required=False)
+    # Legacy alias for requester, still sent by older skills.
+    skill = serializers.CharField(required=False)
     action = serializers.CharField()
     description = serializers.CharField()
     command = serializers.CharField(required=False, allow_blank=True)
     details = serializers.JSONField(required=False)
     timeout_seconds = serializers.FloatField(required=False, min_value=0)
+
+    def validate(self, attrs):
+        if not attrs.get("requester") and not attrs.get("skill"):
+            raise serializers.ValidationError(
+                "requester is required (legacy key: skill)"
+            )
+        return attrs
 
 
 @api_view(["GET"])
@@ -86,7 +95,8 @@ def skill_approval_requests(request):
         )
     try:
         approval_request = create_skill_approval_request(
-            skill=serializer.validated_data["skill"],
+            skill=serializer.validated_data.get("requester")
+            or serializer.validated_data["skill"],
             action=serializer.validated_data["action"],
             description=serializer.validated_data["description"],
             details=details,

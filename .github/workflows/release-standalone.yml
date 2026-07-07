@@ -74,6 +74,12 @@ jobs:
           repository: montaguegabe/boilersync-react
           path: boilersync-react
 
+      - name: Checkout openapprovals-react
+        uses: actions/checkout@v4
+        with:
+          repository: montaguegabe/openapprovals-react
+          path: openapprovals-react
+
       - name: Checkout skills
         uses: actions/checkout@v4
         with:
@@ -95,6 +101,7 @@ jobs:
             --arg coder_react "$(git -C coder-react rev-parse HEAD)" \
             --arg multi_react "$(git -C multi-react rev-parse HEAD)" \
             --arg boilersync_react "$(git -C boilersync-react rev-parse HEAD)" \
+            --arg openapprovals_react "$(git -C openapprovals-react rev-parse HEAD)" \
             --arg skills "$(git -C skills rev-parse HEAD)" \
             --arg workspace "$(git -C workspace-seed rev-parse HEAD)" \
             '{
@@ -103,6 +110,7 @@ jobs:
               "coder-react": $coder_react,
               "multi-react": $multi_react,
               "boilersync-react": $boilersync_react,
+              "openapprovals-react": $openapprovals_react,
               "skills": $skills,
               "workspace": $workspace
             }')"

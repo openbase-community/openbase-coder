@@ -11,7 +11,7 @@ trap 'rm -rf "$build_dir"' EXIT
 
 cp "$cli_dir/scripts/release-workspace/package.json" "$build_dir/"
 cp "$cli_dir/scripts/release-workspace/pnpm-workspace.yaml" "$build_dir/"
-for repo in console coder-react multi-react boilersync-react; do
+for repo in console coder-react multi-react boilersync-react openapprovals-react; do
   mkdir -p "$build_dir/$repo"
   cp "$workspace_dir/$repo/package.json" "$build_dir/$repo/"
 done

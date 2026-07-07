@@ -27,12 +27,13 @@ def test_skill_approval_lifecycle_uses_json_store(tmp_path: Path) -> None:
         path=path,
     )
 
-    assert request["id"].startswith("skill-")
+    assert request["id"].startswith("approval-")
     assert list_skill_approval_requests(path) == [request]
     assert get_skill_approval_request(request["id"], path) == request
     store = read_permission_store(path)
     assert request["id"] in store["requests"]
-    assert store["requests"][request["id"]]["method"] == "openbaseSkill/requestApproval"
+    assert store["requests"][request["id"]]["method"] == "openapprovals/requestApproval"
+    assert store["requests"][request["id"]]["params"]["requester"] == "whatsapp-cli"
 
     decision = answer_skill_approval_request(request["id"], "accept", path)
 

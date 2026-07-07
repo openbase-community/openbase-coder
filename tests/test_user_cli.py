@@ -127,7 +127,7 @@ def test_user_approval_request_waits_for_accept(monkeypatch):
         "POST",
         "http://127.0.0.1:7999/api/skill-approval-requests/",
         {
-            "skill": "whatsapp-cli",
+            "requester": "whatsapp-cli",
             "action": "send-message",
             "description": "Queue a WhatsApp message",
             "details": {"contact": "contact"},
