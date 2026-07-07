@@ -115,10 +115,10 @@ def _ahead_of_upstream(directory: str) -> int | None:
 
 
 def repo_state(changed_files: list[str], ahead: int | None) -> str:
-    """in_progress (dirty) / committed (clean, unpushed) / pushed (clean, level)."""
+    """in_progress (dirty) / committed (clean, ahead of remote) / pushed (clean, level or no remote)."""
     if changed_files:
         return "in_progress"
-    if ahead is None or ahead > 0:
+    if ahead is not None and ahead > 0:
         return "committed"
     return "pushed"
 
