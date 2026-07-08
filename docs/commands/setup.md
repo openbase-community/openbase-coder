@@ -49,6 +49,10 @@ For development, run the workspace script from your checkout root; it runs
 ./scripts/setup
 ```
 
+The workspace script is for a clean source-workspace install. If it finds an
+existing standalone install or a different development workspace install, it
+stops and directs you to [Uninstall](../uninstall.md) before making changes.
+
 ## Backend Selection
 
 Setup configures the default coding backend:

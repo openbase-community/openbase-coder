@@ -63,6 +63,10 @@ cd openbase-coder-workspace
 ./scripts/setup
 ```
 
+If a standalone desktop/CLI install, or a different development workspace
+install, already exists, the workspace script stops and links to
+[Uninstall](uninstall.md). Uninstall first, then rerun `./scripts/setup`.
+
 After setup completes — in either mode — authenticate with Openbase Cloud
 (required for iOS app pairing and cloud onboarding):
 
