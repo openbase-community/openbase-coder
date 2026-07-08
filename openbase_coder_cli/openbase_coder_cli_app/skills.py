@@ -2,13 +2,8 @@
 
 from __future__ import annotations
 
-import json
-import re
 import shutil
-import time
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
 
 from rest_framework import status
 from rest_framework.decorators import api_view
@@ -17,21 +12,11 @@ from rest_framework.response import Response
 from openbase_coder_cli import dispatcher_config, skills_autolink
 from openbase_coder_cli.paths import CODEX_HOME_DIR, OPENBASE_CLAUDE_CONFIG_DIR
 
-PRINTING_PRESS_REGISTRY_URL = "https://raw.githubusercontent.com/mvanhorn/printing-press-library/main/registry.json"
-PRINTING_PRESS_SKILL_URL_TEMPLATE = (
-    "https://raw.githubusercontent.com/mvanhorn/printing-press-library/main/"
-    "cli-skills/pp-{name}/SKILL.md"
-)
-PRINTING_PRESS_TARGET_SCOPES = {"home", "openbase_codex", "openbase_claude"}
 GLOBAL_SKILL_SCOPES = {
     "home",
     "openbase_codex",
     "openbase_claude",
 }
-PRINTING_PRESS_SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-PRINTING_PRESS_REGISTRY_CACHE_SECONDS = 300
-_PRINTING_PRESS_REGISTRY_CACHE: dict | None = None
-_PRINTING_PRESS_REGISTRY_CACHE_EXPIRES_AT = 0.0
 
 
 def _home_skills_dir() -> Path:
@@ -116,181 +101,6 @@ def _skill_payload(skill_file: Path, skill_name: str) -> dict[str, str]:
     if skill_file.parent.is_symlink() or skill_file.is_symlink():
         payload["source_path"] = str(skill_file.resolve())
     return payload
-
-
-def _read_url_text(url: str, *, timeout: int = 15) -> str:
-    with urlopen(url, timeout=timeout) as response:
-        return response.read().decode("utf-8")
-
-
-def _fetch_printing_press_registry() -> dict:
-    global _PRINTING_PRESS_REGISTRY_CACHE
-    global _PRINTING_PRESS_REGISTRY_CACHE_EXPIRES_AT
-
-    now = time.monotonic()
-    if (
-        _PRINTING_PRESS_REGISTRY_CACHE is not None
-        and _PRINTING_PRESS_REGISTRY_CACHE_EXPIRES_AT > now
-    ):
-        return _PRINTING_PRESS_REGISTRY_CACHE
-
-    registry = json.loads(_read_url_text(PRINTING_PRESS_REGISTRY_URL))
-    _PRINTING_PRESS_REGISTRY_CACHE = registry
-    _PRINTING_PRESS_REGISTRY_CACHE_EXPIRES_AT = (
-        now + PRINTING_PRESS_REGISTRY_CACHE_SECONDS
-    )
-    return registry
-
-
-def _printing_press_skill_name(name: str) -> str:
-    normalized = name.strip().lower()
-    if not PRINTING_PRESS_SKILL_NAME_RE.fullmatch(normalized):
-        raise ValueError("invalid printing press skill name")
-    return f"pp-{normalized}"
-
-
-def _printing_press_skill_installed_targets(name: str) -> dict[str, bool]:
-    skill_name = _printing_press_skill_name(name)
-    return {
-        scope: _skill_file(_skills_dir(None, scope), skill_name).is_file()
-        for scope in sorted(PRINTING_PRESS_TARGET_SCOPES)
-    }
-
-
-def _printing_press_entry_payload(entry: dict) -> dict:
-    name = str(entry.get("name", ""))
-    release = entry.get("release") if isinstance(entry.get("release"), dict) else {}
-    creator = entry.get("creator") if isinstance(entry.get("creator"), dict) else {}
-    mcp = entry.get("mcp") if isinstance(entry.get("mcp"), dict) else None
-    payload = {
-        "name": name,
-        "skill_name": _printing_press_skill_name(name),
-        "category": entry.get("category") or "other",
-        "api": entry.get("api") or name,
-        "description": entry.get("description") or "",
-        "path": entry.get("path") or "",
-        "release": {
-            "cli_name": release.get("cli_name") or "",
-            "version": release.get("version") or "",
-            "released_at": release.get("released_at") or "",
-        },
-        "printer": entry.get("printer") or creator.get("handle") or "",
-        "printer_name": entry.get("printer_name") or creator.get("name") or "",
-        "creator": {
-            "handle": creator.get("handle") or "",
-            "name": creator.get("name") or "",
-        },
-        "installed_targets": _printing_press_skill_installed_targets(name),
-    }
-    if mcp:
-        payload["mcp"] = {
-            "binary": mcp.get("binary") or "",
-            "transports": mcp.get("transports") or [],
-            "tool_count": mcp.get("tool_count") or 0,
-            "public_tool_count": mcp.get("public_tool_count") or 0,
-            "auth_type": mcp.get("auth_type") or "",
-            "env_vars": mcp.get("env_vars") or [],
-            "mcp_ready": mcp.get("mcp_ready") or "",
-            "spec_format": mcp.get("spec_format") or "",
-        }
-    return payload
-
-
-def _printing_press_entries(
-    registry: dict, *, query: str = "", category: str = ""
-) -> list[dict]:
-    entries = registry.get("entries")
-    if not isinstance(entries, list):
-        return []
-    normalized_query = query.strip().lower()
-    normalized_category = category.strip().lower()
-    filtered = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        if (
-            normalized_category
-            and str(entry.get("category", "")).lower() != normalized_category
-        ):
-            continue
-        if normalized_query:
-            search_terms = entry.get("search_terms")
-            search_values = search_terms if isinstance(search_terms, list) else []
-            searchable = [
-                str(entry.get("name", "")),
-                str(entry.get("api", "")),
-                str(entry.get("description", "")),
-                *[str(term) for term in search_values],
-            ]
-            if not any(normalized_query in value.lower() for value in searchable):
-                continue
-        try:
-            filtered.append(_printing_press_entry_payload(entry))
-        except ValueError:
-            continue
-    return sorted(filtered, key=lambda item: (item["category"], item["name"]))
-
-
-def _printing_press_registry_has_entry(registry: dict, name: str) -> bool:
-    entries = registry.get("entries")
-    if not isinstance(entries, list):
-        return False
-    return any(
-        isinstance(entry, dict) and str(entry.get("name", "")).lower() == name
-        for entry in entries
-    )
-
-
-def _printing_press_catalog_payload(*, query: str = "", category: str = "") -> dict:
-    registry = _fetch_printing_press_registry()
-    all_entries = _printing_press_entries(registry)
-    filtered_entries = _printing_press_entries(registry, query=query, category=category)
-    category_counts: dict[str, int] = {}
-    for entry in all_entries:
-        category_name = entry["category"]
-        category_counts[category_name] = category_counts.get(category_name, 0) + 1
-    categories = [
-        {"name": name, "count": count}
-        for name, count in sorted(category_counts.items(), key=lambda item: item[0])
-    ]
-    return {
-        "schema_version": registry.get("schema_version"),
-        "source_url": PRINTING_PRESS_REGISTRY_URL,
-        "categories": categories,
-        "entries": filtered_entries,
-    }
-
-
-def _fetch_printing_press_skill_content(name: str) -> str:
-    skill_name = _printing_press_skill_name(name).removeprefix("pp-")
-    return _read_url_text(PRINTING_PRESS_SKILL_URL_TEMPLATE.format(name=skill_name))
-
-
-def _install_printing_press_skill(
-    *, name: str, target_scope: str, content: str
-) -> dict[str, str | bool]:
-    if target_scope not in PRINTING_PRESS_TARGET_SCOPES:
-        raise ValueError("invalid target scope")
-    skill_name = _printing_press_skill_name(name)
-    skill_file = _skill_file(_skills_dir(None, target_scope), skill_name)
-    skill_dir = skill_file.parent
-    if skill_file.is_file():
-        return {
-            "target": target_scope,
-            "status": "already_installed",
-            "path": str(skill_file),
-            "created": False,
-        }
-    if skill_dir.exists() or skill_dir.is_symlink():
-        raise FileExistsError(f"Skill '{skill_name}' already exists in {skill_dir}")
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    skill_file.write_text(content, encoding="utf-8")
-    return {
-        "target": target_scope,
-        "status": "installed",
-        "path": str(skill_file),
-        "created": True,
-    }
 
 
 def _same_resolved_path(left: Path, right: Path) -> bool:
@@ -493,98 +303,6 @@ def skills_symlink(request):
     return Response(
         result,
         status=status.HTTP_201_CREATED if result["created"] else status.HTTP_200_OK,
-    )
-
-
-@api_view(["GET"])
-def printing_press_catalog(request):
-    query = request.query_params.get("q", "")
-    category = request.query_params.get("category", "")
-    try:
-        return Response(_printing_press_catalog_payload(query=query, category=category))
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
-        return Response(
-            {"error": f"Unable to load Printing Press catalog: {exc}"},
-            status=status.HTTP_502_BAD_GATEWAY,
-        )
-
-
-@api_view(["POST"])
-def printing_press_install(request):
-    name = request.data.get("name", "")
-    raw_targets = request.data.get("targets", [])
-    if not name:
-        return Response(
-            {"error": "name is required"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    if not isinstance(raw_targets, list) or not raw_targets:
-        return Response(
-            {"error": "targets must be a non-empty list"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    targets = list(dict.fromkeys(str(target).strip() for target in raw_targets))
-    if any(target not in PRINTING_PRESS_TARGET_SCOPES for target in targets):
-        return Response(
-            {"error": "invalid target scope"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    try:
-        _printing_press_skill_name(name)
-        normalized_name = name.strip().lower()
-    except ValueError as exc:
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        registry = _fetch_printing_press_registry()
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
-        return Response(
-            {"error": f"Unable to load Printing Press catalog: {exc}"},
-            status=status.HTTP_502_BAD_GATEWAY,
-        )
-    if not _printing_press_registry_has_entry(registry, normalized_name):
-        return Response(
-            {"error": f"Printing Press skill '{normalized_name}' was not found"},
-            status=status.HTTP_404_NOT_FOUND,
-        )
-
-    installed_targets = _printing_press_skill_installed_targets(name)
-    needs_content = any(not installed_targets[target] for target in targets)
-    try:
-        content = _fetch_printing_press_skill_content(name) if needs_content else ""
-    except (HTTPError, URLError, TimeoutError) as exc:
-        return Response(
-            {"error": f"Unable to load Printing Press skill: {exc}"},
-            status=status.HTTP_502_BAD_GATEWAY,
-        )
-
-    results = []
-    for target in targets:
-        try:
-            results.append(
-                _install_printing_press_skill(
-                    name=name,
-                    target_scope=target,
-                    content=content,
-                )
-            )
-        except FileExistsError as exc:
-            results.append({"target": target, "status": "conflict", "error": str(exc)})
-        except OSError as exc:
-            results.append({"target": target, "status": "error", "error": str(exc)})
-
-    has_error = any(result["status"] in {"conflict", "error"} for result in results)
-    response_status = status.HTTP_207_MULTI_STATUS if has_error else status.HTTP_200_OK
-    if all(result["status"] == "installed" for result in results):
-        response_status = status.HTTP_201_CREATED
-    return Response(
-        {
-            "name": name,
-            "skill_name": _printing_press_skill_name(name),
-            "results": results,
-        },
-        status=response_status,
     )
 
 

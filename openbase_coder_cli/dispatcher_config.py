@@ -45,6 +45,7 @@ SERVICE_TIERS = {"fast", "standard"}
 DEFAULT_DISPATCHER_SERVICE_TIER = "fast"
 DEFAULT_SUPER_AGENTS_SERVICE_TIER = "standard"
 AUTO_LINK_PERSONAL_SKILLS_KEY = "auto_link_personal_skills"
+MARKETPLACE_PROMPT_DISMISSED_AT_KEY = "marketplace_prompt_dismissed_at"
 BACKEND_MODELS_KEY = "backend_models"
 DISPATCHER_MODEL_ROLE = "dispatcher"
 SUPER_AGENTS_MODEL_ROLE = "super_agents"
@@ -184,6 +185,23 @@ def set_auto_link_personal_skills(enabled: bool, path: Path | None = None) -> Pa
     payload = {
         **read_dispatcher_config(config_path),
         AUTO_LINK_PERSONAL_SKILLS_KEY: bool(enabled),
+    }
+    _write_dispatcher_config(payload, config_path)
+    return config_path
+
+
+def marketplace_prompt_dismissed_at(path: Path | None = None) -> str | None:
+    value = read_dispatcher_config(path).get(MARKETPLACE_PROMPT_DISMISSED_AT_KEY)
+    return value if isinstance(value, str) and value else None
+
+
+def set_marketplace_prompt_dismissed_at(
+    dismissed_at: str | None, path: Path | None = None
+) -> Path:
+    config_path = path or CODEX_DISPATCHER_CONFIG_PATH
+    payload = {
+        **read_dispatcher_config(config_path),
+        MARKETPLACE_PROMPT_DISMISSED_AT_KEY: dismissed_at or None,
     }
     _write_dispatcher_config(payload, config_path)
     return config_path

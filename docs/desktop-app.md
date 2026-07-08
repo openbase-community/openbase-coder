@@ -134,10 +134,10 @@ app, the console, or `openbase-coder routines ...`.
 
 ### Skills
 
-Browse installed agent skills and the Printing Press skill catalog. You can
-search, view skill metadata (version, targets, MCP tool details), install
-catalog skills to one or more targets, edit skill sources, and enable
-auto-linking of personal skills into the Openbase agent homes.
+Browse installed agent skills and the official skills catalog. You can search,
+view skill metadata, install official catalog skills (co-installed for Claude
+Code and Codex together), edit skill sources, and enable auto-linking of
+personal skills into the Openbase agent homes.
 
 **On iPhone:** skills are not managed from the iOS app.
 

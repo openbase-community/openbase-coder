@@ -53,6 +53,13 @@ from openbase_coder_cli.openbase_coder_cli_app.livekit import (
     livekit_voice_route_exit,
     livekit_voice_route_transfer,
 )
+from openbase_coder_cli.openbase_coder_cli_app.marketplace import (
+    marketplace_recommended_prompt,
+    marketplace_routines_catalog,
+    marketplace_routines_install,
+    marketplace_skills_catalog,
+    marketplace_skills_install,
+)
 from openbase_coder_cli.openbase_coder_cli_app.model_settings import (
     backend_model_settings,  # noqa: F401
 )
@@ -257,18 +264,6 @@ def skills_auto_link_settings(request):
 
 
 @csrf_exempt
-def printing_press_catalog(request):
-    _sync_skills_compat_globals()
-    return _skills.printing_press_catalog(request)
-
-
-@csrf_exempt
-def printing_press_install(request):
-    _sync_skills_compat_globals()
-    return _skills.printing_press_install(request)
-
-
-@csrf_exempt
 def skill_detail(request, skill_name):
     _sync_skills_compat_globals()
     return _skills.skill_detail(request, skill_name)
@@ -309,6 +304,11 @@ __all__ = [
     "livekit_voice_route_exit",
     "livekit_voice_route_transfer",
     "local_stt_download",
+    "marketplace_recommended_prompt",
+    "marketplace_routines_catalog",
+    "marketplace_routines_install",
+    "marketplace_skills_catalog",
+    "marketplace_skills_install",
     "onboarding_status",
     "openbase_restart",
     "openbase_service_action",
@@ -316,8 +316,6 @@ __all__ = [
     "plugin_console_registry",
     "plugin_detail",
     "plugins_list",
-    "printing_press_catalog",
-    "printing_press_install",
     "project_reports",
     "project_reports_action",
     "project_reports_download",
