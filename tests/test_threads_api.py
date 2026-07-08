@@ -14,7 +14,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 django.setup()
 
-from openbase_coder_cli.mcp.models import ThreadInfo
+from openbase_coder_cli.mcp.models import ThreadInfo, ThreadStatus
 from openbase_coder_cli.mcp.session_manager import ThreadListPage
 from openbase_coder_cli.openbase_coder_cli_app import threads as thread_views
 
@@ -351,3 +351,35 @@ def test_thread_tags_endpoint_rejects_non_list(monkeypatch, tmp_path):
 
     assert response.status_code == 400
     assert response.data["error"] == "tags must be a list"
+
+
+def _activity_response(monkeypatch, threads: list[ThreadInfo]):
+    thread_views.invalidate_thread_list_cache()
+    manager = FakeThreadManager(threads)
+    monkeypatch.setattr(thread_views, "get_session_manager", lambda: manager)
+
+    factory = APIRequestFactory()
+    request = factory.get("/api/threads/activity/")
+    force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+    return thread_views.thread_activity(request)
+
+
+def test_thread_activity_counts_running_and_waiting_runs(monkeypatch) -> None:
+    threads = [_thread(index) for index in range(4)]
+    threads[0].raw_status = ThreadStatus.running
+    threads[1].raw_status = ThreadStatus.waiting
+    threads[2].raw_status = ThreadStatus.completed
+
+    response = _activity_response(monkeypatch, threads)
+
+    assert response.status_code == 200
+    assert response.data["active_run_count"] == 2
+    assert response.data["thread_count"] == 4
+
+
+def test_thread_activity_reports_zero_when_no_runs_active(monkeypatch) -> None:
+    response = _activity_response(monkeypatch, [_thread(0), _thread(1)])
+
+    assert response.status_code == 200
+    assert response.data["active_run_count"] == 0
+    assert response.data["thread_count"] == 2

@@ -110,6 +110,7 @@ from openbase_coder_cli.openbase_coder_cli_app.services_views import (
 from openbase_coder_cli.openbase_coder_cli_app.skills import _home_skills_dir
 from openbase_coder_cli.openbase_coder_cli_app.tags import tag_options
 from openbase_coder_cli.openbase_coder_cli_app.threads import (
+    thread_activity,  # noqa: F401
     thread_detail,
     thread_dispatcher,  # noqa: F401
     thread_favorite,
@@ -342,6 +343,7 @@ __all__ = [
     "tag_options",
     "stt_settings",
     "tts_settings",
+    "thread_activity",
     "thread_detail",
     "thread_favorite",
     "thread_interrupt",

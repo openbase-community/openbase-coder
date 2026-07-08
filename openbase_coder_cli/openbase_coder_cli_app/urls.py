@@ -86,6 +86,7 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     skills_symlink,
     stt_settings,
     tag_options,
+    thread_activity,
     thread_detail,
     thread_device_sync_conflict_resolve,
     thread_device_sync_conflicts,
@@ -126,6 +127,7 @@ urlpatterns = [
     path("update/status/", update_status, name="update-status"),
     path("update/apply/", update_apply, name="update-apply"),
     path("threads/", thread_list, name="thread-list"),
+    path("threads/activity/", thread_activity, name="thread-activity"),
     path("threads/dispatcher/", thread_dispatcher, name="thread-dispatcher"),
     path("threads/<str:thread_id>/", thread_detail, name="thread-detail"),
     path(

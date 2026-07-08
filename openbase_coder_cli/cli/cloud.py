@@ -1,29 +1,34 @@
 """Openbase Cloud workspace integration commands.
 
 Currently just the idle heartbeat: a workspace launched by openbase-cloud reports
-whether a DCV client is currently connected so the cloud API can defer idle
-auto-stop for full/GUI workspaces. Headless workspaces have no desktop and their
-activity is observed from proxy traffic instead, so they report inactive here.
+whether agent runs (Super Agents / Codex / Claude Code threads) are running or
+were launched during the beat window, so the cloud API can defer idle auto-stop.
+Desktop (DCV) connections and console browsing intentionally do not count as
+activity: a workspace with no run activity is stopped for later.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import subprocess
 import time
 
 import click
 import httpx
 
 from openbase_coder_cli.cli.backend import read_env_values
+from openbase_coder_cli.cli.local_server import local_server_url
 from openbase_coder_cli.config.token_manager import (
     DEFAULT_WEB_BACKEND_URL,
+    CloudAccessTokenAuth,
     TokenManager,
 )
 from openbase_coder_cli.paths import DEFAULT_ENV_FILE_PATH
 
 HEARTBEAT_PATH = "/api/openbase/devspaces/heartbeat/"
+THREAD_ACTIVITY_PATH = "/api/threads/activity/"
+
+# Runs shorter than one heartbeat interval would be invisible to a single
+# per-beat check, so activity is sampled more often and OR-ed into the beat.
+RUN_SAMPLE_INTERVAL_SECONDS = 15
 
 
 def _web_backend_url() -> str:
@@ -36,28 +41,28 @@ def _web_backend_url() -> str:
     return DEFAULT_WEB_BACKEND_URL
 
 
-def _dcv_connection_active(session_name: str) -> bool:
-    """True when the DCV session has at least one connected client.
+def _agent_runs_active(local_url: str, manager: TokenManager) -> bool:
+    """True when any coder thread has a running or queued agent run.
 
-    Headless workspaces have no `dcv` binary or session; any failure here just
-    means "no desktop activity".
+    The local coder server is the source of truth for Super Agents / Codex /
+    Claude Code runs. Any failure here (server down, auth hiccup) just means
+    "no run activity" for this sample; the next sample retries.
     """
     try:
-        result = subprocess.run(
-            ["dcv", "describe-session", session_name, "--json"],
-            capture_output=True,
-            text=True,
-            check=False,
+        response = httpx.get(
+            f"{local_url}{THREAD_ACTIVITY_PATH}",
+            auth=CloudAccessTokenAuth(manager),
+            timeout=10,
         )
-    except OSError:
+    except (httpx.HTTPError, RuntimeError):
         return False
-    if result.returncode != 0 or not result.stdout.strip():
+    if response.status_code != 200:
         return False
     try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
+        data = response.json()
+    except ValueError:
         return False
-    return int(data.get("num-of-connections", 0)) > 0
+    return int(data.get("active_run_count", 0)) > 0
 
 
 @click.group()
@@ -73,20 +78,15 @@ def cloud() -> None:
     show_default=True,
     help="Seconds between heartbeats. 0 sends a single heartbeat and exits.",
 )
-@click.option(
-    "--session-name",
-    default=None,
-    help="DCV session name to inspect (defaults to $DCV_SESSION_NAME or 'openbase').",
-)
-def heartbeat(interval: int, session_name: str | None) -> None:
-    """Report workspace activity to Openbase Cloud so idle auto-stop is deferred."""
+def heartbeat(interval: int) -> None:
+    """Report agent-run activity to Openbase Cloud so idle auto-stop is deferred."""
     url = _web_backend_url()
     manager = TokenManager(web_backend_url=url)
     manager.load()
-    session = session_name or os.environ.get("DCV_SESSION_NAME", "openbase")
+    local_url = local_server_url()
 
+    active = _agent_runs_active(local_url, manager)
     while True:
-        active = _dcv_connection_active(session)
         # A long-running service must survive network blips and token-refresh
         # hiccups: skipping one beat and retrying next interval is the fallback.
         try:
@@ -103,4 +103,14 @@ def heartbeat(interval: int, session_name: str | None) -> None:
                 raise
         if interval <= 0:
             break
-        time.sleep(interval)
+
+        # Sample run activity through the beat window so short runs launched
+        # between beats still mark the workspace active.
+        active = False
+        deadline = time.monotonic() + interval
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(RUN_SAMPLE_INTERVAL_SECONDS, remaining))
+            active = _agent_runs_active(local_url, manager) or active

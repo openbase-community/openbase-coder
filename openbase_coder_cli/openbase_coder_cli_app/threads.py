@@ -10,6 +10,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from openbase_coder_cli.mcp.models import ThreadStatus
 from openbase_coder_cli.mcp.projects import (
     refresh_projects_from_thread_directories as _refresh_projects_from_threads,
 )
@@ -192,6 +193,24 @@ def _favorite_thread_list_response(
             "threads": [
                 annotate_thread_payload(t.model_dump(mode="json")) for t in page_threads
             ],
+        }
+    )
+
+
+@api_view(["GET"])
+def thread_activity(request):
+    """Report whether any agent runs are active, for the cloud idle heartbeat."""
+    manager = get_session_manager()
+    threads = get_cached_thread_list(manager)
+    active_run_count = sum(
+        1
+        for thread in threads
+        if thread.status in (ThreadStatus.running, ThreadStatus.waiting)
+    )
+    return Response(
+        {
+            "active_run_count": active_run_count,
+            "thread_count": len(threads),
         }
     )
 
