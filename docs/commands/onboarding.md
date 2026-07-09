@@ -36,9 +36,9 @@ when the server is not running yet (before setup completes).
 
 Registers this device (including its Tailscale identity) with Openbase cloud
 and reports `cli_configured` and Tailscale Serve health, so other devices —
-e.g. the iOS app — can observe onboarding progress. `login` and `setup` run
-the same report automatically; use this command to retry after Tailscale
-comes up.
+e.g. the iOS app — can observe onboarding progress. `login` runs the same
+report automatically; use this command to retry after Tailscale comes up or
+after local setup completes.
 
 Requires `openbase-coder login`. If the backend does not implement the device
 registration endpoints yet, the command prints a notice and exits

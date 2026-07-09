@@ -129,9 +129,10 @@ declares Python `<3.13`.
 22. Configures Tailscale Serve routes for the iOS app:
     - `tailscale serve --bg --http=18080 http://127.0.0.1:7999`
     - `tailscale serve --bg --tcp=7880 tcp://127.0.0.1:7880`
-23. Registers this device with Openbase cloud and reports `cli_configured`
-    for the onboarding flow (warns and continues on failure; requires a prior
-    `openbase-coder login`). See [`onboarding`](onboarding.md).
+23. Leaves Openbase Cloud registration to the later login/pairing flow. Use
+    `openbase-coder onboarding report` after `openbase-coder login` when you
+    need to register this device for iOS pairing. See
+    [`onboarding`](onboarding.md).
 
 ## JSON Progress
 
@@ -139,7 +140,7 @@ With `--json-progress`, setup emits one NDJSON event per line on stdout so a
 UI (e.g. the Mac app's one-click setup) can render a live checklist; all
 human-readable output — including subprocess output — is redirected to
 stderr. Step ids, in order: `workspace`, `installation_config`, `env`,
-`agent_config`, `services`, `tailscale_serve`, `cloud_report`.
+`agent_config`, `services`, `tailscale_serve`.
 
 ```jsonc
 {"event": "step", "id": "services", "status": "start", "detail": null}

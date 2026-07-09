@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+from types import SimpleNamespace
 
 from click.testing import CliRunner
 
@@ -202,3 +203,83 @@ def test_setup_result_uses_computed_cli_state(monkeypatch, capfd) -> None:
         "cli_configured": False,
         "tailscale_serve_healthy": True,
     }
+
+
+def test_setup_phases_do_not_report_to_cloud(monkeypatch, tmp_path) -> None:
+    class FakeInstallationConfig:
+        console_build_dir = ""
+
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def save(self) -> None:
+            return None
+
+    class CaptureProgress:
+        def __init__(self):
+            self.events = []
+
+        def step(self, step_id: str, step_status: str, detail: str | None = None):
+            self.events.append((step_id, step_status, detail))
+
+    def noop(*args, **kwargs):
+        return None
+
+    progress = CaptureProgress()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    monkeypatch.setattr(setup_cli, "OPENBASE_BASE_DIR", tmp_path / ".openbase")
+    monkeypatch.setattr(setup_cli, "InstallationConfig", FakeInstallationConfig)
+    monkeypatch.setattr(setup_cli, "current_runtime_package", lambda: None)
+    monkeypatch.setattr(setup_cli, "resolve_dev_workspace_dir", lambda value: str(workspace))
+    for name in (
+        "_ensure_thread_sync_exchange_dir",
+        "_ensure_bundled_sounds",
+        "_ensure_env_file",
+        "ensure_backend_binary",
+        "_symlink_codex_auth",
+        "_ensure_normal_claude_md_symlink",
+        "_ensure_codex_home_default_files",
+        "_ensure_codex_home_dispatcher_config",
+        "set_dispatcher_service_tier",
+        "_symlink_codex_home_skills",
+        "_init_cli_workspace",
+        "_ensure_codex_home_config",
+        "_ensure_claude_config",
+        "_ensure_claude_auth_bridge",
+        "_ensure_normal_codex_mcp",
+        "_ensure_normal_claude_mcp",
+        "_install_cli_shim",
+        "_build_console",
+        "configure_tailscale_serve",
+    ):
+        monkeypatch.setattr(setup_cli, name, noop)
+    monkeypatch.setattr(setup_cli, "_selected_coding_backend", lambda *args: "codex")
+    monkeypatch.setattr(
+        setup_cli,
+        "tailscale_serve_health",
+        lambda: SimpleNamespace(healthy=True, openbase_url="http://mac.tailnet.ts.net", error=None),
+    )
+
+    def fail_cloud_report(*args, **kwargs):
+        raise AssertionError("setup must not report onboarding state to Openbase Cloud")
+
+    monkeypatch.setattr(setup_cli, "register_and_report", fail_cloud_report, raising=False)
+
+    serve_healthy = setup_cli._run_setup_phases(
+        progress,
+        workspace_dir=str(workspace),
+        env_file=str(tmp_path / ".env"),
+        assembly_ai_api_key="",
+        cartesia_api_key="",
+        skip_services=True,
+        link_codex_config=False,
+        link_claude_config=False,
+        fast_mode=True,
+        coding_backend="codex",
+        audio_provider="openbase-cloud",
+    )
+
+    assert serve_healthy is True
+    assert all(event[0] != "cloud_report" for event in progress.events)
