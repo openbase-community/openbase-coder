@@ -1,6 +1,6 @@
 {
   "template": "https://github.com/openbase-community/templates.git#cli-with-db",
-  "template_commit": "c639c82558f884dae815ba247ceb5a65c83fa1ba",
+  "template_commit": "00040c2dc82463468f80a34f5dcfd387c125fe4f",
   "name_snake": "openbase_coder_cli",
   "name_pretty": "Openbase Coder Cli",
   "variables": {
@@ -13,6 +13,8 @@
     "python_requires": ">=3.12,<3.14",
     "python_version_ruff": "py313",
     "homebrew_tap_location": "gabemontague/homebrew-tap",
-    "publish": false
+    "publish": false,
+    "name_snake": "openbase_coder_cli",
+    "name_pretty": "Openbase Coder Cli"
   }
 }
