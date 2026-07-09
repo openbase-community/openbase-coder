@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 import os
 import platform
-import time
 import sys
+import time
 from pathlib import Path
 from shutil import which  # noqa: F401
 
@@ -159,7 +159,6 @@ from openbase_coder_cli.runtime import (
     packaged_instructions_dir,  # noqa: F401
     packaged_skills_dir,  # noqa: F401
 )
-from openbase_coder_cli.services.cloud_registration import register_and_report
 from openbase_coder_cli.services.installation import InstallationConfig
 from openbase_coder_cli.services.launchd import install_all_services
 from openbase_coder_cli.services.onboarding import compute_cli_configured
@@ -188,7 +187,6 @@ SETUP_PROGRESS_STEPS = (
     "agent_config",
     "services",
     "tailscale_serve",
-    "cloud_report",
 )
 
 
@@ -624,25 +622,5 @@ def _run_setup_phases(
             if health.error:
                 click.echo(f"        {health.error}")
             progress.step("tailscale_serve", "warn", health.error)
-
-    # --- Report onboarding state to openbase-cloud ---
-    progress.step("cloud_report", "start")
-    cli_configured = compute_cli_configured()
-    report = register_and_report(
-        cli_configured=cli_configured, serve_healthy=serve_healthy
-    )
-    if report.ok:
-        click.echo("Registered device and reported CLI state to openbase-cloud.")
-        progress.step("cloud_report", "ok")
-    else:
-        if report.supported:
-            click.echo(
-                click.style(
-                    f"  WARN  Could not report onboarding state to openbase-cloud: "
-                    f"{report.error}",
-                    fg="yellow",
-                )
-            )
-        progress.step("cloud_report", "warn", report.error)
 
     return serve_healthy
