@@ -214,7 +214,9 @@ def stage_console(package_dir: Path, *, skip_build: bool) -> None:
             else ["install", "--no-frozen-lockfile", "--shamefully-hoist"]
         )
         for package_name in ("console", "coder-react", "multi-react", "boilersync-react"):
-            (REPO_ROOT / package_name / "node_modules").mkdir(exist_ok=True)
+            node_modules_dir = REPO_ROOT / package_name / "node_modules"
+            if not node_modules_dir.exists() and not node_modules_dir.is_symlink():
+                node_modules_dir.mkdir()
         subprocess.run(["pnpm", *install_args], cwd=REPO_ROOT, check=True)
         subprocess.run(["pnpm", "--dir", str(CONSOLE_ROOT), "run", "build"], check=True)
     dist = CONSOLE_ROOT / "dist"
