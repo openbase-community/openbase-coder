@@ -23,6 +23,7 @@ from openbase_coder_cli.cli.utils import (
 from openbase_coder_cli.plugins.console import sync_console_integration
 from openbase_coder_cli.plugins.store import load_registry
 from openbase_coder_cli.services.installation import InstallationConfig
+from openbase_coder_cli.services.keep_awake import keep_system_awake
 
 
 @click.command()
@@ -145,13 +146,14 @@ def server(
             cmd.extend(["--reload"])
 
     # Run the server
-    try:
-        subprocess.run(cmd, env=os.environ, check=True)
-    except KeyboardInterrupt:
-        click.echo("\nServer stopped.")
-    except subprocess.CalledProcessError as e:
-        click.echo(f"Server exited with error: {e.returncode}", err=True)
-        sys.exit(e.returncode)
+    with keep_system_awake(warn=lambda message: click.echo(message, err=True)):
+        try:
+            subprocess.run(cmd, env=os.environ, check=True)
+        except KeyboardInterrupt:
+            click.echo("\nServer stopped.")
+        except subprocess.CalledProcessError as e:
+            click.echo(f"Server exited with error: {e.returncode}", err=True)
+            sys.exit(e.returncode)
 
 
 def _build_console() -> None:
