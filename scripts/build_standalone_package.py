@@ -213,6 +213,8 @@ def stage_console(package_dir: Path, *, skip_build: bool) -> None:
             if (REPO_ROOT / "pnpm-lock.yaml").is_file()
             else ["install", "--no-frozen-lockfile", "--shamefully-hoist"]
         )
+        for package_name in ("console", "coder-react", "multi-react", "boilersync-react"):
+            (REPO_ROOT / package_name / "node_modules").mkdir(exist_ok=True)
         subprocess.run(["pnpm", *install_args], cwd=REPO_ROOT, check=True)
         subprocess.run(["pnpm", "--dir", str(CONSOLE_ROOT), "run", "build"], check=True)
     dist = CONSOLE_ROOT / "dist"
