@@ -431,6 +431,150 @@ def test_user_say_reports_server_error(monkeypatch):
     assert "No active LiveKit voice room" in result.output
 
 
+def test_user_say_falls_back_to_push_when_no_active_room(monkeypatch):
+    def fake_request(method, url, **kwargs):
+        assert method == "POST"
+        return httpx.Response(
+            200,
+            json={
+                "status": "no_active_room",
+                "detail": "No active LiveKit voice room was found.",
+                "agent_name": "Dottie",
+                "thread_id": "thread-42",
+            },
+        )
+
+    patch_local_server_request(monkeypatch, fake_request)
+    pushes = []
+    monkeypatch.setattr(
+        user_cli.cloud_push,
+        "send_notification",
+        lambda **kwargs: pushes.append(kwargs) or {"sent": 1},
+    )
+
+    result = CliRunner().invoke(user_cli.user, ["say", "Dottie", "build is done"])
+
+    assert result.exit_code == 0
+    assert "falling back to an iPhone push notification" in result.output
+    assert "Push notification sent to your iPhone." in result.output
+    assert pushes == [
+        {
+            "body": "build is done",
+            "title": "Dottie",
+            "destination": "threads",
+            "thread_id": "thread-42",
+        }
+    ]
+
+
+def test_user_say_fallback_uses_dispatch_without_thread(monkeypatch):
+    def fake_request(method, url, **kwargs):
+        return httpx.Response(
+            200,
+            json={"status": "no_active_room", "agent_name": "Dottie", "thread_id": ""},
+        )
+
+    patch_local_server_request(monkeypatch, fake_request)
+    pushes = []
+    monkeypatch.setattr(
+        user_cli.cloud_push,
+        "send_notification",
+        lambda **kwargs: pushes.append(kwargs) or {"sent": 1},
+    )
+
+    result = CliRunner().invoke(user_cli.user, ["say", "Dottie", "hi"])
+
+    assert result.exit_code == 0
+    assert pushes[0]["destination"] == "dispatch"
+    assert "thread_id" not in pushes[0]
+
+
+def test_user_notify_sends_push(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        user_cli.cloud_push,
+        "send_notification",
+        lambda **kwargs: calls.append(kwargs) or {"sent": 2},
+    )
+
+    result = CliRunner().invoke(
+        user_cli.user,
+        [
+            "notify",
+            "--body",
+            "Review ready",
+            "--destination",
+            "reports",
+            "--report-id",
+            "r_9",
+            "--param",
+            "project_path=/tmp/x",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Notification sent to 2 device(s)." in result.output
+    assert calls[0]["body"] == "Review ready"
+    assert calls[0]["destination"] == "reports"
+    assert calls[0]["report_id"] == "r_9"
+    assert calls[0]["params"] == {"project_path": "/tmp/x"}
+
+
+def test_user_notify_rejects_bad_destination(monkeypatch):
+    result = CliRunner().invoke(
+        user_cli.user, ["notify", "--body", "hi", "--destination", "nowhere"]
+    )
+
+    assert result.exit_code != 0
+
+
+def test_user_call_places_call(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        user_cli.cloud_push,
+        "place_call",
+        lambda **kwargs: calls.append(kwargs) or {"sent": 1},
+    )
+
+    result = CliRunner().invoke(
+        user_cli.user,
+        ["call", "--room", "room-xyz", "--agent-name", "livekit-agent"],
+    )
+
+    assert result.exit_code == 0
+    assert "Call ringing on 1 device(s)." in result.output
+    assert calls[0]["room_name"] == "room-xyz"
+    assert calls[0]["livekit_dispatch_agent_name"] == "livekit-agent"
+
+
+def test_user_notify_reports_push_error(monkeypatch):
+    def raise_push_error(**kwargs):
+        raise user_cli.cloud_push.PushError("No registered iPhone.")
+
+    monkeypatch.setattr(user_cli.cloud_push, "send_notification", raise_push_error)
+
+    result = CliRunner().invoke(user_cli.user, ["notify", "--body", "hi"])
+
+    assert result.exit_code != 0
+    assert "No registered iPhone." in result.output
+
+
+def test_cli_destinations_match_canonical_contract():
+    # Mirrors the iOS CoderDestination vocabulary and the cloud PUSH_DESTINATIONS
+    # set. Update all three together if this changes.
+    assert set(user_cli.cloud_push.CODER_DESTINATIONS) == {
+        "call",
+        "dispatch",
+        "threads",
+        "sync_conflicts",
+        "approvals",
+        "reports",
+        "diff",
+        "account",
+        "voice_test",
+    }
+
+
 def test_resolve_sound_path_accepts_existing_path(tmp_path):
     audio_path = tmp_path / "done.wav"
     audio_path.write_bytes(b"audio")

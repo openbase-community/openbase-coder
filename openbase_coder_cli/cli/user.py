@@ -5,6 +5,7 @@ from pathlib import Path
 import click
 
 from openbase_coder_cli.cli.local_server import local_server_request
+from openbase_coder_cli.config import cloud_push
 from openbase_coder_cli.livekit_announcer import (
     MAX_ANNOUNCER_TEXT_LENGTH,
     SUPPORTED_AUDIO_EXTENSIONS,
@@ -54,8 +55,34 @@ def say(
     response = local_server_request("POST", "/api/user/say/", json=payload)
 
     data = response.json()
+    if data.get("status") == "no_active_room":
+        _fall_back_to_push(normalized_agent_name, text, data.get("thread_id", ""))
+        return
     target_room = data.get("room_name") or "active room"
     click.echo(f"Announcer message sent to {target_room}.")
+
+
+def _fall_back_to_push(agent_name: str, text: str, thread_id: str) -> None:
+    """Send an iPhone push when there is no active voice session to speak into."""
+    click.echo(
+        "openbase-coder: no active voice session — falling back to an iPhone "
+        "push notification.",
+        err=True,
+    )
+    if thread_id:
+        destination, kwargs = "threads", {"thread_id": thread_id}
+    else:
+        destination, kwargs = "dispatch", {}
+    try:
+        cloud_push.send_notification(
+            body=text,
+            title=agent_name,
+            destination=destination,
+            **kwargs,
+        )
+    except cloud_push.PushError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo("Push notification sent to your iPhone.")
 
 
 @user.command()
@@ -132,16 +159,109 @@ def approval_request(
 
 
 def _parse_approval_details(detail_items: tuple[str, ...]) -> dict[str, str]:
-    details: dict[str, str] = {}
-    for item in detail_items:
+    return _parse_key_value(detail_items, option="--detail")
+
+
+def _parse_key_value(items: tuple[str, ...], *, option: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for item in items:
         if "=" not in item:
-            raise click.ClickException("--detail values must use KEY=VALUE.")
+            raise click.ClickException(f"{option} values must use KEY=VALUE.")
         key, value = item.split("=", 1)
         key = key.strip()
         if not key:
-            raise click.ClickException("--detail keys cannot be blank.")
-        details[key] = value.strip()
-    return details
+            raise click.ClickException(f"{option} keys cannot be blank.")
+        parsed[key] = value.strip()
+    return parsed
+
+
+@user.command("notify")
+@click.option("--body", "body_text", required=True, help="Notification body text.")
+@click.option(
+    "--title", default="Openbase Coder", show_default=True, help="Notification title."
+)
+@click.option(
+    "--destination",
+    type=click.Choice(cloud_push.CODER_DESTINATIONS),
+    default="dispatch",
+    show_default=True,
+    help="iOS screen to open when the notification is tapped.",
+)
+@click.option("--thread-id", default="", help="Thread to deep-link to (threads).")
+@click.option("--report-id", default="", help="Report to deep-link to (reports).")
+@click.option(
+    "--param",
+    "params",
+    multiple=True,
+    help="Extra deep-link params as KEY=VALUE. May be repeated.",
+)
+def notify(
+    body_text: str,
+    title: str,
+    destination: str,
+    thread_id: str,
+    report_id: str,
+    params: tuple[str, ...],
+) -> None:
+    """Send a deep-linked push notification to the user's iPhone."""
+    parsed_params = _parse_key_value(params, option="--param")
+    try:
+        result = cloud_push.send_notification(
+            body=body_text,
+            title=title,
+            destination=destination,
+            params=parsed_params or None,
+            thread_id=thread_id.strip(),
+            report_id=report_id.strip(),
+        )
+    except cloud_push.PushError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Notification sent to {result.get('sent', 0)} device(s).")
+
+
+@user.command("call")
+@click.option(
+    "--room",
+    "room_name",
+    default="",
+    help="LiveKit room the answered call should join. Defaults to a new room.",
+)
+@click.option(
+    "--caller-name",
+    default="Openbase Coder",
+    show_default=True,
+    help="Name shown on the incoming call screen.",
+)
+@click.option(
+    "--agent-name",
+    "agent_name",
+    default="",
+    help="LiveKit dispatch agent to connect on answer.",
+)
+@click.option(
+    "--param",
+    "params",
+    multiple=True,
+    help="Extra params as KEY=VALUE. May be repeated.",
+)
+def call(
+    room_name: str,
+    caller_name: str,
+    agent_name: str,
+    params: tuple[str, ...],
+) -> None:
+    """Ring the user's iPhone with an inbound Openbase Coder call."""
+    parsed_params = _parse_key_value(params, option="--param")
+    try:
+        result = cloud_push.place_call(
+            room_name=room_name.strip(),
+            caller_name=caller_name,
+            livekit_dispatch_agent_name=agent_name.strip(),
+            params=parsed_params or None,
+        )
+    except cloud_push.PushError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Call ringing on {result.get('sent', 0)} device(s).")
 
 
 def resolve_sound_path(sound_or_path: str) -> Path:

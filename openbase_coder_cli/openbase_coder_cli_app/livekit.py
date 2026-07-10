@@ -262,7 +262,23 @@ def user_say(request):
     except AnnouncerValidationError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     except NoActiveLiveKitRoomError as exc:
-        return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
+        # No live voice session to speak into. Report this to the CLI (the only
+        # caller) as a 200 so it can fall back to an iPhone push notification,
+        # carrying the agent's thread so the push can deep-link there.
+        logger.info(
+            "dispatch_timing stage=user_say_no_active_room agent_name=%s thread_id=%s",
+            agent_name,
+            voice_entry.thread_id or "",
+        )
+        return Response(
+            {
+                "status": "no_active_room",
+                "detail": str(exc),
+                "agent_name": agent_name,
+                "thread_id": voice_entry.thread_id or "",
+            },
+            status=status.HTTP_200_OK,
+        )
     except AnnouncerError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     except Exception:
