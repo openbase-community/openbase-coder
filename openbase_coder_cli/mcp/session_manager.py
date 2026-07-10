@@ -36,6 +36,7 @@ from openbase_coder_cli.livekit_voice_route import (
     get_livekit_voice_route_state,
     super_agent_voice_for_context,
 )
+from openbase_coder_cli.onboarding_reminder import append_onboarding_reminder
 from openbase_coder_cli.paths import CODEX_SUPER_AGENT_INSTRUCTIONS_PATH
 
 from .models import ThreadInfo as SessionInfo
@@ -336,6 +337,8 @@ class CodexAppServerSessionManager:
             raise ValueError(f"Thread {thread_id} not found")
         if not thread.directory:
             raise ValueError(f"Thread {thread_id} is missing its cwd")
+
+        prompt = _with_dispatcher_onboarding_reminder(thread_id, prompt)
 
         result = await self._client.queue_turn_by_label(
             LabelQueryInput(thread_id=thread_id, cwd=thread.directory),
@@ -733,6 +736,8 @@ class CodexAppServerSessionManager:
         if not thread.directory:
             raise ValueError(f"Thread {session_id} is missing its cwd")
 
+        message = _with_dispatcher_onboarding_reminder(session_id, message)
+
         if self._uses_backend_session_api():
             started = await self._client.start_turn_by_label(
                 LabelQueryInput(thread_id=session_id, cwd=thread.directory),
@@ -1072,9 +1077,7 @@ class CodexAppServerSessionManager:
         self._delivered_text.pop(turn_id, None)
         self._turn_current_item.pop(turn_id, None)
         for item_key in [
-            item_key
-            for item_key in self._delivered_item_text
-            if item_key[0] == turn_id
+            item_key for item_key in self._delivered_item_text if item_key[0] == turn_id
         ]:
             self._delivered_item_text.pop(item_key, None)
 
@@ -1098,6 +1101,17 @@ def get_session_manager() -> CodexAppServerSessionManager:
     if _session_manager is None:
         _session_manager = CodexAppServerSessionManager()
     return _session_manager
+
+
+def _with_dispatcher_onboarding_reminder(thread_id: str, prompt: str) -> str:
+    """Append the onboarding reminder to messages bound for the dispatcher."""
+    try:
+        state = get_livekit_voice_route_state()
+    except Exception:
+        return prompt
+    if not state.dispatcher_thread_id or state.dispatcher_thread_id != thread_id:
+        return prompt
+    return append_onboarding_reminder(prompt)
 
 
 def _has_livekit_voice_route() -> bool:
