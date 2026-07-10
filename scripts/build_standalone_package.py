@@ -59,6 +59,7 @@ def main() -> int:
     python_dir = package_dir / "python"
     create_runtime_python(python_dir, args.python)
     install_cli_package(python_dir)
+    rewrite_bin_shebangs(python_dir)
     relocate_macos_python(python_dir)
     stage_bin(
         package_dir,
@@ -150,6 +151,50 @@ def install_cli_package(python_dir: Path) -> None:
     )
 
 
+def rewrite_bin_shebangs(python_dir: Path) -> None:
+    # pip writes each entry-point script with an absolute shebang pointing at
+    # the build machine's interpreter, which breaks once the package is
+    # installed anywhere else. Rewrite them to resolve the bundled interpreter
+    # relative to the script itself.
+    interpreter_name = runtime_python(python_dir).resolve().name
+    header = (
+        "#!/bin/sh\n"
+        f'\'\'\'exec\' "$(dirname -- "$0")/{interpreter_name}" "$0" "$@"\n'
+        "' '''\n"
+    ).encode("utf-8")
+    for script in sorted((python_dir / "bin").iterdir()):
+        if script.is_symlink() or not script.is_file():
+            continue
+        body = _python_script_body(script.read_bytes())
+        if body is not None:
+            script.write_bytes(header + body)
+
+
+def _python_script_body(raw: bytes) -> bytes | None:
+    """Return the code after the shebang header if it needs a rewrite."""
+    first_line, _, rest = raw.partition(b"\n")
+    if not first_line.startswith(b"#!"):
+        return None
+    if first_line.strip() == b"#!/bin/sh":
+        # distlib's spaces-in-path form: a three-line /bin/sh trampoline.
+        exec_line, _, rest = rest.partition(b"\n")
+        close_line, _, rest = rest.partition(b"\n")
+        if (
+            exec_line.startswith(b"'''exec'")
+            and close_line.strip() == b"' '''"
+            and not _is_relocatable_trampoline(
+                exec_line.decode("utf-8", errors="replace")
+            )
+        ):
+            return rest
+        return None
+    return rest if b"python" in first_line else None
+
+
+def _is_relocatable_trampoline(exec_line: str) -> bool:
+    return "$(dirname -- " in exec_line
+
+
 def relocate_macos_python(python_dir: Path) -> None:
     if platform.system() != "Darwin" or not shutil.which("install_name_tool"):
         return
@@ -213,7 +258,12 @@ def stage_console(package_dir: Path, *, skip_build: bool) -> None:
             if (REPO_ROOT / "pnpm-lock.yaml").is_file()
             else ["install", "--no-frozen-lockfile", "--shamefully-hoist"]
         )
-        for package_name in ("console", "coder-react", "multi-react", "boilersync-react"):
+        for package_name in (
+            "console",
+            "coder-react",
+            "multi-react",
+            "boilersync-react",
+        ):
             node_modules_dir = REPO_ROOT / package_name / "node_modules"
             if node_modules_dir.is_symlink() or (
                 node_modules_dir.exists() and not node_modules_dir.is_dir()
@@ -281,6 +331,12 @@ def validate_package(package_dir: Path, version: str) -> None:
             raise RuntimeError(f"Package validation failed; missing {path}")
     _validate_no_external_python_links(package_dir)
     _validate_no_host_macos_library_links(package_dir)
+    _validate_relocatable_bin_shebangs(package_dir)
+    subprocess.run(
+        [str(package_dir / "python" / "bin" / "pip"), "--version"],
+        check=True,
+        capture_output=True,
+    )
     result = subprocess.run(
         [str(package_dir / "bin" / "openbase-coder"), "--version"],
         check=True,
@@ -358,6 +414,33 @@ def _validate_no_external_python_links(package_dir: Path) -> None:
                 "Package validation failed; bundled Python contains external "
                 f"symlink {path} -> {resolved}"
             ) from exc
+
+
+def _validate_relocatable_bin_shebangs(package_dir: Path) -> None:
+    # Tripwire for the 0.10.0 regression: a script shebang naming the build
+    # machine's interpreter dies on every user's machine.
+    for script in sorted((package_dir / "python" / "bin").iterdir()):
+        if script.is_symlink() or not script.is_file():
+            continue
+        with script.open("rb") as handle:
+            header = handle.read(1024)
+        if not header.startswith(b"#!"):
+            continue
+        lines = header.decode("utf-8", errors="replace").splitlines()
+        if "python" in lines[0]:
+            raise RuntimeError(
+                "Package validation failed; script shebang points at the "
+                f"build machine's interpreter: {script} ({lines[0]})"
+            )
+        if (
+            len(lines) > 1
+            and lines[1].startswith("'''exec'")
+            and not _is_relocatable_trampoline(lines[1])
+        ):
+            raise RuntimeError(
+                "Package validation failed; script trampoline is not "
+                f"relocatable: {script} ({lines[1]})"
+            )
 
 
 def _validate_no_host_macos_library_links(package_dir: Path) -> None:
