@@ -14,6 +14,7 @@ from openbase_coder_cli.livekit_agent.spoken_commands import (
     _is_exit_to_dispatch_command,
 )
 from openbase_coder_cli.livekit_agent.voice_routing import LiveKitVoiceRouter
+from openbase_coder_cli.services.lockdown import record_direct_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,14 @@ def _register_session_diagnostics(
                 transcript[:160],
             )
         if is_final and transcript.strip():
+            # Locked-down mode unlocks only on the verbatim STT transcript —
+            # never on agent-produced text — so the check lives here, before
+            # the speech reaches any model.
+            if record_direct_transcript(transcript):
+                logger.info(
+                    "dispatch_timing stage=lockdown_safe_phrase_unlocked transcript_len=%d",
+                    len(transcript),
+                )
             schedule_proactive_steer(transcript.strip())
 
     def on_conversation_item_added(event) -> None:

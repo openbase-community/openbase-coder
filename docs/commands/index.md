@@ -33,6 +33,7 @@ openbase-coder [OPTIONS] COMMAND [ARGS]
 | [`self-update`](self-update.md) | Update a standalone install to the latest release |
 | [`services`](services.md) | Manage launchd services |
 | [`doctor`](doctor.md) | Verify install, service health, and secrets |
+| [`lockdown`](lockdown.md) | Gate Super Agents launches until a voice safe phrase is heard |
 | [`onboarding`](onboarding.md) | Inspect onboarding state and report it to Openbase cloud |
 | [`login`](login.md) | Email-code login to Openbase cloud |
 | [`logout`](logout.md) | Remove saved auth tokens |

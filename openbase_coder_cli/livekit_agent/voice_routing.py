@@ -84,6 +84,7 @@ class LiveKitVoiceRouter:
                 super_agent_name=label,
                 super_agent_agent_name=target_voice_name,
                 use_super_agent_reasoning=True,
+                enforce_lockdown=True,
             )
             self._target_clients[thread_id] = target_client
         else:

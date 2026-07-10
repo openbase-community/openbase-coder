@@ -75,6 +75,7 @@ class SuperAgentsLiveKitClient:
         super_agent_agent_name: str | None = None,
         use_super_agent_reasoning: bool = False,
         backend_client: Any | None = None,
+        enforce_lockdown: bool = False,
     ) -> None:
         self._cwd = cwd
         self._state_path = (
@@ -85,6 +86,9 @@ class SuperAgentsLiveKitClient:
         self._developer_instructions = developer_instructions or None
         self._approval_policy = approval_policy
         self._sandbox = sandbox
+        # Voice-target clients pass through the machine-wide permission
+        # guard (locked-down mode); the dispatcher's own thread does not.
+        self._enforce_lockdown = enforce_lockdown
         self._service_tier = service_tier
         self._super_agent_name = _super_agent_name(
             super_agent_name
@@ -346,9 +350,12 @@ class SuperAgentsLiveKitClient:
             developer_instructions
         ):
             turn_input["developerInstructions"] = effective_developer_instructions
+        turn_input = self._guarded_permissions(turn_input)
 
         previous_turn_id = None
-        if not (self._backend_is_codex() and hasattr(self._backend_client, "start_turn")):
+        if not (
+            self._backend_is_codex() and hasattr(self._backend_client, "start_turn")
+        ):
             previous_turn_id = await self._latest_real_turn_id(thread_id)
 
         if self._backend_is_codex() and hasattr(self._backend_client, "start_turn"):
@@ -466,9 +473,7 @@ class SuperAgentsLiveKitClient:
             )
             return None
         return str(
-            progress.get("status")
-            or progress.get("summary", {}).get("status")
-            or ""
+            progress.get("status") or progress.get("summary", {}).get("status") or ""
         ).lower()
 
     async def _latest_real_turn_id(self, thread_id: str) -> str | None:
@@ -705,6 +710,7 @@ class SuperAgentsLiveKitClient:
             params["model"] = self._model_name
         if developer_instructions := self._thread_developer_instructions():
             params["developerInstructions"] = developer_instructions
+        params = self._guarded_permissions(params)
         started = await self._backend_client.start_thread(params)
         thread_id = _extract_thread_id(started)
         if not thread_id:
@@ -749,6 +755,13 @@ class SuperAgentsLiveKitClient:
         }
         values.update(overrides)
         return LabelQueryInput(**values)
+
+    def _guarded_permissions(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        if not self._enforce_lockdown:
+            return input_data
+        from super_agents.permission_guard import apply_permission_guard
+
+        return apply_permission_guard(input_data)
 
     def _client_from_environment(self) -> Any:
         from super_agents.backend_clients import client_from_environment

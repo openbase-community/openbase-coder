@@ -27,12 +27,17 @@ from openbase_coder_cli.openbase_coder_cli_app.common import _auth_debug_value
 from openbase_coder_cli.services.console_settings import (
     DEFAULT_DANGEROUS_CONFIRMATION_PHRASE,
     DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS,
+    DEFAULT_LOCKED_DOWN_MODE,
     get_dangerous_confirmation_phrase,
     get_ignored_launchctl_labels,
+    get_lockdown_safe_phrase,
+    get_locked_down_mode,
     include_normal_codex_agents_in_openbase_agents,
     set_dangerous_confirmation_phrase,
     set_ignored_launchctl_labels,
     set_include_normal_codex_agents_in_openbase_agents,
+    set_lockdown_safe_phrase,
+    set_locked_down_mode,
 )
 from openbase_coder_cli.services.definitions import SERVICES
 from openbase_coder_cli.services.launchctl_tools import (
@@ -40,6 +45,10 @@ from openbase_coder_cli.services.launchctl_tools import (
     run_launchctl_service_action,
 )
 from openbase_coder_cli.services.launchd import launchctl_status
+from openbase_coder_cli.services.lockdown import (
+    lockdown_restricted,
+    sync_lockdown_guard,
+)
 from openbase_coder_cli.services.openbase_services import (
     list_openbase_services_payload,
     run_openbase_service_action,
@@ -92,6 +101,28 @@ class AgentsGenerationSettingsSerializer(serializers.Serializer):
     include_normal_codex_agents_in_openbase_agents = serializers.BooleanField()
 
 
+class LockdownSettingsSerializer(serializers.Serializer):
+    locked_down_mode = serializers.BooleanField(required=False)
+    lockdown_safe_phrase = serializers.CharField(
+        required=False,
+        allow_blank=False,
+        trim_whitespace=True,
+    )
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError(
+                "Provide locked_down_mode and/or lockdown_safe_phrase."
+            )
+        if attrs.get("locked_down_mode") is True:
+            phrase = attrs.get("lockdown_safe_phrase") or get_lockdown_safe_phrase()
+            if not phrase:
+                raise serializers.ValidationError(
+                    "Set a lockdown safe phrase before enabling locked-down mode."
+                )
+        return attrs
+
+
 def _dangerous_confirmation_settings_payload(*, refreshed: bool = False) -> dict:
     return {
         "dangerous_confirmation_phrase": get_dangerous_confirmation_phrase(),
@@ -110,6 +141,33 @@ def _agents_generation_settings_payload(*, refreshed: bool = False) -> dict:
         ),
         "refreshed": refreshed,
     }
+
+
+def _lockdown_settings_payload() -> dict:
+    return {
+        "locked_down_mode": get_locked_down_mode(),
+        "default_locked_down_mode": DEFAULT_LOCKED_DOWN_MODE,
+        "lockdown_safe_phrase": get_lockdown_safe_phrase(),
+        "restricted": lockdown_restricted(),
+    }
+
+
+@api_view(["GET", "PATCH"])
+def lockdown_settings(request):
+    """Read or update locked-down mode and its voice safe phrase."""
+    if request.method == "GET":
+        return Response(_lockdown_settings_payload())
+
+    serializer = LockdownSettingsSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    if phrase := serializer.validated_data.get("lockdown_safe_phrase"):
+        set_lockdown_safe_phrase(phrase)
+    if (enabled := serializer.validated_data.get("locked_down_mode")) is not None:
+        set_locked_down_mode(enabled)
+    sync_lockdown_guard(
+        relock=serializer.validated_data.get("locked_down_mode") is True
+    )
+    return Response(_lockdown_settings_payload())
 
 
 @api_view(["GET"])

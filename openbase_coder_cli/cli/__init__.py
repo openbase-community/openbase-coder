@@ -24,6 +24,7 @@ from .computer_use import computer_use
 from .defaults import defaults
 from .desktop import desktop
 from .doctor import doctor
+from .lockdown import lockdown
 from .onboarding import onboarding
 from .plugins import plugins
 from .provision import provision
@@ -69,6 +70,7 @@ main.add_command(setup)
 main.add_command(backend)
 main.add_command(services)
 main.add_command(doctor)
+main.add_command(lockdown)
 main.add_command(onboarding)
 main.add_command(desktop)
 main.add_command(login)

@@ -192,6 +192,7 @@ from openbase_coder_cli.livekit_agent.voices import (  # noqa: F401
     stable_super_agent_voice,
     stable_super_agent_voice_id,
 )
+from openbase_coder_cli.services.lockdown import sync_lockdown_guard
 from openbase_coder_cli.stt_providers import (
     ASSEMBLYAI_STT_PROVIDER_ID,
     DEEPGRAM_STT_PROVIDER_ID,
@@ -445,7 +446,9 @@ def _exception_status(exc: BaseException) -> int | None:
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        status = getattr(current, "status", None) or getattr(current, "status_code", None)
+        status = getattr(current, "status", None) or getattr(
+            current, "status_code", None
+        )
         if isinstance(status, int):
             return status
         current = current.__cause__ or current.__context__
@@ -588,6 +591,10 @@ async def _start_voice_session(
 @server.rtc_session(agent_name=LIVEKIT_DISPATCH_AGENT_NAME)
 async def livekit_agent(ctx: JobContext):
     _refresh_audio_credentials()
+    # Each voice session starts locked when locked-down mode is on; a prior
+    # session's safe-phrase unlock never carries over.
+    if sync_lockdown_guard(relock=True):
+        logger.info("Locked-down mode armed for this voice session.")
     ctx.log_context_fields = {
         "room": ctx.room.name,
     }

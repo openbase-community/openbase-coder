@@ -7,6 +7,7 @@ from openbase_coder_cli.paths import CONSOLE_SETTINGS_JSON_PATH
 
 DEFAULT_DANGEROUS_CONFIRMATION_PHRASE = "yes, proceed"
 DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS = True
+DEFAULT_LOCKED_DOWN_MODE = False
 
 
 def get_ignored_launchctl_labels() -> list[str]:
@@ -60,6 +61,39 @@ def set_include_normal_codex_agents_in_openbase_agents(value: bool) -> bool:
     data["include_normal_codex_agents_in_openbase_agents"] = bool(value)
     _write_settings(data)
     return bool(value)
+
+
+def get_locked_down_mode() -> bool:
+    data = _read_settings()
+    value = data.get("locked_down_mode")
+    if isinstance(value, bool):
+        return value
+    return DEFAULT_LOCKED_DOWN_MODE
+
+
+def set_locked_down_mode(value: bool) -> bool:
+    data = _read_settings()
+    data["locked_down_mode"] = bool(value)
+    _write_settings(data)
+    return bool(value)
+
+
+def get_lockdown_safe_phrase() -> str:
+    data = _read_settings()
+    phrase = data.get("lockdown_safe_phrase")
+    if not isinstance(phrase, str):
+        return ""
+    return phrase.strip()
+
+
+def set_lockdown_safe_phrase(phrase: str) -> str:
+    normalized = phrase.strip()
+    if not normalized:
+        raise ValueError("Lockdown safe phrase cannot be blank.")
+    data = _read_settings()
+    data["lockdown_safe_phrase"] = normalized
+    _write_settings(data)
+    return normalized
 
 
 def _read_settings() -> dict:
