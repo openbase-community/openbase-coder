@@ -945,7 +945,7 @@ def _build_companion_session_payload(
     )
 
     return {
-        "roomUrl": _livekit_room_url(),
+        "roomUrl": os.environ.get("LIVEKIT_URL", "ws://localhost:7880"),
         "roomName": target_room_name,
         "companionToken": token,
         "companionTokenExpiresAt": expires_at.isoformat(),
