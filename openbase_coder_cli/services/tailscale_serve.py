@@ -62,8 +62,14 @@ class TailscaleServeHealth:
 
 def configure_tailscale_serve() -> None:
     if tsnet_enabled():
-        # The embedded node forwards both routes itself; just make sure it runs.
-        ensure_tunneld_running()
+        # The embedded node forwards the routes itself; make sure it runs and
+        # is logged in, minting a cloud auth key when one is available.
+        # Imported lazily: cloud_registration imports this module at top level.
+        from openbase_coder_cli.services.cloud_registration import (
+            mint_tailscale_auth_key,
+        )
+
+        ensure_tunneld_running(auth_key=mint_tailscale_auth_key())
         return
 
     tailscale_bin = _tailscale_bin()

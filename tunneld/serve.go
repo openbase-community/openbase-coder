@@ -75,6 +75,10 @@ func runServe(args []string) error {
 	if err := os.MkdirAll(cfg.stateDir, 0o700); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
+	token, err := loadOrCreateControlToken(cfg.stateDir)
+	if err != nil {
+		return fmt.Errorf("control token: %w", err)
+	}
 
 	// Start the local control API before the node is up so the CLI can watch
 	// login progress (including the interactive AuthURL) from the beginning.
@@ -82,7 +86,7 @@ func runServe(args []string) error {
 	if err != nil {
 		return fmt.Errorf("local client: %w", err)
 	}
-	api := &localAPI{srv: srv, lc: lc}
+	api := &localAPI{srv: srv, lc: lc, token: token}
 	apiLn, err := net.Listen("tcp", cfg.localAPI)
 	if err != nil {
 		return fmt.Errorf("listen local api %s: %w", cfg.localAPI, err)
