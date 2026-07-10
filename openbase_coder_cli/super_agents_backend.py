@@ -1,3 +1,12 @@
+"""Compatibility boundary for APIs owned by the sibling ``super-agents`` package.
+
+Prefer the canonical ``super_agents.backend_clients`` and
+``super_agents.app_permissions.permission_response_for_request`` implementations
+whenever they are installed. The fallback code only covers older/editable local
+``super-agents`` checkouts that predate those exports; it should not become a
+second source of truth for newer backend behavior.
+"""
+
 from __future__ import annotations
 
 import os

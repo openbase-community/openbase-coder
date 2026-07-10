@@ -21,3 +21,21 @@ def test_client_from_environment_reports_missing_claude_backend(monkeypatch) -> 
 
     with pytest.raises(RuntimeError, match="does not include Claude Code backend"):
         super_agents_backend.client_from_environment()
+
+
+def test_permission_response_fallback_handles_approval_request() -> None:
+    result = super_agents_backend.permission_response_for_request(
+        {"method": "exec/requestApproval"},
+        "decline",
+    )
+
+    assert result == {"decision": "decline"}
+
+
+def test_permission_response_fallback_handles_mcp_elicitation() -> None:
+    result = super_agents_backend.permission_response_for_request(
+        {"method": "mcpServer/elicitation/request"},
+        "accept",
+    )
+
+    assert result == {"action": "accept", "content": None, "_meta": None}
