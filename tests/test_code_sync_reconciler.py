@@ -315,3 +315,19 @@ def test_discover_git_repos_skips_unreadable_directories(tmp_path: Path) -> None
         os.chmod(locked, 0o755)
 
     assert root / "repo-a" in repos
+
+
+def test_extra_untracked_files_do_not_block_fast_forward(tmp_path: Path) -> None:
+    """In-flight uncommitted work is the normal state of a live machine."""
+    local, peer = _pair(tmp_path)
+    peer_head = _commit(peer, "app.py", "print('v2')\n", "peer change")
+    (local / "app.py").write_text("print('v2')\n", encoding="utf-8")
+    (local / "wip-notes.md").write_text("uncommitted work\n", encoding="utf-8")
+
+    result = _reconcile(local, peer, tmp_path / "conflicts.json")
+
+    assert result.action == reconciler.ACTION_FAST_FORWARDED
+    assert _git(local, "rev-parse", "main") == peer_head
+    # The in-flight file survives, still untracked.
+    assert (local / "wip-notes.md").read_text(encoding="utf-8") == "uncommitted work\n"
+    assert "?? wip-notes.md" in _git(local, "status", "--porcelain")

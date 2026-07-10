@@ -175,16 +175,20 @@ def worktree_matches_commit(repo: Path, commit_sha: str) -> bool:
     ``git diff <commit>`` alone reports paths the commit adds but the local
     index does not know as deletions — even when Syncthing has already
     delivered identical content as untracked files. Build a throwaway index
-    from the worktree instead and compare tree hashes. Seeding from the
-    commit keeps files that are tracked there but locally gitignored, while
-    untracked-and-gitignored files (e.g. ``.env``) never block a match.
+    seeded from the commit and update it from the worktree instead, then
+    compare tree hashes. ``add -u`` updates only the seeded (= committed)
+    paths, so extra untracked files — in-flight uncommitted work, which is
+    the normal state of a live machine — never block a fast-forward, and
+    neither do untracked-and-gitignored files like ``.env``. Files the
+    commit tracks but the local repo gitignores are still compared (they
+    are tracked in the throwaway index).
     """
     target_tree = _git(["rev-parse", f"{commit_sha}^{{tree}}"], repo).stdout.strip()
     if not target_tree:
         return False
     with tempfile.TemporaryDirectory(prefix="code-sync-index-") as tmp:
         env = {**os.environ, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
-        for args in (["read-tree", commit_sha], ["add", "-A", "."]):
+        for args in (["read-tree", commit_sha], ["add", "-u"]):
             if _git(args, repo, env=env).returncode != 0:
                 return False
         actual_tree = _git(["write-tree"], repo, env=env).stdout.strip()
