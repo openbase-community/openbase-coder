@@ -59,6 +59,7 @@ def main() -> int:
     python_dir = package_dir / "python"
     create_runtime_python(python_dir, args.python)
     install_cli_package(python_dir)
+    relocate_console_scripts(python_dir)
     relocate_macos_python(python_dir)
     stage_bin(
         package_dir,
@@ -148,6 +149,42 @@ def install_cli_package(python_dir: Path) -> None:
         check=True,
         env=_runtime_pip_env(),
     )
+
+
+def relocate_console_scripts(python_dir: Path) -> None:
+    """Rewrite pip's absolute shebangs into relocatable ``/bin/sh`` wrappers.
+
+    pip stamps each console script with the absolute path of the interpreter
+    that installed it, which during a release build is the build-time package
+    directory (``$RUNNER_TEMP/openbase-coder-package-<target>``). That path
+    does not exist once the archive is extracted on a user's machine, so every
+    console script dies with ``bad interpreter``.
+
+    The install prefix is not knowable at build time, so the shebang cannot be
+    rewritten to it. Instead emit the same relocatable wrapper that the bundled
+    interpreter already uses for its own scripts (pip, pydoc3, idle3), which
+    resolves the interpreter relative to the script's own location.
+    """
+    bin_dir = python_dir / "bin"
+    build_shebangs = {
+        f"#!{bin_dir / name}" for name in ("python", "python3", "python3.12")
+    }
+    wrapper = (
+        "#!/bin/sh\n"
+        "'''exec' \"$(dirname -- \"$(realpath -- \"$0\")\")/python3\" \"$0\" \"$@\"\n"
+        "' '''\n"
+    )
+    for path in sorted(bin_dir.iterdir()):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        shebang, newline, body = text.partition("\n")
+        if not newline or shebang not in build_shebangs:
+            continue
+        path.write_text(wrapper + body, encoding="utf-8")
 
 
 def relocate_macos_python(python_dir: Path) -> None:
@@ -281,6 +318,7 @@ def validate_package(package_dir: Path, version: str) -> None:
             raise RuntimeError(f"Package validation failed; missing {path}")
     _validate_no_external_python_links(package_dir)
     _validate_no_host_macos_library_links(package_dir)
+    _validate_no_build_path_shebangs(package_dir)
     result = subprocess.run(
         [str(package_dir / "bin" / "openbase-coder"), "--version"],
         check=True,
@@ -343,6 +381,32 @@ def _uv_managed_python(version: str) -> Path | None:
         return None
     path = Path(result.stdout.strip())
     return path if path.is_file() else None
+
+
+def _validate_no_build_path_shebangs(package_dir: Path) -> None:
+    """Fail the build if any script hardcodes the build-time package directory.
+
+    ``bin/openbase-coder`` is a hand-written relocatable launcher, so the CLI
+    smoke test in validate_package() passes even when every pip-generated
+    console script in python/bin is broken. Check them directly.
+    """
+    for path in sorted((package_dir / "python" / "bin").iterdir()):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if not text.startswith("#!"):
+            continue
+        # Check the exec line too: the sh-wrapper form pip emits for paths
+        # containing spaces keeps the absolute interpreter path on line 2.
+        for line in text.split("\n", 2)[:2]:
+            if str(package_dir) in line:
+                raise RuntimeError(
+                    "Package validation failed; script has a non-relocatable "
+                    f"build-path reference: {path} -> {line.strip()}"
+                )
 
 
 def _validate_no_external_python_links(package_dir: Path) -> None:
