@@ -74,6 +74,14 @@ BACKEND_MODEL_OPTIONS = {
     CLAUDE_CODE_BACKEND: CLAUDE_CODE_MODEL_OPTIONS,
 }
 CLAUDE_CODE_MODEL_ALIASES = {option["id"] for option in CLAUDE_CODE_MODEL_OPTIONS}
+VOICE_DISPATCH_PROVIDER_KEY = "voice_dispatch_provider"
+LIVEKIT_VOICE_DISPATCH_PROVIDER = "livekit"
+VOCALBRIDGE_VOICE_DISPATCH_PROVIDER = "vocalbridge"
+VOICE_DISPATCH_PROVIDERS = {
+    LIVEKIT_VOICE_DISPATCH_PROVIDER,
+    VOCALBRIDGE_VOICE_DISPATCH_PROVIDER,
+}
+DEFAULT_VOICE_DISPATCH_PROVIDER = LIVEKIT_VOICE_DISPATCH_PROVIDER
 TTS_PROVIDER_KEY = "tts_provider"
 STT_PROVIDER_KEY = "stt_provider"
 DISPATCHER_VOICE_ID_KEY = "dispatcher_voice_id"
@@ -321,6 +329,32 @@ def set_stt_provider(provider_id: str, path: Path | None = None) -> dict[str, st
         config_path,
     )
     return {"provider": normalized_provider_id}
+
+
+def voice_dispatch_provider(path: Path | None = None) -> str:
+    configured = _optional_str(
+        read_dispatcher_config(path).get(VOICE_DISPATCH_PROVIDER_KEY)
+    )
+    if configured and configured.strip().lower() in VOICE_DISPATCH_PROVIDERS:
+        return configured.strip().lower()
+    return DEFAULT_VOICE_DISPATCH_PROVIDER
+
+
+def set_voice_dispatch_provider(value: str, path: Path | None = None) -> str:
+    normalized = value.strip().lower()
+    if normalized not in VOICE_DISPATCH_PROVIDERS:
+        allowed = ", ".join(sorted(VOICE_DISPATCH_PROVIDERS))
+        raise ValueError(f"Voice dispatch provider must be one of: {allowed}.")
+
+    config_path = path or CODEX_DISPATCHER_CONFIG_PATH
+    _write_dispatcher_config(
+        {
+            **read_dispatcher_config(config_path),
+            VOICE_DISPATCH_PROVIDER_KEY: normalized,
+        },
+        config_path,
+    )
+    return normalized
 
 
 def dispatcher_voice(path: Path | None = None) -> dict[str, str]:

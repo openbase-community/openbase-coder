@@ -122,6 +122,9 @@ from openbase_coder_cli.openbase_coder_cli_app.threads import (
     thread_steer_turn,
     thread_tags,
 )
+from openbase_coder_cli.openbase_coder_cli_app.voice_dispatch_settings import (
+    voice_dispatch_settings,
+)
 from openbase_coder_cli.paths import (
     CODEX_AGENTS_MD_PATH,
     CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
@@ -334,6 +337,7 @@ __all__ = [
     "routines_run_due",
     "service_status",
     "service_tier_settings",
+    "voice_dispatch_settings",
     "thread_device_sync_status",
     "thread_device_sync_conflicts",
     "thread_device_sync_conflict_resolve",

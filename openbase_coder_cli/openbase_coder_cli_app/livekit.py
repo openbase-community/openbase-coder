@@ -30,12 +30,15 @@ from openbase_coder_cli.config.token_manager import (
     AuthTransientError,
 )
 from openbase_coder_cli.dispatcher_config import (
+    LIVEKIT_VOICE_DISPATCH_PROVIDER,
+    VOCALBRIDGE_VOICE_DISPATCH_PROVIDER,
     dispatcher_voice,
     selected_stt_provider_id,
     selected_tts_provider_id,
     set_dispatcher_voice,
     set_stt_provider,
     set_tts_provider_and_dispatcher_voice,
+    voice_dispatch_provider,
 )
 from openbase_coder_cli.livekit_announcer import (
     MAX_ANNOUNCER_TEXT_LENGTH,
@@ -74,6 +77,15 @@ from openbase_coder_cli.tts_providers import (
     KOKORO_PROVIDER_ID,
     all_tts_providers,
     get_tts_provider,
+)
+from openbase_coder_cli.vocalbridge.config import (
+    VocalBridgeNotConfiguredError,
+    vocalbridge_credentials,
+)
+from openbase_coder_cli.vocalbridge.responder import ensure_vocalbridge_responder
+from openbase_coder_cli.vocalbridge.tokens import (
+    VocalBridgeTokenError,
+    mint_vocalbridge_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -732,13 +744,79 @@ def _timestamp_value(value) -> float:
     return 0.0
 
 
+def _vocalbridge_room_token_response(request) -> Response:
+    """Mint VocalBridge room tokens and start the local query responder.
+
+    VocalBridge owns the room (and its name); the caller's requested room
+    name is ignored. Two tokens share one session: the client's, returned to
+    the caller, and a responder token this machine uses to join the same
+    room and answer delegated ``query_agent`` questions.
+    """
+    try:
+        credentials = vocalbridge_credentials()
+    except VocalBridgeNotConfiguredError as exc:
+        return Response(
+            {"detail": str(exc), "code": "vocalbridge_not_configured"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    display_name = (
+        request.user.get_full_name().strip()
+        if hasattr(request.user, "get_full_name")
+        else ""
+    ) or _request_identity(request)
+    session_id = f"openbase-{uuid.uuid4().hex[:16]}"
+
+    try:
+        client_grant = mint_vocalbridge_token(
+            participant_name=display_name,
+            session_id=session_id,
+            credentials=credentials,
+        )
+        responder_grant = mint_vocalbridge_token(
+            participant_name="Openbase Coder",
+            session_id=session_id,
+            credentials=credentials,
+        )
+    except VocalBridgeTokenError as exc:
+        return Response(
+            {"detail": str(exc), "code": "vocalbridge_token_failed"},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    room_name = str(client_grant.get("room_name") or "")
+    livekit_url = str(client_grant.get("livekit_url") or "")
+    responder_room = str(responder_grant.get("room_name") or "")
+    if responder_room and room_name and responder_room != room_name:
+        logger.warning(
+            "VocalBridge minted mismatched rooms for one session; the "
+            "dispatcher responder cannot join this call "
+            "(client_room=%s responder_room=%s)",
+            room_name,
+            responder_room,
+        )
+    else:
+        ensure_vocalbridge_responder(
+            room_name=room_name,
+            livekit_url=str(responder_grant.get("livekit_url") or livekit_url),
+            token=str(responder_grant["token"]),
+        )
+
+    return Response(
+        {
+            "token": client_grant["token"],
+            "room_name": room_name,
+            "url": livekit_url,
+            "provider": VOCALBRIDGE_VOICE_DISPATCH_PROVIDER,
+        }
+    )
+
+
 @api_view(["POST"])
 def livekit_room_token(request):
-    """Mint a local LiveKit room token for the authenticated caller."""
+    """Mint a room token for the configured voice dispatch provider."""
     input_serializer = LiveKitRoomTokenSerializer(data=request.data)
     input_serializer.is_valid(raise_exception=True)
-
-    api_key, api_secret = _livekit_client_token_credentials()
 
     if not isinstance(request.auth, dict):
         raise serializers.ValidationError(
@@ -746,6 +824,13 @@ def livekit_room_token(request):
                 "detail": "A JWT-authenticated caller is required to start a LiveKit session."
             }
         )
+
+    if voice_dispatch_provider() == VOCALBRIDGE_VOICE_DISPATCH_PROVIDER:
+        # VocalBridge hosts the voice pipeline, so the local LiveKit stack
+        # and Openbase Cloud audio entitlements are not involved.
+        return _vocalbridge_room_token_response(request)
+
+    api_key, api_secret = _livekit_client_token_credentials()
 
     try:
         ensure_openbase_cloud_audio_subscription(
@@ -819,7 +904,16 @@ def livekit_room_token(request):
         .to_jwt()
     )
 
-    return Response({"token": token, "room_name": room_name})
+    # No "url" here on purpose: local-mode clients already derive the LiveKit
+    # URL from the backend host they reached us on; the server-side
+    # LIVEKIT_URL (often localhost) would be wrong for remote callers.
+    return Response(
+        {
+            "token": token,
+            "room_name": room_name,
+            "provider": LIVEKIT_VOICE_DISPATCH_PROVIDER,
+        }
+    )
 
 
 @api_view(["GET"])

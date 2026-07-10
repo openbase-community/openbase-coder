@@ -86,8 +86,8 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     skills_symlink,
     stt_settings,
     tag_options,
-    thread_activity,
     thread_active_voice,
+    thread_activity,
     thread_detail,
     thread_device_sync_conflict_resolve,
     thread_device_sync_conflicts,
@@ -107,6 +107,7 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     uv_tool_detail,
     uv_tool_executable_help,
     uv_tools_list,
+    voice_dispatch_settings,
 )
 
 router = DefaultRouter()
@@ -319,6 +320,11 @@ urlpatterns = [
         "settings/service-tier/",
         service_tier_settings,
         name="service-tier-settings",
+    ),
+    path(
+        "settings/voice-dispatch/",
+        voice_dispatch_settings,
+        name="voice-dispatch-settings",
     ),
     path(
         "settings/env/",
