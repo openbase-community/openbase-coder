@@ -25,12 +25,8 @@ from super_agents.app_server_client import (
     shared_permission_requests,
     write_shared_permission_decision,
 )
-from super_agents.backend_clients import (
-    CLAUDE_CODE_BACKEND,
-    backend_from_environment,
-    client_from_environment,
-)
 
+from openbase_coder_cli.backend_config import CLAUDE_CODE_BACKEND
 from openbase_coder_cli.livekit_voice_history import record_voice_assignment
 from openbase_coder_cli.livekit_voice_route import (
     get_livekit_voice_route_state,
@@ -38,6 +34,10 @@ from openbase_coder_cli.livekit_voice_route import (
 )
 from openbase_coder_cli.onboarding_reminder import append_onboarding_reminder
 from openbase_coder_cli.paths import CODEX_SUPER_AGENT_INSTRUCTIONS_PATH
+from openbase_coder_cli.super_agents_backend import (
+    backend_from_environment,
+    client_from_environment,
+)
 
 from .models import QueuedTurnInfo
 from .models import ThreadInfo as SessionInfo
