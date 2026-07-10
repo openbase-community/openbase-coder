@@ -60,6 +60,7 @@ def main() -> int:
     create_runtime_python(python_dir, args.python)
     install_cli_package(python_dir)
     rewrite_bin_shebangs(python_dir)
+    prune_runtime(python_dir)
     relocate_macos_python(python_dir)
     stage_bin(
         package_dir,
@@ -193,6 +194,59 @@ def _python_script_body(raw: bytes) -> bytes | None:
 
 def _is_relocatable_trampoline(exec_line: str) -> bool:
     return "$(dirname -- " in exec_line
+
+
+def prune_runtime(python_dir: Path) -> None:
+    """Trim runtime fat left behind by pip install (~400 MB uncompressed).
+
+    Everything removed here is dead weight at runtime:
+
+    - ``__pycache__``: pip repopulates what ``create_runtime_python`` excluded.
+      Bytecode regenerates lazily once the package runs from its installed,
+      writable location.
+    - ``tests``/``test`` directories inside installed site-packages.
+    - ``claude_agent_sdk/_bundled``: a full Claude Code CLI the SDK wheel
+      ships. Its ``_find_cli()`` falls back to the PATH-installed ``claude``
+      (which also covers ``~/.local/bin``), and setup installs that on demand
+      when the Claude backend is selected — neither backend CLI ships inside
+      the standalone runtime (see ``backend_binaries.py``).
+    - Tk/Tcl data trees, ``tkinter``, ``idlelib``, ``turtledemo``: the bundled
+      Python has no ``_tkinter`` extension module, so none of these can load.
+    """
+    lib_dir = python_dir / "lib"
+    doomed: set[Path] = set()
+
+    doomed.update(path for path in python_dir.rglob("__pycache__") if path.is_dir())
+
+    for site_packages in lib_dir.glob("python*/site-packages"):
+        for name in ("tests", "test"):
+            doomed.update(path for path in site_packages.rglob(name) if path.is_dir())
+        doomed.add(site_packages / "claude_agent_sdk" / "_bundled")
+
+    for stdlib_dir in lib_dir.glob("python3*"):
+        doomed.update(
+            stdlib_dir / name for name in ("idlelib", "turtledemo", "tkinter")
+        )
+        doomed.add(stdlib_dir / "turtle.py")
+        doomed.update(stdlib_dir.glob("lib-dynload/_tkinter*"))
+    for pattern in ("tcl8*", "tk8*", "itcl*", "thread*"):
+        doomed.update(path for path in lib_dir.glob(pattern) if path.is_dir())
+
+    freed = 0
+    for path in sorted(doomed):
+        if path.is_symlink() or not path.exists():
+            continue
+        if path.is_dir():
+            freed += sum(
+                child.stat().st_size
+                for child in path.rglob("*")
+                if child.is_file() and not child.is_symlink()
+            )
+            shutil.rmtree(path)
+        else:
+            freed += path.stat().st_size
+            path.unlink()
+    print(f"Pruned runtime: freed {freed / 1024 / 1024:.0f} MB")
 
 
 def relocate_macos_python(python_dir: Path) -> None:
