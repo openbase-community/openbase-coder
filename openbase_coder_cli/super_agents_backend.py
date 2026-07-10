@@ -10,6 +10,26 @@ from openbase_coder_cli.backend_config import (
 )
 
 try:
+    from super_agents.app_permissions import (
+        permission_response_for_request,  # type: ignore[attr-defined]
+    )
+except ImportError:
+
+    def permission_response_for_request(
+        request: Any,
+        decision: str,
+    ) -> dict[str, Any]:
+        method = (
+            request.get("method", "")
+            if isinstance(request, dict)
+            else getattr(request, "method", "")
+        )
+        if "elicitation" in str(method).lower():
+            return {"action": decision, "content": None, "_meta": None}
+        return {"decision": decision}
+
+
+try:
     from super_agents.backend_clients import (  # type: ignore[import-not-found]
         backend_from_environment,
         client_from_environment,
