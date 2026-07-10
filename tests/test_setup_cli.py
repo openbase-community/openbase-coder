@@ -11,6 +11,8 @@ import pytest
 from click.testing import CliRunner
 
 from openbase_coder_cli import claude_auth
+from openbase_coder_cli.cli.setup.hooks import session_start_hook_trusted_hash
+from openbase_coder_cli.paths import INJECT_SESSION_ID_HOOK_PATH
 
 setup_cli = importlib.import_module("openbase_coder_cli.cli.setup")
 codex_home_instructions = importlib.import_module(
@@ -27,7 +29,6 @@ def _patch_setup(monkeypatch, name, value):
     for module in (setup_cli, *_setup_phase_modules):
         if hasattr(module, name):
             monkeypatch.setattr(module, name, value)
-
 
 
 def _patch_openbase_agent_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path]:
@@ -125,9 +126,7 @@ def test_resolve_dev_workspace_dir_uses_recorded_installation(
     assert setup_cli.resolve_dev_workspace_dir(None) == str(workspace)
 
 
-def test_resolve_dev_workspace_dir_uses_editable_install(
-    tmp_path, monkeypatch
-) -> None:
+def test_resolve_dev_workspace_dir_uses_editable_install(tmp_path, monkeypatch) -> None:
     workspace = _make_workspace_checkout(tmp_path / "editable")
     from openbase_coder_cli.cli.setup import workspace as workspace_phase
 
@@ -639,6 +638,23 @@ def test_symlink_codex_home_skills_preserves_real_directories(
     assert (target / "SKILL.md").read_text(encoding="utf-8") == "# Custom\n"
 
 
+def _expected_session_id_hook_suffix(codex_home: Path) -> str:
+    hook_command = str(INJECT_SESSION_ID_HOOK_PATH)
+    state_key = f"{codex_home.resolve() / 'config.toml'}:session_start:0:0"
+    return (
+        "\n"
+        "[[hooks.SessionStart]]\n"
+        "\n"
+        "[[hooks.SessionStart.hooks]]\n"
+        'type = "command"\n'
+        f"command = {json.dumps(hook_command)}\n"
+        "\n"
+        f'[hooks.state."{state_key}"]\n'
+        f"trusted_hash = {json.dumps(session_start_hook_trusted_hash(hook_command))}\n"
+        "enabled = true\n"
+    )
+
+
 def test_ensure_codex_home_config_creates_config(tmp_path, monkeypatch) -> None:
     workspace = tmp_path / "workspace"
     command = workspace / ".venv" / "bin" / "super-agents-mcp"
@@ -658,6 +674,7 @@ def test_ensure_codex_home_config_creates_config(tmp_path, monkeypatch) -> None:
         "\n"
         "[mcp_servers.super-agents]\n"
         f"command = {json.dumps(str(command))}\n"
+        + _expected_session_id_hook_suffix(codex_home)
     )
 
 
@@ -739,6 +756,7 @@ def test_ensure_codex_home_config_falls_back_to_resolved_uv(
         "[mcp_servers.super-agents]\n"
         f"command = {json.dumps(str(uv_bin))}\n"
         f"args = {json.dumps(['--directory', str(cli_dir), 'run', 'super-agents-mcp'])}\n"
+        + _expected_session_id_hook_suffix(codex_home)
     )
 
 
@@ -851,6 +869,12 @@ def test_ensure_claude_settings_seeds_from_normal_claude_settings(
     assert settings["claudeMdExcludes"] == [
         "/tmp/other-team/CLAUDE.md",
         str(setup_cli.NORMAL_CLAUDE_CONFIG_DIR / "CLAUDE.md"),
+    ]
+    assert settings["hooks"]["SessionStart"] == [
+        {
+            "matcher": "",
+            "hooks": [{"type": "command", "command": str(INJECT_SESSION_ID_HOOK_PATH)}],
+        }
     ]
 
 
@@ -1158,12 +1182,8 @@ def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
     (workspace / "multi.json").write_text("{}", encoding="utf-8")
     _patch_setup(monkeypatch, "ensure_backend_binary", lambda _backend: None)
     _patch_setup(monkeypatch, "_ensure_normal_codex_mcp", lambda _workspace_dir: None)
-    _patch_setup(
-        monkeypatch, "_ensure_normal_claude_mcp", lambda _workspace_dir: None
-    )
-    _patch_setup(
-        monkeypatch, "_ensure_claude_auth_bridge", lambda **_kwargs: None
-    )
+    _patch_setup(monkeypatch, "_ensure_normal_claude_mcp", lambda _workspace_dir: None)
+    _patch_setup(monkeypatch, "_ensure_claude_auth_bridge", lambda **_kwargs: None)
     _patch_setup(
         monkeypatch,
         "_ensure_thread_sync_exchange_dir",

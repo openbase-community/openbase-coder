@@ -16,6 +16,7 @@ from openbase_coder_cli.claude_auth import (
     sync_normal_claude_state,
 )
 from openbase_coder_cli.cli.setup.codex import _super_agents_mcp_command
+from openbase_coder_cli.cli.setup.hooks import merge_session_id_hook_into_claude_hooks
 from openbase_coder_cli.paths import (
     CODEX_DISPATCHER_CONFIG_PATH,
     CODEX_SUPER_AGENT_INSTRUCTIONS_PATH,
@@ -269,6 +270,7 @@ def _merge_claude_settings(settings: dict[str, object]) -> dict[str, object]:
     updated["claudeMdExcludes"] = _merge_claude_md_excludes(
         updated.get("claudeMdExcludes")
     )
+    updated["hooks"] = merge_session_id_hook_into_claude_hooks(updated.get("hooks"))
     return updated
 
 

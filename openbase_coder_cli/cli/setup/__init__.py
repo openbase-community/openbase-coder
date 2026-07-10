@@ -95,6 +95,9 @@ from openbase_coder_cli.cli.setup.env import (
     _selected_coding_backend,
     _upsert_env_file_values,  # noqa: F401
 )
+from openbase_coder_cli.cli.setup.hooks import (
+    ensure_session_id_hook_script as _ensure_session_id_hook_script,
+)
 from openbase_coder_cli.cli.setup.workspace import (
     BUNDLED_SOUND_FILES,  # noqa: F401
     BUNDLED_SOUNDS_PACKAGE,  # noqa: F401
@@ -299,9 +302,7 @@ class _SetupProgress:
 @click.option(
     "--link-claude-config",
     is_flag=True,
-    help=(
-        "Symlink Openbase's Claude settings to the normal ~/.claude/settings.json."
-    ),
+    help=("Symlink Openbase's Claude settings to the normal ~/.claude/settings.json."),
 )
 @click.option(
     "--fast-mode/--no-fast-mode",
@@ -520,6 +521,7 @@ def _run_setup_phases(
         _init_standalone_runtime(runtime_package)
 
     # --- Configure the service CODEX_HOME ---
+    _ensure_session_id_hook_script()
     if link_codex_config:
         _ensure_codex_home_config(
             workspace_dir if use_dev_workspace else "",
