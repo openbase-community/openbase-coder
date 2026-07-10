@@ -42,17 +42,21 @@ class SkillApprovalRequestCreateSerializer(serializers.Serializer):
         return attrs
 
 
+async def pending_approval_requests() -> list[dict]:
+    """Pending approval requests across threads and skills."""
+    manager = get_session_manager()
+    return [
+        approval_request
+        for approval_request in await manager.list_approval_requests()
+        if not is_skill_approval_request(approval_request)
+        or is_pending_skill_approval_request(approval_request)
+    ]
+
+
 @api_view(["GET"])
 def approval_requests(request):
     """List currently pending approval requests across threads and skills."""
-    manager = get_session_manager()
-    requests = []
-    for approval_request in async_to_sync(manager.list_approval_requests)():
-        if is_skill_approval_request(
-            approval_request
-        ) and not is_pending_skill_approval_request(approval_request):
-            continue
-        requests.append(approval_request)
+    requests = async_to_sync(pending_approval_requests)()
     return Response({"requests": requests}, status=status.HTTP_200_OK)
 
 

@@ -115,7 +115,13 @@ Call tab is where you actually speak to it. See
 ### Approvals
 
 Pending permission requests from running agents (commands, tool calls) with
-Accept and Decline buttons. Auto-refreshes every 5 seconds.
+Accept and Decline buttons. Updates live as requests arrive and are answered,
+with a polling fallback when the live connection is unavailable.
+
+Approvals come from Codex app-server callbacks, skill approval requests, and —
+when a gated permission mode is configured via the
+`SUPER_AGENTS_CLAUDE_PERMISSION_MODE` environment variable — Claude Code
+sessions.
 
 **On iPhone:** the Approvals tab shows the same queue with approve/deny
 buttons, and approval push notifications deep-link straight to it — so you

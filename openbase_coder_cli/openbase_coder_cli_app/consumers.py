@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
+from open_approvals import resolve_requests_file
 
 from openbase_coder_cli.mcp.session_manager import get_session_manager
+from openbase_coder_cli.openbase_coder_cli_app.approvals import (
+    pending_approval_requests,
+)
 from openbase_coder_cli.openbase_coder_cli_app.thread_metadata import (
     annotate_thread_payload,
 )
@@ -220,6 +225,102 @@ class AllThreadsConsumer(AsyncJsonWebsocketConsumer):
                 "thread_id": event["thread_id"],
                 "data": event["data"],
             }
+        )
+
+
+class _ApprovalStoreWatcher:
+    """Broadcasts to the approvals group whenever the shared store file changes.
+
+    Every approval producer (Codex app-server callbacks, Claude Code
+    permission gating, skills) writes the shared open-approvals store, so one
+    local file stat per tick replaces per-client HTTP polling.
+    """
+
+    group_name = "approval_requests"
+    poll_seconds = 0.5
+
+    def __init__(self) -> None:
+        self._connections = 0
+        self._task: asyncio.Task[None] | None = None
+
+    def acquire(self) -> None:
+        self._connections += 1
+        if self._task is None or self._task.done():
+            # Capture the baseline before yielding control so store writes
+            # racing with the first connect are still detected.
+            self._task = asyncio.create_task(self._watch(self._store_signature()))
+
+    def release(self) -> None:
+        self._connections = max(0, self._connections - 1)
+
+    async def _watch(self, last_signature: tuple[float, int] | None) -> None:
+        from channels.layers import get_channel_layer
+
+        while self._connections > 0:
+            await asyncio.sleep(self.poll_seconds)
+            signature = self._store_signature()
+            if signature == last_signature:
+                continue
+            last_signature = signature
+            channel_layer = get_channel_layer()
+            if channel_layer is not None:
+                await channel_layer.group_send(
+                    self.group_name,
+                    {"type": "approval_requests_changed"},
+                )
+
+    @staticmethod
+    def _store_signature() -> tuple[float, int] | None:
+        try:
+            stat = resolve_requests_file().stat()
+        except OSError:
+            return None
+        return (stat.st_mtime, stat.st_size)
+
+
+_approval_store_watcher = _ApprovalStoreWatcher()
+
+
+class ApprovalRequestsConsumer(AsyncJsonWebsocketConsumer):
+    """Pushes the pending approval-request list when the shared store changes."""
+
+    group_name = _ApprovalStoreWatcher.group_name
+
+    async def connect(self):
+        self._watching = False
+        if self.scope.get("user") != "authenticated":
+            await self.close(code=4001)
+            return
+
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+        _approval_store_watcher.acquire()
+        self._watching = True
+        await self._send_snapshot()
+
+    async def disconnect(self, close_code):
+        if getattr(self, "_watching", False):
+            _approval_store_watcher.release()
+        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def receive_json(self, content, **kwargs):
+        if content.get("action") == "refresh":
+            await self._send_snapshot()
+
+    async def approval_requests_changed(self, event):
+        await self._send_snapshot()
+
+    async def _send_snapshot(self):
+        try:
+            requests = await pending_approval_requests()
+        except Exception:
+            logger.warning(
+                "Unable to load approval requests for the approvals socket",
+                exc_info=True,
+            )
+            return
+        await self.send_json(
+            {"type": "approval_requests", "data": {"requests": requests}}
         )
 
 
