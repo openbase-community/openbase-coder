@@ -10,6 +10,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from openbase_coder_cli.livekit_voice_route import get_livekit_voice_route_state
 from openbase_coder_cli.mcp.models import ThreadStatus
 from openbase_coder_cli.mcp.projects import (
     refresh_projects_from_thread_directories as _refresh_projects_from_threads,
@@ -154,6 +155,25 @@ def _get_cached_livekit_dispatcher_thread(manager):
     except RuntimeError:
         logger.warning(
             "thread_list skipping unavailable LiveKit dispatcher fallback thread_id=%s",
+            livekit_thread_id,
+        )
+        return None
+
+
+def get_livekit_active_voice_thread_id() -> str | None:
+    state = get_livekit_voice_route_state()
+    return state.active_target_thread_id or state.dispatcher_thread_id
+
+
+def _get_livekit_active_voice_thread(manager):
+    livekit_thread_id = get_livekit_active_voice_thread_id()
+    if not livekit_thread_id:
+        return None
+    try:
+        return async_to_sync(manager.get_thread_state)(livekit_thread_id)
+    except RuntimeError:
+        logger.warning(
+            "thread_active_voice skipping unavailable LiveKit thread_id=%s",
             livekit_thread_id,
         )
         return None
@@ -345,6 +365,19 @@ def thread_dispatcher(request):
     return Response(annotate_thread_payload(thread.model_dump(mode="json")))
 
 
+@api_view(["GET"])
+def thread_active_voice(request):
+    """Return the active voice conversation with turn text for the call page."""
+    manager = get_session_manager()
+    thread = _get_livekit_active_voice_thread(manager)
+    if thread is None:
+        return Response(
+            {"error": "Active LiveKit voice thread not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return Response(annotate_thread_payload(thread.model_dump(mode="json")))
+
+
 @api_view(["GET", "DELETE"])
 def thread_detail(request, thread_id):
     """Get or archive a thread."""
@@ -445,9 +478,45 @@ def thread_start_turn(request, thread_id):
         )
     try:
         turn_id = async_to_sync(manager.start_turn)(thread_id, prompt)
-    except ValueError as e:
+    except (ValueError, RuntimeError) as e:
         return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
     invalidate_thread_list_cache()
     return Response(
         {"turn_id": turn_id, "status": "started"}, status=status.HTTP_201_CREATED
     )
+
+
+@api_view(["POST"])
+def thread_queue_turn(request, thread_id):
+    """Queue a follow-up turn on a thread (non-blocking)."""
+    manager = get_session_manager()
+    prompt = request.data.get("prompt")
+    if not prompt:
+        return Response(
+            {"error": "prompt is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        result = async_to_sync(manager.queue_turn)(thread_id, prompt)
+    except (ValueError, RuntimeError) as e:
+        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    invalidate_thread_list_cache()
+    return Response(result, status=status.HTTP_202_ACCEPTED)
+
+
+@api_view(["POST"])
+def thread_steer_turn(request, thread_id):
+    """Send text steering input to the active turn on a thread."""
+    manager = get_session_manager()
+    prompt = request.data.get("prompt")
+    if not prompt:
+        return Response(
+            {"error": "prompt is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        result = async_to_sync(manager.steer_turn)(thread_id, prompt)
+    except (ValueError, RuntimeError) as e:
+        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    invalidate_thread_list_cache()
+    return Response(result)

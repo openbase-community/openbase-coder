@@ -28,7 +28,7 @@ from .onboarding import onboarding
 from .plugins import plugins
 from .provision import provision
 from .reports import reports
-from .restart import restart
+from .restart import restart, self_restart
 from .routines import routines
 from .self_update import self_update, version_command
 from .server import server
@@ -79,6 +79,7 @@ main.add_command(provision)
 main.add_command(reports)
 main.add_command(bootstrap)
 main.add_command(restart)
+main.add_command(self_restart)
 main.add_command(user)
 main.add_command(boilersync)
 main.add_command(cloud)

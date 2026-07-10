@@ -98,6 +98,64 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
                     {"type": "error", "data": {"message": _friendly_error(exc)}}
                 )
 
+        elif action == "queue_turn":
+            prompt = content.get("prompt", "")
+            if not prompt:
+                await self.send_json(
+                    {"type": "error", "data": {"message": "prompt is required"}}
+                )
+                return
+            try:
+                result = await manager.queue_turn(self.thread_id, prompt)
+                await self.send_json({"type": "turn_queued", "data": result})
+                thread = await manager.get_thread_state(self.thread_id)
+                if thread:
+                    await self.send_json(
+                        {
+                            "type": "thread_state",
+                            "data": annotate_thread_payload(
+                                thread.model_dump(mode="json"),
+                                thread_id=self.thread_id,
+                            ),
+                        }
+                    )
+            except (ValueError, RuntimeError) as exc:
+                logger.warning(
+                    "queue_turn failed for thread %s: %s", self.thread_id, exc
+                )
+                await self.send_json(
+                    {"type": "error", "data": {"message": _friendly_error(exc)}}
+                )
+
+        elif action == "steer_turn":
+            prompt = content.get("prompt", "")
+            if not prompt:
+                await self.send_json(
+                    {"type": "error", "data": {"message": "prompt is required"}}
+                )
+                return
+            try:
+                result = await manager.steer_turn(self.thread_id, prompt)
+                await self.send_json({"type": "turn_steered", "data": result})
+                thread = await manager.get_thread_state(self.thread_id)
+                if thread:
+                    await self.send_json(
+                        {
+                            "type": "thread_state",
+                            "data": annotate_thread_payload(
+                                thread.model_dump(mode="json"),
+                                thread_id=self.thread_id,
+                            ),
+                        }
+                    )
+            except (ValueError, RuntimeError) as exc:
+                logger.warning(
+                    "steer_turn failed for thread %s: %s", self.thread_id, exc
+                )
+                await self.send_json(
+                    {"type": "error", "data": {"message": _friendly_error(exc)}}
+                )
+
         elif action == "interrupt_turn":
             try:
                 success = await manager.interrupt_turn(self.thread_id)

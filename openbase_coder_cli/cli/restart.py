@@ -45,3 +45,40 @@ def restart(service: str | None, delay: float, recreate_dispatcher: bool) -> Non
         )
     if plan.recreate_dispatcher:
         click.echo("Dispatcher thread will be recreated.")
+    else:
+        click.echo(
+            "Dispatcher context is preserved; use --recreate-dispatcher for a "
+            "fresh dispatcher thread."
+        )
+
+
+@click.command("self-restart")
+@click.option(
+    "--delay",
+    type=float,
+    default=DEFAULT_RESTART_DELAY_SECONDS,
+    show_default=True,
+    help="Seconds to wait before restarting.",
+)
+@click.option(
+    "--recreate-dispatcher",
+    is_flag=True,
+    help="Recreate the dispatcher thread during restart.",
+)
+def self_restart(delay: float, recreate_dispatcher: bool) -> None:
+    """Restart the full Openbase Coder service stack."""
+    request = RestartRequest(
+        recreate_dispatcher=recreate_dispatcher,
+        delay_seconds=delay,
+    )
+    plan = schedule_restart(request)
+    click.echo(
+        f"Scheduled self-restart for all Openbase-managed services in {plan.delay_seconds:g}s."
+    )
+    if plan.recreate_dispatcher:
+        click.echo("Dispatcher thread will be recreated.")
+    else:
+        click.echo(
+            "Dispatcher context is preserved; use --recreate-dispatcher for a "
+            "fresh dispatcher thread."
+        )
