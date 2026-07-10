@@ -124,9 +124,15 @@ def git_http_backend(request, folder_id: str, subpath: str):
         "REQUEST_METHOD": request.method,
         "QUERY_STRING": request.META.get("QUERY_STRING", ""),
         "CONTENT_TYPE": request.META.get("CONTENT_TYPE", ""),
+        "CONTENT_LENGTH": str(len(request.body)),
         "REMOTE_ADDR": request.META.get("REMOTE_ADDR", ""),
         "REMOTE_USER": "openbase-coder",
     }
+    # git clients gzip large upload-pack request bodies; the CGI needs the
+    # encoding to inflate them.
+    content_encoding = request.META.get("HTTP_CONTENT_ENCODING", "")
+    if content_encoding:
+        env["HTTP_CONTENT_ENCODING"] = content_encoding
     try:
         result = subprocess.run(
             ["git", "http-backend"],

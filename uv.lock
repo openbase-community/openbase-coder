@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-07-03T16:08:06.284672Z"
+exclude-newer = "2026-07-03T20:35:32.990971Z"
 exclude-newer-span = "P1W"
 
 [[package]]
@@ -1732,7 +1732,7 @@ name = "macholib"
 version = "1.16.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "altgraph" },
+    { name = "altgraph", marker = "platform_python_implementation != 'PyPy' or sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/10/2f/97589876ea967487978071c9042518d28b958d87b17dceb7cdc1d881f963/macholib-1.16.4.tar.gz", hash = "sha256:f408c93ab2e995cd2c46e34fe328b130404be143469e41bc366c807448979362", size = 59427, upload-time = "2025-11-22T08:28:38.373Z" }
 wheels = [
@@ -3650,7 +3650,7 @@ wheels = [
 
 [[package]]
 name = "super-agents"
-version = "0.1.6"
+version = "0.1.7"
 source = { editable = "../super-agents" }
 dependencies = [
     { name = "mcp" },

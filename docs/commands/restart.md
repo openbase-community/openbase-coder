@@ -10,6 +10,7 @@ restart controls.
 
 ```bash
 openbase-coder restart [OPTIONS]
+openbase-coder self-restart [OPTIONS]
 ```
 
 With no options, this schedules a detached restart of every Openbase-managed launchd service:
@@ -17,7 +18,9 @@ With no options, this schedules a detached restart of every Openbase-managed lau
 - all Openbase launchd services
 - the Openbase Coder API/MCP host through `django-cli`
 
-Dispatcher context is preserved by default.
+Dispatcher context is preserved by default. Use `--recreate-dispatcher` when
+you need a new dispatcher thread; a normal restart intentionally keeps the
+existing dispatcher route state.
 
 The Super Agents MCP stdio process is owned by the client that spawned it, such as Codex.
 `openbase-coder restart` does not kill or restart that process.
@@ -30,10 +33,15 @@ The Super Agents MCP stdio process is owned by the client that spawned it, such 
 | `--delay FLOAT` | `8.0` | Seconds to wait before restarting |
 | `--recreate-dispatcher` | off | Clear dispatcher state and recreate it during restart |
 
+`openbase-coder self-restart` is an alias for a full Openbase-managed service
+restart. It supports `--delay` and `--recreate-dispatcher`, but does not accept
+`--service`.
+
 ## Examples
 
 ```bash
 openbase-coder restart
 openbase-coder restart --service livekit-agent
 openbase-coder restart --recreate-dispatcher
+openbase-coder self-restart --recreate-dispatcher
 ```

@@ -40,6 +40,10 @@ class LiveKitVoiceRouter:
         return self._active_client
 
     @property
+    def is_dispatcher_active(self) -> bool:
+        return self._active_client is self._dispatcher_client
+
+    @property
     def active_target_voice_id(self) -> str | None:
         return self._active_target_voice_id
 

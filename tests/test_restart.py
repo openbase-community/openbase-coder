@@ -2,7 +2,7 @@ import importlib
 
 from click.testing import CliRunner
 
-from openbase_coder_cli.cli.restart import restart
+from openbase_coder_cli.cli.restart import restart, self_restart
 from openbase_coder_cli.services.installation import InstallationConfig
 from openbase_coder_cli.services.restart import (
     RestartPlan,
@@ -34,6 +34,7 @@ def test_restart_default_schedules_all_openbase_services(monkeypatch):
 
     assert result.exit_code == 0
     assert "all Openbase-managed services" in result.output
+    assert "Dispatcher context is preserved" in result.output
     assert "super-agents-mcp" not in result.output
     assert len(popen_calls) == 1
 
@@ -45,6 +46,30 @@ def test_restart_default_schedules_all_openbase_services(monkeypatch):
     assert "codex-thread-device-sync" not in command
     assert "super-agents-mcp" not in command
     assert warnings == [{"reason": "restart", "emit_cli_warning": True}]
+
+
+def test_self_restart_schedules_all_openbase_services(monkeypatch):
+    popen_calls = []
+
+    class FakePopen:
+        def __init__(self, *args, **kwargs):
+            popen_calls.append((args, kwargs))
+
+    monkeypatch.setattr(InstallationConfig, "exists", classmethod(lambda cls: True))
+    monkeypatch.setattr(restart_module.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(
+        restart_module,
+        "warn_before_voice_interruption",
+        lambda **_kwargs: None,
+    )
+
+    result = CliRunner().invoke(self_restart, ["--delay", "0"])
+
+    assert result.exit_code == 0
+    assert "Scheduled self-restart" in result.output
+    command = popen_calls[0][0][0][2]
+    assert "livekit-server" in command
+    assert "django-cli" in command
 
 
 def test_restart_single_service_schedules_only_that_service(monkeypatch):

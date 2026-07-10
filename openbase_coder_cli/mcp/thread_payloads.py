@@ -24,6 +24,7 @@ from super_agents.app_server_client import (
 from .models import ThreadInfo as SessionInfo
 from .models import ThreadStatus as SessionStatus
 from .models import TurnInfo as RunInfo
+from .models import TurnSteerInfo as SteerInfo
 
 logger = logging.getLogger(__name__)
 
@@ -137,25 +138,24 @@ def _turn_sort_key(turn: dict[str, Any]) -> int:
     return 0
 
 
-def _extract_user_message(turn: dict[str, Any]) -> str:
-    text_parts: list[str] = []
+def _user_message_texts(turn: dict[str, Any]) -> list[str]:
+    """Extract the text of each userMessage item in the turn, in order.
+
+    The first user message started the turn; any later ones are steering
+    input sent while the turn was running.
+    """
+    texts: list[str] = []
     for item in turn.get("items", []):
         if item.get("type") != "userMessage":
             continue
-        for content in item.get("content", []):
-            if content.get("type") == "text":
-                text = content.get("text", "").strip()
-                if text:
-                    text_parts.append(text)
-    return (
-        "\n\n".join(text_parts)
-        or _optional_turn_string(
-            turn,
-            "prompt",
-            "promptPreview",
-        )
-        or ""
-    )
+        text_parts = [
+            content.get("text", "").strip()
+            for content in item.get("content", [])
+            if content.get("type") == "text" and content.get("text", "").strip()
+        ]
+        if text_parts:
+            texts.append("\n\n".join(text_parts))
+    return texts
 
 
 def _extract_agent_output(turn: dict[str, Any]) -> str:
@@ -275,6 +275,12 @@ def _run_from_turn(
     status = _turn_status(turn.get("status"), error)
     if raw_status == SessionStatus.waiting and status == SessionStatus.running:
         status = SessionStatus.waiting
+    user_texts = _user_message_texts(turn)
+    message = (
+        user_texts[0]
+        if user_texts
+        else _optional_turn_string(turn, "prompt", "promptPreview") or ""
+    )
 
     return RunInfo(
         run_id=turn_id,
@@ -284,12 +290,13 @@ def _run_from_turn(
         accumulated_output=_extract_agent_output(turn),
         accumulated_stderr=stderr,
         return_code=0 if status == SessionStatus.completed else -1,
-        message=_extract_user_message(turn),
+        message=message,
         reasoning_effort=_optional_turn_string(
             turn,
             "reasoningEffort",
             "reasoning_effort",
         ),
+        steers=[SteerInfo(text=text) for text in user_texts[1:]],
     )
 
 
@@ -449,7 +456,13 @@ async def _merge_tracked_turn_summaries(client: Any, thread: dict[str, Any]) -> 
         thread["turns"] = summaries
 
 
-async def _merge_tracked_turn_reasoning(client: Any, thread: dict[str, Any]) -> None:
+async def _merge_tracked_turn_details(client: Any, thread: dict[str, Any]) -> None:
+    """Fill turn fields the app-server payload may lack from tracked state.
+
+    Reasoning effort is only known to the Super Agents turn tracker, and an
+    in-flight turn's userMessage items may not be readable yet, so the tracked
+    prompt preview keeps the prompt visible while the agent is mid-response.
+    """
     thread_id = extract_thread_id(thread)
     if not thread_id:
         return
@@ -478,3 +491,11 @@ async def _merge_tracked_turn_reasoning(client: Any, thread: dict[str, Any]) -> 
         reasoning_effort = getattr(summary, "reasoning_effort", None)
         if isinstance(reasoning_effort, str) and reasoning_effort:
             turn["reasoningEffort"] = reasoning_effort
+        prompt_preview = getattr(summary, "prompt_preview", None)
+        if (
+            isinstance(prompt_preview, str)
+            and prompt_preview
+            and not _user_message_texts(turn)
+            and not _optional_turn_string(turn, "prompt", "promptPreview")
+        ):
+            turn["promptPreview"] = prompt_preview

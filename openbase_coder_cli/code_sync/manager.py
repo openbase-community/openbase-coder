@@ -8,6 +8,8 @@ config, managed ignores, and the ``code-sync`` service.
 from __future__ import annotations
 
 import socket
+import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -21,19 +23,136 @@ from openbase_coder_cli.code_sync.eligibility import (
 )
 from openbase_coder_cli.code_sync.ignores import update_all_ignores
 from openbase_coder_cli.code_sync.syncthing import (
+    SYNC_LISTEN_PORT,
     PeerDevice,
     SyncthingClient,
     ensure_identity,
     peer_address,
     write_config,
 )
-from openbase_coder_cli.paths import SYNC_VERSIONS_DIR
+from openbase_coder_cli.paths import CODE_SYNC_DIR, SYNC_VERSIONS_DIR
 from openbase_coder_cli.sync_config import (
     code_sync_enabled,
     set_code_sync_enabled,
 )
 
 CODE_SYNC_SERVICE_NAME = "code-sync"
+
+# Config locations of a Syncthing instance the user manages themselves.
+USER_SYNCTHING_CONFIG_PATHS = (
+    Path("Library/Application Support/Syncthing/config.xml"),
+    Path(".local/state/syncthing/config.xml"),
+    Path(".config/syncthing/config.xml"),
+)
+
+
+def _managed_service_running() -> bool:
+    from openbase_coder_cli.services.launchd import launchctl_status
+
+    return bool(launchctl_status(_service_definition()).get("pid"))
+
+
+def _user_managed_syncthing_running() -> bool:
+    """A syncthing process that is not our managed instance."""
+    result = subprocess.run(
+        ["pgrep", "-fl", "syncthing"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+    for line in result.stdout.splitlines():
+        # "PID <argv...>": only count real syncthing executables, not
+        # scripts whose command line merely mentions syncthing.
+        parts = line.split(None, 2)
+        if len(parts) < 2 or Path(parts[1]).name != "syncthing":
+            continue
+        if str(CODE_SYNC_DIR) not in line:
+            return True
+    return False
+
+
+def _listen_port_available(port: int = SYNC_LISTEN_PORT) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("0.0.0.0", port))
+        except OSError:
+            return False
+    return True
+
+
+def user_managed_syncthing_folders(home: Path | None = None) -> list[Path]:
+    """Folder paths configured in any user-managed Syncthing config."""
+    home = home or Path.home()
+    folders: list[Path] = []
+    for rel in USER_SYNCTHING_CONFIG_PATHS:
+        config_path = home / rel
+        if not config_path.is_file():
+            continue
+        try:
+            root = ET.parse(config_path).getroot()
+        except (OSError, ET.ParseError):
+            continue
+        for element in root.findall("./folder"):
+            raw = element.get("path") or ""
+            if raw:
+                folders.append(Path(raw).expanduser())
+    return folders
+
+
+def _paths_overlap(a: Path, b: Path) -> bool:
+    try:
+        a.relative_to(b)
+        return True
+    except ValueError:
+        pass
+    try:
+        b.relative_to(a)
+        return True
+    except ValueError:
+        return False
+
+
+def ensure_port_available() -> None:
+    """Refuse to arm sync when another Syncthing owns the listen port.
+
+    Two instances cannot share tcp/22000; a user-managed Syncthing left
+    running would leave the managed one unable to accept peer connections.
+    """
+    if _managed_service_running():
+        return  # Re-render/restart of our own instance; the port is ours.
+    if not _listen_port_available():
+        raise CodeSyncError(
+            f"Port {SYNC_LISTEN_PORT} is already in use"
+            + (
+                " by a user-managed Syncthing; stop it (or move its listen "
+                "address to another port) before enabling code sync."
+                if _user_managed_syncthing_running()
+                else "; free it before enabling code sync."
+            )
+        )
+
+
+def ensure_no_user_managed_overlap(folders, home: Path | None = None) -> None:
+    """Refuse folders that a running user-managed Syncthing already syncs.
+
+    Two sync engines over one directory echo each other's writes and
+    manufacture conflict storms.
+    """
+    if not _user_managed_syncthing_running():
+        return
+    user_folders = user_managed_syncthing_folders(home)
+    for folder in folders:
+        managed_path = folder.absolute_path(home)
+        for user_path in user_folders:
+            if _paths_overlap(managed_path, user_path):
+                raise CodeSyncError(
+                    f"'{folder.relpath}' overlaps a folder the running "
+                    f"user-managed Syncthing already syncs ({user_path}); "
+                    "remove it there first."
+                )
 
 
 def _peer_devices(eligibility: EligibilityResult) -> list[PeerDevice]:
@@ -113,6 +232,11 @@ def enable_code_sync(
     if not eligibility.eligible and not force:
         raise CodeSyncError(eligibility.reason or "Code sync is not eligible.")
 
+    from openbase_coder_cli.sync_config import sync_folders
+
+    ensure_port_available()
+    ensure_no_user_managed_overlap(sync_folders(config_path))
+
     from openbase_coder_cli.code_sync.install import ensure_syncthing_installed
 
     ensure_syncthing_installed()
@@ -148,6 +272,9 @@ def apply_settings_change(config_path: Path | None = None) -> dict[str, Any]:
     """Re-render config/ignores after a settings mutation and reload sync."""
     if not code_sync_enabled(config_path):
         return {"applied": False, "reason": "code sync is disabled"}
+    from openbase_coder_cli.sync_config import sync_folders
+
+    ensure_no_user_managed_overlap(sync_folders(config_path))
     rendered = render_configuration(config_path=config_path)
     # syncthing runs with --no-restart; kick the service so the rendered
     # config.xml is reloaded, then request a rescan once it is back.

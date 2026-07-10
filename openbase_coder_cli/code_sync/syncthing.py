@@ -140,6 +140,21 @@ def peer_address(tailscale_magic_dns: str) -> str:
     return f"tcp://{host}:{SYNC_LISTEN_PORT}"
 
 
+def existing_folder_types(config_dir: Path = CODE_SYNC_DIR) -> dict[str, str]:
+    """Folder types from the current config.xml, so re-renders preserve the
+    write lease instead of resetting every folder to send-receive."""
+    config_path = config_dir / CONFIG_XML_FILENAME
+    try:
+        root = ET.parse(config_path).getroot()
+    except (FileNotFoundError, OSError, ET.ParseError):
+        return {}
+    return {
+        element.get("id", ""): element.get("type", "")
+        for element in root.findall("./folder")
+        if element.get("id")
+    }
+
+
 def render_config_xml(
     *,
     self_device_id: str,
@@ -149,20 +164,28 @@ def render_config_xml(
     folders: list[SyncFolder],
     home: Path | None = None,
     versions_dir: Path | None = None,
+    folder_types: dict[str, str] | None = None,
 ) -> str:
     """Render the full Syncthing config.xml owned by openbase-coder."""
     home = home or Path.home()
     versions_dir = versions_dir or SYNC_VERSIONS_DIR
+    folder_types = folder_types or {}
     root = ET.Element("configuration", version="37")
 
     for folder in folders:
+        current_type = folder_types.get(folder.folder_id)
         folder_element = ET.SubElement(
             root,
             "folder",
             id=folder.folder_id,
             label=folder.relpath,
             path=str(folder.absolute_path(home)),
-            type="sendreceive",
+            # Preserve the lease's receive-only flips across re-renders.
+            type=(
+                current_type
+                if current_type in ("sendreceive", "receiveonly")
+                else "sendreceive"
+            ),
             rescanIntervalS="3600",
             fsWatcherEnabled="true",
             fsWatcherDelayS="10",
@@ -241,6 +264,7 @@ def write_config(
         folders=folders,
         home=home,
         versions_dir=versions_dir,
+        folder_types=existing_folder_types(config_dir),
     )
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / CONFIG_XML_FILENAME
@@ -320,3 +344,17 @@ class SyncthingClient:
     def rescan(self, folder_id: str | None = None) -> None:
         query = f"?folder={folder_id}" if folder_id else ""
         self._request("POST", f"/rest/db/scan{query}")
+
+    def latest_event_time(self, event_type: str) -> str | None:
+        """RFC3339 time of the most recent buffered event of a type, if any."""
+        events = (
+            self._request(
+                "GET",
+                f"/rest/events?events={event_type}&since=0&limit=1&timeout=0",
+            )
+            or []
+        )
+        if not isinstance(events, list) or not events:
+            return None
+        value = events[-1].get("time")
+        return value if isinstance(value, str) else None

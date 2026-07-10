@@ -9,6 +9,7 @@ from shutil import which
 import click
 
 from openbase_coder_cli.backend_config import DEFAULT_CODING_BACKEND
+from openbase_coder_cli.cli.setup.hooks import ensure_codex_session_id_hook
 from openbase_coder_cli.codex_backend_config import apply_backend_to_codex_config
 from openbase_coder_cli.codex_home_instructions import (
     ensure_openbase_agents_md,
@@ -225,6 +226,8 @@ def _ensure_codex_home_config(
     else:
         config_path.write_text(updated, encoding="utf-8")
         click.echo(f"Configured Codex home config at {config_path}")
+
+    ensure_codex_session_id_hook(config_path)
 
     result = apply_backend_to_codex_config(coding_backend, config_path=config_path)
     if result.changed:

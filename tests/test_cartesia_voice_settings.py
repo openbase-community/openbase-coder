@@ -438,3 +438,32 @@ def test_apple_music_playback_entitlement_reports_subscription_required(
     assert response.status_code == 402
     assert response.data["available"] is False
     assert response.data["code"] == "subscription_required"
+
+
+def test_apple_music_playback_entitlement_uses_request_bearer_jwt(
+    monkeypatch,
+) -> None:
+    captured: dict[str, str | None] = {}
+
+    def fake_entitlement(**kwargs):
+        captured["access_token"] = kwargs.get("access_token")
+        return {"has_active_subscription": True, "detail": ""}
+
+    monkeypatch.setattr(
+        views._livekit,
+        "openbase_cloud_subscription_entitlement",
+        fake_entitlement,
+    )
+
+    factory = APIRequestFactory()
+    request = factory.get(
+        "/api/features/apple-music-playback/",
+        HTTP_AUTHORIZATION="Bearer caller.jwt.token",
+    )
+    force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+
+    response = views.apple_music_playback_entitlement(request)
+
+    assert response.status_code == 200
+    assert response.data["available"] is True
+    assert captured["access_token"] == "caller.jwt.token"

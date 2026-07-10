@@ -91,6 +91,35 @@ def test_write_config_keeps_api_key_stable(tmp_path: Path) -> None:
     assert _write() == first_key
 
 
+def test_write_config_preserves_receiveonly_folder_type(tmp_path: Path) -> None:
+    """A re-render must not stomp the lease's receive-only flip."""
+    folder = SyncFolder(relpath="Projects/demo")
+
+    def _write() -> None:
+        syncthing.write_config(
+            self_device_id=SELF_ID,
+            self_name="laptop",
+            peers=[],
+            folders=[folder],
+            config_dir=tmp_path,
+            home=tmp_path,
+        )
+
+    _write()
+    config_path = tmp_path / syncthing.CONFIG_XML_FILENAME
+    content = config_path.read_text(encoding="utf-8").replace(
+        'type="sendreceive"', 'type="receiveonly"', 1
+    )
+    config_path.write_text(content, encoding="utf-8")
+    assert syncthing.existing_folder_types(tmp_path) == {
+        folder.folder_id: "receiveonly"
+    }
+
+    _write()
+    root = ET.parse(config_path).getroot()
+    assert root.find("folder").get("type") == "receiveonly"
+
+
 def test_device_id_parsing_and_storage(tmp_path: Path) -> None:
     output = f"Device ID: {SELF_ID}\n"
     assert syncthing._device_id_from_output(output) == SELF_ID

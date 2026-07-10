@@ -130,6 +130,8 @@ from openbase_coder_cli.livekit_agent.logging_utils import (  # noqa: F401
     _event_text_hash,
     _frame_duration_ms,
     _should_log_audio_frame,
+    exception_chain_summary,
+    redact_exception_text,
 )
 from openbase_coder_cli.livekit_agent.packets import (  # noqa: F401
     AnnouncerAudioMessage,
@@ -380,6 +382,10 @@ def _agent_error_code(exc: Exception) -> str:
         return "login_required"
     if isinstance(exc, AuthTransientError):
         return "cloud_unavailable"
+    if _is_openbase_cloud_audio_authorization_error(exc):
+        return "cloud_audio_auth_failed"
+    if _is_openbase_cloud_audio_provider_error(exc):
+        return "cloud_audio_provider_failed"
     return "agent_start_failed"
 
 
@@ -392,9 +398,23 @@ def _agent_error_detail(exc: Exception) -> str:
         | AuthTransientError,
     ):
         return str(exc)
+    if _is_openbase_cloud_audio_authorization_error(exc):
+        return (
+            "Openbase Cloud audio authorization failed while starting this call. "
+            "Sign in to Openbase Cloud again on your computer, then restart the "
+            "Openbase Coder services or switch voice settings to direct provider "
+            "keys or local audio."
+        )
+    if _is_openbase_cloud_audio_provider_error(exc):
+        return (
+            "Openbase Cloud audio could not start the selected STT/TTS provider. "
+            "Check your Openbase Cloud audio subscription and voice settings, then "
+            "rejoin the call."
+        )
+    summary = redact_exception_text(exc)
     return (
         "The Openbase voice agent joined the call but could not start its "
-        f"audio pipeline: {exc}. Check the voice settings and the Openbase "
+        f"audio pipeline: {summary}. Check the voice settings and the Openbase "
         "Coder service logs, then rejoin the call."
     )
 
@@ -409,6 +429,34 @@ async def _report_agent_error(room: rtc.Room, exc: Exception) -> None:
         )
     except Exception:
         logger.exception("Unable to publish LiveKit agent error packet")
+
+
+def _is_openbase_cloud_audio_authorization_error(exc: Exception) -> bool:
+    status = _exception_status(exc)
+    return status in {401, 403} and _exception_mentions_openbase_cloud_audio(exc)
+
+
+def _is_openbase_cloud_audio_provider_error(exc: Exception) -> bool:
+    return _exception_mentions_openbase_cloud_audio(exc)
+
+
+def _exception_status(exc: BaseException) -> int | None:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        status = getattr(current, "status", None) or getattr(current, "status_code", None)
+        if isinstance(status, int):
+            return status
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _exception_mentions_openbase_cloud_audio(exc: BaseException) -> bool:
+    text = exception_chain_summary(exc).lower()
+    return "app.openbase.cloud/api/openbase/audio/" in text or (
+        "/api/openbase/audio/" in text and "openbase" in text
+    )
 
 
 def _uses_openbase_cloud_audio() -> bool:
@@ -520,6 +568,7 @@ async def _start_voice_session(
         session,
         voice_router,
         enable_logging=LIVEKIT_VERBOSE_LOGGING,
+        on_unrecoverable_error=lambda exc: _report_agent_error(ctx.room, exc),
     )
 
     # Start the session
@@ -581,8 +630,7 @@ async def livekit_agent(ctx: JobContext):
         logger.error(
             "LiveKit agent joined room %s but could not start its voice session: %s",
             ctx.room.name,
-            exc,
-            exc_info=True,
+            exception_chain_summary(exc),
         )
         await _report_agent_error(ctx.room, exc)
         raise

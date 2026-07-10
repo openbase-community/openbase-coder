@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from super_agents.app_models import LabelQueryInput
+from super_agents.app_permissions import permission_response_for_request
 from super_agents.app_server_client import (
     CodexAppServerClient,
     extract_notification_thread_id,
@@ -35,15 +36,18 @@ from openbase_coder_cli.livekit_voice_route import (
     get_livekit_voice_route_state,
     super_agent_voice_for_context,
 )
+from openbase_coder_cli.onboarding_reminder import append_onboarding_reminder
 from openbase_coder_cli.paths import CODEX_SUPER_AGENT_INSTRUCTIONS_PATH
 
+from .models import QueuedTurnInfo
 from .models import ThreadInfo as SessionInfo
 from .models import ThreadStatus as SessionStatus
 from .models import TurnInfo as RunInfo
+from .models import TurnSteerInfo as SteerInfo
 from .thread_payloads import (
     _approval_request_payload,
     _datetime_to_iso,
-    _merge_tracked_turn_reasoning,
+    _merge_tracked_turn_details,
     _merge_tracked_turn_summaries,
     _next_cursor,
     _normalize_backend_thread_payload,
@@ -52,12 +56,16 @@ from .thread_payloads import (
     _session_sort_key,
     _thread_history_limit,
     _thread_payload,
+    _timestamp_to_datetime,
     _undelivered_suffix,
 )
 
 logger = logging.getLogger(__name__)
 
 SUPER_AGENT_INSTRUCTIONS_PATH_ENV = "CODEX_SUPER_AGENT_INSTRUCTIONS_PATH"
+# Locally tracked per-turn prompts/steers are kept after turn completion (see
+# _forget_turn_locked) and bounded by evicting the oldest entries.
+_TRACKED_TURN_TEXT_LIMIT = 500
 SUPER_AGENT_INSTRUCTIONS_TEXT_ENV = "CODEX_SUPER_AGENT_INSTRUCTIONS"
 _USE_SUPER_AGENT_INSTRUCTIONS = object()
 
@@ -85,6 +93,22 @@ class _SuperAgentsClient(Protocol):
     ) -> dict[str, Any]: ...
     async def start_thread(self, input_data: dict[str, Any]) -> dict[str, Any]: ...
     async def start_turn(self, input_data: dict[str, Any]) -> dict[str, Any]: ...
+    async def start_turn_by_label(
+        self,
+        input_data: LabelQueryInput,
+        turn_input: dict[str, Any],
+    ) -> dict[str, Any]: ...
+    async def queue_turn_by_label(
+        self,
+        input_data: LabelQueryInput,
+        turn_input: dict[str, Any],
+    ) -> dict[str, Any]: ...
+    async def steer_by_label(
+        self,
+        input_data: LabelQueryInput,
+        prompt: str,
+        turn_input: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
     async def cancel_turn(self, thread_id: str, turn_id: str) -> dict[str, Any]: ...
     def pending_permission_requests(self) -> list[Any]: ...
     async def answer_request(
@@ -220,6 +244,27 @@ def _turn_failure_message(params: dict[str, Any]) -> str:
     return "The agent turn failed unexpectedly."
 
 
+def _notification_item_id(params: dict[str, Any]) -> str | None:
+    for key in ("itemId", "item_id"):
+        value = params.get(key)
+        if isinstance(value, str) and value:
+            return value
+    item = params.get("item")
+    if isinstance(item, dict):
+        value = item.get("id")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _agent_message_boundary(previous_text: str, next_text: str) -> str:
+    if not previous_text or not next_text:
+        return ""
+    if previous_text[-1].isspace() or next_text[0].isspace():
+        return ""
+    return "\n\n"
+
+
 class _OpenbaseSuperAgentsClient(CodexAppServerClient):
     def __init__(
         self, manager: "CodexAppServerSessionManager", ws_url: str | None
@@ -263,6 +308,10 @@ class CodexAppServerSessionManager:
         self._client: _SuperAgentsClient = client or self._default_client()
         self._turn_to_session: dict[str, str] = {}
         self._delivered_text: dict[str, str] = {}
+        self._turn_current_item: dict[str, str] = {}
+        self._delivered_item_text: dict[tuple[str, str], str] = {}
+        self._turn_prompt: dict[str, str] = {}
+        self._turn_steers: dict[str, list[SteerInfo]] = {}
         self._state_lock = asyncio.Lock()
 
     def _default_client(self) -> _SuperAgentsClient:
@@ -288,6 +337,72 @@ class CodexAppServerSessionManager:
     async def start_turn(self, thread_id: str, prompt: str) -> str:
         """Start a new Codex turn on an existing thread."""
         return await self.send_message(thread_id, prompt)
+
+    async def queue_turn(self, thread_id: str, prompt: str) -> dict[str, Any]:
+        """Queue a follow-up turn after the active turn, or start immediately if idle."""
+        thread = await self.get_session_state(thread_id)
+        if thread is None:
+            raise ValueError(f"Thread {thread_id} not found")
+        if not thread.directory:
+            raise ValueError(f"Thread {thread_id} is missing its cwd")
+
+        prompt = _with_dispatcher_onboarding_reminder(thread_id, prompt)
+
+        result = await self._client.queue_turn_by_label(
+            LabelQueryInput(thread_id=thread_id, cwd=thread.directory),
+            {
+                "prompt": prompt,
+                "cwd": thread.directory,
+            },
+        )
+        if not result.get("queued"):
+            turn_id = extract_turn_id(result)
+            if turn_id:
+                async with self._state_lock:
+                    self._turn_to_session[turn_id] = thread_id
+                    self._delivered_text[turn_id] = ""
+                    self._remember_turn_prompt_locked(turn_id, prompt)
+        await self._broadcast_thread_state(thread_id)
+        return result
+
+    async def steer_turn(self, thread_id: str, prompt: str) -> dict[str, Any]:
+        """Send steering input to the active turn on a thread."""
+        thread = await self.get_session_state(thread_id)
+        if thread is None:
+            raise ValueError(f"Thread {thread_id} not found")
+        if not thread.directory:
+            raise ValueError(f"Thread {thread_id} is missing its cwd")
+
+        turn_id = await self._active_turn_id(thread_id)
+        if turn_id is None:
+            raise ValueError(f"Thread {thread_id} has no active turn to steer")
+
+        result = await self._client.steer_by_label(
+            LabelQueryInput(
+                thread_id=thread_id,
+                cwd=thread.directory,
+                turn_id=turn_id,
+                prefer="latest_active",
+            ),
+            prompt,
+            {"cwd": thread.directory},
+        )
+        resolved_turn_id = extract_turn_id(result) or turn_id
+        # steer_by_label can fall back to starting or queueing a fresh turn
+        # when the resolved turn is no longer steerable.
+        steered = not result.get("queued") and not result.get("startedImmediately")
+        async with self._state_lock:
+            self._turn_to_session[resolved_turn_id] = thread_id
+            self._delivered_text.setdefault(resolved_turn_id, "")
+            if steered:
+                self._remember_turn_steer_locked(
+                    resolved_turn_id,
+                    SteerInfo(text=prompt, created_at=datetime.now(UTC)),
+                )
+            else:
+                self._remember_turn_prompt_locked(resolved_turn_id, prompt)
+        await self._broadcast_thread_state(thread_id)
+        return {**result, "turn_id": resolved_turn_id, "steered": steered}
 
     async def get_thread_state(self, thread_id: str) -> SessionInfo | None:
         """Get the current thread snapshot."""
@@ -325,15 +440,22 @@ class CodexAppServerSessionManager:
         await self._client.ensure_connected()
         request = self._find_pending_approval_request(request_id)
         if request is None:
+            shared_request = _find_shared_permission_request(request_id)
             if write_shared_permission_decision(request_id, decision):
                 return {
                     "answered": False,
                     "queued": True,
                     "requestId": request_id,
-                    "result": {"decision": decision},
+                    "result": permission_response_for_request(
+                        shared_request or {"method": ""},
+                        decision,
+                    ),
                 }
             raise ValueError(f"No pending approval request found for id {request_id}.")
-        return await self._client.answer_request(request.id, {"decision": decision})
+        return await self._client.answer_request(
+            request.id,
+            permission_response_for_request(request, decision),
+        )
 
     def _find_pending_approval_request(self, request_id: str | int) -> Any | None:
         candidates: list[str | int] = [request_id]
@@ -617,8 +739,7 @@ class CodexAppServerSessionManager:
                 if candidate_session_id == session_id
             ]
             for turn_id in turn_ids:
-                self._turn_to_session.pop(turn_id, None)
-                self._delivered_text.pop(turn_id, None)
+                self._forget_turn_locked(turn_id)
         return True
 
     async def send_message(self, session_id: str, message: str) -> str:
@@ -636,6 +757,8 @@ class CodexAppServerSessionManager:
         if not thread.directory:
             raise ValueError(f"Thread {session_id} is missing its cwd")
 
+        message = _with_dispatcher_onboarding_reminder(session_id, message)
+
         if self._uses_backend_session_api():
             started = await self._client.start_turn_by_label(
                 LabelQueryInput(thread_id=session_id, cwd=thread.directory),
@@ -644,6 +767,8 @@ class CodexAppServerSessionManager:
             turn_id = extract_turn_id(started)
             if not turn_id:
                 raise RuntimeError("Super Agents did not return a turn id")
+            async with self._state_lock:
+                self._remember_turn_prompt_locked(turn_id, message)
             return turn_id
 
         turn_input = {
@@ -697,6 +822,7 @@ class CodexAppServerSessionManager:
         async with self._state_lock:
             self._turn_to_session[turn_id] = session_id
             self._delivered_text[turn_id] = ""
+            self._remember_turn_prompt_locked(turn_id, message)
 
         await _broadcast(
             session_id,
@@ -709,7 +835,87 @@ class CodexAppServerSessionManager:
         result = await self._read_thread(session_id, include_turns=True)
         if result is None:
             return None
-        return _session_from_thread(result, include_turns=True)
+        session = _session_from_thread(result, include_turns=True)
+        await self._apply_local_turn_state(session_id, session)
+        return session
+
+    async def _apply_local_turn_state(
+        self, session_id: str, session: SessionInfo
+    ) -> None:
+        """Overlay locally tracked prompts, steers, and the pending turn queue.
+
+        The app-server can lag behind locally initiated actions — a turn's
+        userMessage items (including steering input) may not be readable while
+        the turn is in flight — so locally tracked state fills those gaps.
+        """
+        async with self._state_lock:
+            for run in [session.current_run, *session.run_history]:
+                if run is None:
+                    continue
+                if not run.message:
+                    run.message = self._turn_prompt.get(run.run_id, "")
+                tracked_steers = self._turn_steers.get(run.run_id)
+                if tracked_steers:
+                    known = {steer.text.strip() for steer in run.steers}
+                    run.steers = run.steers + [
+                        steer
+                        for steer in tracked_steers
+                        if steer.text.strip() not in known
+                    ]
+        session.queued_turns = self._queued_turns_for_thread(session_id)
+
+    def _queued_turns_for_thread(self, thread_id: str) -> list[QueuedTurnInfo]:
+        summary_method = getattr(self._client, "queued_turn_summary", None)
+        if not callable(summary_method):
+            return []
+        try:
+            summaries = summary_method()
+        except Exception:
+            logger.debug(
+                "Unable to read queued turns for thread %s", thread_id, exc_info=True
+            )
+            return []
+        queued: list[QueuedTurnInfo] = []
+        for summary in summaries:
+            if not isinstance(summary, dict) or summary.get("threadId") != thread_id:
+                continue
+            for item in summary.get("items", []):
+                if not isinstance(item, dict):
+                    continue
+                input_data = (
+                    item.get("inputData")
+                    if isinstance(item.get("inputData"), dict)
+                    else {}
+                )
+                prompt = str(
+                    input_data.get("prompt") or item.get("promptPreview") or ""
+                )
+                if not prompt:
+                    continue
+                queued_at_raw = item.get("queuedAt")
+                queued.append(
+                    QueuedTurnInfo(
+                        queue_id=str(item.get("id")) if item.get("id") else None,
+                        prompt=prompt,
+                        queued_at=(
+                            _timestamp_to_datetime(queued_at_raw)
+                            if queued_at_raw
+                            else None
+                        ),
+                    )
+                )
+        return queued
+
+    async def _broadcast_thread_state(self, thread_id: str) -> None:
+        session_state = await self.get_session_state(thread_id)
+        if session_state is not None:
+            await _broadcast(
+                thread_id,
+                {
+                    "type": "thread_state",
+                    "data": session_state.model_dump(mode="json"),
+                },
+            )
 
     async def interrupt_run(self, session_id: str) -> bool:
         """Interrupt the current turn in a thread."""
@@ -782,8 +988,7 @@ class CodexAppServerSessionManager:
                 return turn["id"]
             if local_turn_id is not None:
                 async with self._state_lock:
-                    self._turn_to_session.pop(local_turn_id, None)
-                    self._delivered_text.pop(local_turn_id, None)
+                    self._forget_turn_locked(local_turn_id)
             return None
         return local_turn_id
 
@@ -842,7 +1047,7 @@ class CodexAppServerSessionManager:
             fetched_turns = False
         thread = _thread_payload(result)
         if thread is not None and fetched_turns:
-            await _merge_tracked_turn_reasoning(self._client, thread)
+            await _merge_tracked_turn_details(self._client, thread)
         elif thread is not None and include_turns:
             await _merge_tracked_turn_summaries(self._client, thread)
         return thread
@@ -864,21 +1069,23 @@ class CodexAppServerSessionManager:
             return
 
         if method == "server_request":
-            session_state = await self.get_session_state(thread_id)
-            if session_state is not None:
-                await _broadcast(
-                    thread_id,
-                    {
-                        "type": "thread_state",
-                        "data": session_state.model_dump(mode="json"),
-                    },
-                )
+            await self._broadcast_thread_state(thread_id)
+            return
+
+        if method == "turn/started":
+            if turn_id:
+                await self._announce_started_turn(thread_id, turn_id, params)
             return
 
         if method == "item/agentMessage/delta":
             delta = params.get("delta", "")
             if turn_id and isinstance(delta, str) and delta:
-                await self._append_output(thread_id, turn_id, delta)
+                await self._append_output(
+                    thread_id,
+                    turn_id,
+                    delta,
+                    item_id=_notification_item_id(params),
+                )
             return
 
         if method == "item/completed":
@@ -886,17 +1093,28 @@ class CodexAppServerSessionManager:
             if isinstance(item, dict) and item.get("type") == "agentMessage":
                 text = item.get("text", "")
                 if turn_id and isinstance(text, str) and text:
-                    delivered = self._delivered_text.get(turn_id, "")
+                    item_id = _notification_item_id(params)
+                    if item_id:
+                        delivered = self._delivered_item_text.get(
+                            (turn_id, item_id),
+                            "",
+                        )
+                    else:
+                        delivered = self._delivered_text.get(turn_id, "")
                     suffix = _undelivered_suffix(delivered, text)
                     if suffix:
-                        await self._append_output(thread_id, turn_id, suffix)
+                        await self._append_output(
+                            thread_id,
+                            turn_id,
+                            suffix,
+                            item_id=item_id,
+                        )
             return
 
         if method in {"turn/completed", "turn/failed"}:
             if turn_id:
                 async with self._state_lock:
-                    self._turn_to_session.pop(turn_id, None)
-                    self._delivered_text.pop(turn_id, None)
+                    self._forget_turn_locked(turn_id)
             if method == "turn/failed":
                 failure_message = _turn_failure_message(params)
                 logger.error(
@@ -926,19 +1144,139 @@ class CodexAppServerSessionManager:
                     },
                 )
 
-    async def _append_output(self, thread_id: str, turn_id: str, text: str) -> None:
+    async def _announce_started_turn(
+        self,
+        thread_id: str,
+        turn_id: str,
+        params: dict[str, Any],
+    ) -> None:
+        """Broadcast turn_started for turns this process did not start itself.
+
+        Queued turns are dequeued and started inside the Super Agents client,
+        so the turn/started notification is the only signal that a new turn
+        (with a new prompt) replaced the previous one.
+        """
         async with self._state_lock:
-            self._delivered_text[turn_id] = self._delivered_text.get(turn_id, "") + text
+            already_known = turn_id in self._turn_to_session
+            self._turn_to_session[turn_id] = thread_id
+            self._delivered_text.setdefault(turn_id, "")
+        if already_known:
+            return
+
+        session_state = await self.get_session_state(thread_id)
+        run: RunInfo | None = None
+        if (
+            session_state is not None
+            and session_state.current_run is not None
+            and session_state.current_run.run_id == turn_id
+        ):
+            run = session_state.current_run
+        if run is None:
+            turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+            started_at_raw = turn.get("startedAt")
+            async with self._state_lock:
+                tracked_prompt = self._turn_prompt.get(turn_id, "")
+            run = RunInfo(
+                run_id=turn_id,
+                started_at=(
+                    _timestamp_to_datetime(started_at_raw)
+                    if started_at_raw
+                    else datetime.now(UTC)
+                ),
+                status=SessionStatus.running,
+                message=tracked_prompt,
+                reasoning_effort=_optional_turn_string(
+                    turn, "reasoningEffort", "reasoning_effort"
+                ),
+            )
+        await _broadcast(
+            thread_id,
+            {"type": "turn_started", "data": run.model_dump(mode="json")},
+        )
+        # Follow with full state (updated queue, history) only when the read
+        # already reflects the new turn; a lagging read would clobber the
+        # freshly announced current turn on clients.
+        if (
+            session_state is not None
+            and session_state.current_run is not None
+            and session_state.current_run.run_id == turn_id
+        ):
+            await _broadcast(
+                thread_id,
+                {
+                    "type": "thread_state",
+                    "data": session_state.model_dump(mode="json"),
+                },
+            )
+
+    async def _append_output(
+        self,
+        thread_id: str,
+        turn_id: str,
+        text: str,
+        *,
+        item_id: str | None = None,
+    ) -> None:
+        async with self._state_lock:
+            previous_text = self._delivered_text.get(turn_id, "")
+            output_text = text
+            if item_id:
+                previous_item_id = self._turn_current_item.get(turn_id)
+                if previous_item_id is not None and previous_item_id != item_id:
+                    output_text = _agent_message_boundary(previous_text, text) + text
+                self._turn_current_item[turn_id] = item_id
+                item_key = (turn_id, item_id)
+                self._delivered_item_text[item_key] = (
+                    self._delivered_item_text.get(item_key, "") + text
+                )
+            self._delivered_text[turn_id] = previous_text + output_text
         await _broadcast(
             thread_id,
             {
                 "type": "output_update",
-                "data": {"stream": "stdout", "line": text, "chunk": True},
+                "data": {
+                    "stream": "stdout",
+                    "line": output_text,
+                    "chunk": True,
+                    "turn_id": turn_id,
+                },
             },
         )
 
+    def _remember_turn_prompt_locked(self, turn_id: str, prompt: str) -> None:
+        self._turn_prompt.setdefault(turn_id, prompt)
+        while len(self._turn_prompt) > _TRACKED_TURN_TEXT_LIMIT:
+            self._turn_prompt.pop(next(iter(self._turn_prompt)))
+
+    def _remember_turn_steer_locked(self, turn_id: str, steer: SteerInfo) -> None:
+        self._turn_steers.setdefault(turn_id, []).append(steer)
+        while len(self._turn_steers) > _TRACKED_TURN_TEXT_LIMIT:
+            self._turn_steers.pop(next(iter(self._turn_steers)))
+
+    def _forget_turn_locked(self, turn_id: str) -> None:
+        # _turn_prompt and _turn_steers survive turn completion on purpose:
+        # they keep history display correct while the app-server payload still
+        # lacks the turn's userMessage items. They are capped instead.
+        self._turn_to_session.pop(turn_id, None)
+        self._delivered_text.pop(turn_id, None)
+        self._turn_current_item.pop(turn_id, None)
+        for item_key in [
+            item_key for item_key in self._delivered_item_text if item_key[0] == turn_id
+        ]:
+            self._delivered_item_text.pop(item_key, None)
+
 
 _session_manager: CodexAppServerSessionManager | None = None
+
+
+def _find_shared_permission_request(request_id: str | int) -> dict[str, Any] | None:
+    request_ids = {str(request_id)}
+    if isinstance(request_id, str) and request_id.isdigit():
+        request_ids.add(str(int(request_id)))
+    for request in shared_permission_requests():
+        if str(request.get("id")) in request_ids:
+            return request
+    return None
 
 
 def get_session_manager() -> CodexAppServerSessionManager:
@@ -947,6 +1285,17 @@ def get_session_manager() -> CodexAppServerSessionManager:
     if _session_manager is None:
         _session_manager = CodexAppServerSessionManager()
     return _session_manager
+
+
+def _with_dispatcher_onboarding_reminder(thread_id: str, prompt: str) -> str:
+    """Append the onboarding reminder to messages bound for the dispatcher."""
+    try:
+        state = get_livekit_voice_route_state()
+    except Exception:
+        return prompt
+    if not state.dispatcher_thread_id or state.dispatcher_thread_id != thread_id:
+        return prompt
+    return append_onboarding_reminder(prompt)
 
 
 def _has_livekit_voice_route() -> bool:

@@ -276,6 +276,7 @@ def test_recent_projects_get_returns_paginated_lazy_metadata(monkeypatch) -> Non
         lambda paths: scheduled.append(paths),
     )
     monkeypatch.setattr(project_views, "_cached_metadata", lambda _: None)
+    monkeypatch.setattr(project_views, "_worktree_children", lambda _: [])
 
     factory = APIRequestFactory()
     request = factory.get("/api/projects/recent/?page_size=2")

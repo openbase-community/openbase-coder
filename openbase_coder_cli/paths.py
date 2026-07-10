@@ -46,7 +46,12 @@ SYNC_VERSIONS_DIR = OPENBASE_BASE_DIR / "sync-versions"
 MACHINE_TOKEN_JSON_PATH = OPENBASE_BASE_DIR / "machine-token.json"
 CONSOLE_SETTINGS_JSON_PATH = OPENBASE_BASE_DIR / "console-settings.json"
 ONBOARDING_JSON_PATH = OPENBASE_BASE_DIR / "onboarding.json"
+# Created by the bundled openbase-onboarding skill once an agent has read it.
+ONBOARDING_SKILL_READ_MARKER_PATH = OPENBASE_BASE_DIR / "onboarding-skill-read"
 DESKTOP_CONTROL_JSON_PATH = OPENBASE_BASE_DIR / "desktop-control.json"
+# Agent-home hook scripts managed by openbase-coder setup.
+OPENBASE_HOOKS_DIR = OPENBASE_BASE_DIR / "hooks"
+INJECT_SESSION_ID_HOOK_PATH = OPENBASE_HOOKS_DIR / "inject-session-id.sh"
 
 PLUGIN_BASE_DIR = OPENBASE_BASE_DIR / "plugins"
 # Stable site dir for plugin Python packages in standalone installs; lives

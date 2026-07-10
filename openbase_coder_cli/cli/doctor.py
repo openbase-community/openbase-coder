@@ -313,20 +313,40 @@ def _syncthing_process_running() -> bool:
     return result.returncode == 0 and bool(result.stdout.strip())
 
 
+def _stignore_content_with_includes(path: Path) -> str:
+    """A .stignore's text plus one level of ``#include`` targets.
+
+    Syncthing resolves includes relative to the .stignore's directory; the
+    VCS patterns typically live in an included .stglobalignore, so checking
+    only the top-level file false-positives on correctly configured setups.
+    """
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    parts = [content]
+    for line in content.splitlines():
+        if not line.startswith("#include "):
+            continue
+        include_path = path.parent / line[len("#include ") :].strip()
+        try:
+            parts.append(include_path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return "\n".join(parts)
+
+
 def _check_code_sync(ok, warn, fail) -> None:
+    from openbase_coder_cli.code_sync.ignores import STIGNORE_FILENAME
     from openbase_coder_cli.code_sync.manager import versions_usage_bytes
     from openbase_coder_cli.services.registry import find_service
-    from openbase_coder_cli.sync_config import code_sync_enabled
+    from openbase_coder_cli.sync_config import code_sync_enabled, sync_folders
 
     # Guard against user-managed Syncthing setups that still sync `.git`
     # (torn git state; the reason code-sync excludes VCS metadata).
     user_stignore = Path.home() / "Projects" / ".stignore"
     if user_stignore.is_file() and _syncthing_process_running():
-        try:
-            content = user_stignore.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            content = ""
-        if _GIT_IGNORE_PATTERN not in content:
+        if _GIT_IGNORE_PATTERN not in _stignore_content_with_includes(user_stignore):
             warn(
                 f"a Syncthing instance is running and {user_stignore} does not "
                 f"ignore '{_GIT_IGNORE_PATTERN}': syncing .git corrupts repos; "
@@ -343,6 +363,18 @@ def _check_code_sync(ok, warn, fail) -> None:
     if not enabled:
         ok("code sync: disabled")
         return
+
+    # The managed .stignore is only rewritten on enable/apply; if one goes
+    # missing or loses the VCS block, Syncthing quietly starts syncing .git.
+    for folder in sync_folders():
+        stignore = folder.absolute_path() / STIGNORE_FILENAME
+        if _GIT_IGNORE_PATTERN in _stignore_content_with_includes(stignore):
+            continue
+        fail(
+            f"managed sync folder '{folder.relpath}' has no .git ignore in "
+            f"{stignore}: run 'openbase-coder sync enable' to regenerate it, "
+            "or .git corruption can recur"
+        )
 
     info = launchctl_status(find_service("code-sync"))
     if not info.get("installed"):

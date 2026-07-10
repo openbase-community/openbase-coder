@@ -846,6 +846,7 @@ def apple_music_playback_entitlement(request):
             web_backend_url=(
                 getattr(settings, "WEB_BACKEND_URL", "") or DEFAULT_WEB_BACKEND_URL
             ).rstrip("/"),
+            access_token=_request_bearer_jwt(request),
         )
     except AuthLoginRequiredError as exc:
         return Response(
@@ -876,6 +877,15 @@ def apple_music_playback_entitlement(request):
         {**payload, "code": "subscription_required"},
         status=status.HTTP_402_PAYMENT_REQUIRED,
     )
+
+
+def _request_bearer_jwt(request) -> str | None:
+    authorization = request.META.get("HTTP_AUTHORIZATION", "")
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].casefold() != "bearer":
+        return None
+    token = parts[1].strip()
+    return token if token.count(".") == 2 else None
 
 
 async def _resolve_companion_target_room(room_name: str | None):

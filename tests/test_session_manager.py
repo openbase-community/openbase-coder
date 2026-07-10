@@ -149,6 +149,62 @@ class FakeSuperAgentsClient:
         self.calls.append(("start_turn", input_data))
         return self._pop("start_turn")
 
+    async def start_turn_by_label(
+        self,
+        input_data,
+        turn_input: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "start_turn_by_label",
+                {
+                    "thread_id": input_data.thread_id,
+                    "cwd": input_data.cwd,
+                    "turn_id": input_data.turn_id,
+                    "turn_input": turn_input,
+                },
+            )
+        )
+        return self._pop("start_turn_by_label")
+
+    async def queue_turn_by_label(
+        self,
+        input_data,
+        turn_input: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "queue_turn_by_label",
+                {
+                    "thread_id": input_data.thread_id,
+                    "cwd": input_data.cwd,
+                    "turn_input": turn_input,
+                },
+            )
+        )
+        return self._pop("queue_turn_by_label")
+
+    async def steer_by_label(
+        self,
+        input_data,
+        prompt: str,
+        turn_input: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "steer_by_label",
+                {
+                    "thread_id": input_data.thread_id,
+                    "cwd": input_data.cwd,
+                    "turn_id": input_data.turn_id,
+                    "prefer": input_data.prefer,
+                    "prompt": prompt,
+                    "turn_input": turn_input,
+                },
+            )
+        )
+        return self._pop("steer_by_label")
+
     async def cancel_turn(self, thread_id: str, turn_id: str) -> dict[str, Any]:
         self.calls.append(("cancel_turn", {"thread_id": thread_id, "turn_id": turn_id}))
         return self._pop("cancel_turn")
@@ -229,7 +285,9 @@ class FakeBackendSessionClient:
         self.calls.append(("sessions", {}))
         return self._pop("sessions")
 
-    async def read_by_label(self, input_data, include_turns: bool = False) -> dict[str, Any]:
+    async def read_by_label(
+        self, input_data, include_turns: bool = False
+    ) -> dict[str, Any]:
         self.calls.append(
             (
                 "read_by_label",
@@ -277,6 +335,38 @@ class FakeBackendSessionClient:
             )
         )
         return self._pop("start_turn_by_label")
+
+    async def queue_turn_by_label(
+        self,
+        input_data,
+        turn_input: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "queue_turn_by_label",
+                {"thread_id": input_data.thread_id, "turn_input": turn_input},
+            )
+        )
+        return self._pop("queue_turn_by_label")
+
+    async def steer_by_label(
+        self,
+        input_data,
+        prompt: str,
+        turn_input: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "steer_by_label",
+                {
+                    "thread_id": input_data.thread_id,
+                    "turn_id": input_data.turn_id,
+                    "prompt": prompt,
+                    "turn_input": turn_input,
+                },
+            )
+        )
+        return self._pop("steer_by_label")
 
     async def cancel_by_label(self, input_data) -> dict[str, Any]:
         self.calls.append(("cancel_by_label", {"thread_id": input_data.thread_id}))
@@ -387,6 +477,38 @@ def test_answer_approval_request_sends_accept_decision() -> None:
     )
 
 
+def test_answer_approval_request_sends_elicitation_action() -> None:
+    request = SimpleNamespace(
+        id="elicitation-1",
+        method="mcpServer/elicitation/request",
+        params={},
+        to_json=lambda: {
+            "id": "elicitation-1",
+            "method": "mcpServer/elicitation/request",
+            "params": {},
+        },
+    )
+    client = FakeSuperAgentsClient(
+        {
+            "pending_permission_requests": [[request]],
+            "answer_request": [{"answered": True}],
+        }
+    )
+
+    result = asyncio.run(
+        _manager(client).answer_approval_request("elicitation-1", "accept")
+    )
+
+    assert result == {"answered": True}
+    assert client.calls[-1] == (
+        "answer_request",
+        {
+            "request_id": "elicitation-1",
+            "result": {"action": "accept", "content": None, "_meta": None},
+        },
+    )
+
+
 def test_answer_approval_request_queues_shared_decision_for_external_owner(
     tmp_path: Path,
     monkeypatch,
@@ -406,6 +528,27 @@ def test_answer_approval_request_queues_shared_decision_for_external_owner(
     assert result["queued"] is True
     assert result["result"] == {"decision": "decline"}
     assert '"decision": "decline"' in approvals_path.read_text(encoding="utf-8")
+
+
+def test_answer_approval_request_queues_elicitation_action_for_external_owner(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    approvals_path = tmp_path / "approvals.json"
+    approvals_path.write_text(
+        '{"requests":{"elicitation-1":{"id":"elicitation-1","method":"mcpServer/elicitation/request","params":{}}},"decisions":{}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SUPER_AGENTS_APPROVAL_REQUESTS_FILE", str(approvals_path))
+    client = FakeSuperAgentsClient({"pending_permission_requests": [[]]})
+
+    result = asyncio.run(
+        _manager(client).answer_approval_request("elicitation-1", "accept")
+    )
+
+    assert result["queued"] is True
+    assert result["result"] == {"action": "accept", "content": None, "_meta": None}
+    assert '"decision": "accept"' in approvals_path.read_text(encoding="utf-8")
 
 
 def test_list_approval_requests_hides_requests_with_queued_decisions(
@@ -668,7 +811,9 @@ def test_read_thread_treats_invalid_backend_thread_id_as_missing() -> None:
     ]
 
 
-def test_resume_thread_without_developer_instructions_is_backend_session_noop(tmp_path: Path) -> None:
+def test_resume_thread_without_developer_instructions_is_backend_session_noop(
+    tmp_path: Path,
+) -> None:
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     client = FakeBackendSessionClient(
@@ -1357,6 +1502,267 @@ def test_start_turn_starts_via_super_agents_and_broadcasts(
     assert events[0][1]["type"] == "turn_started"
 
 
+def test_queue_turn_uses_super_agents_queue_without_exposing_active_turn(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    client = FakeSuperAgentsClient(
+        {
+            "read_thread": [
+                {
+                    "thread": _thread(
+                        "thr-1",
+                        str(project_dir),
+                        status="active",
+                        turns=[
+                            _turn(
+                                "turn-1",
+                                message="Inspect",
+                                output="Working",
+                                started_at=10,
+                                completed_at=None,
+                                status="inProgress",
+                            )
+                        ],
+                    )
+                }
+            ],
+            "queue_turn_by_label": [
+                {
+                    "queued": True,
+                    "threadId": "thr-1",
+                    "queueDepth": 1,
+                    "item": {"id": "q_1", "status": "queued"},
+                }
+            ],
+        }
+    )
+    # queue_turn re-reads state to broadcast the refreshed thread snapshot.
+    client.responses["read_thread"].append(client.responses["read_thread"][0])
+
+    result = asyncio.run(_manager(client).queue_turn("thr-1", "Follow up"))
+
+    assert result["queued"] is True
+    assert (
+        "queue_turn_by_label",
+        {
+            "thread_id": "thr-1",
+            "cwd": str(project_dir),
+            "turn_input": {"prompt": "Follow up", "cwd": str(project_dir)},
+        },
+    ) in client.calls
+
+
+def test_steer_turn_sends_prompt_to_active_super_agents_turn(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    active_thread = {
+        "thread": _thread(
+            "thr-1",
+            str(project_dir),
+            status="active",
+            turns=[
+                _turn(
+                    "turn-1",
+                    message="Inspect",
+                    output="Working",
+                    started_at=10,
+                    completed_at=None,
+                    status="inProgress",
+                )
+            ],
+        )
+    }
+    client = FakeSuperAgentsClient(
+        {
+            # Two reads resolve the thread and active turn; the third backs
+            # the post-steer thread_state broadcast, and the fourth the final
+            # get_session_state assertion below.
+            "read_thread": [active_thread, active_thread, active_thread, active_thread],
+            "steer_by_label": [{"turnId": "turn-1"}],
+        }
+    )
+
+    manager = _manager(client)
+
+    async def steer_then_read() -> tuple[dict[str, Any], Any]:
+        result = await manager.steer_turn("thr-1", "Use the tests")
+        return result, await manager.get_session_state("thr-1")
+
+    result, session = asyncio.run(steer_then_read())
+
+    assert result["steered"] is True
+    assert result["turn_id"] == "turn-1"
+    assert (
+        "steer_by_label",
+        {
+            "thread_id": "thr-1",
+            "cwd": str(project_dir),
+            "turn_id": "turn-1",
+            "prefer": "latest_active",
+            "prompt": "Use the tests",
+            "turn_input": {"cwd": str(project_dir)},
+        },
+    ) in client.calls
+
+    # The steer is overlaid on the active turn until the app-server exposes
+    # it as a userMessage item.
+    assert session is not None and session.current_run is not None
+    assert [steer.text for steer in session.current_run.steers] == ["Use the tests"]
+
+
+def test_turn_prompt_and_steers_derive_from_user_message_items(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    turn = _turn(
+        "turn-1",
+        message="Original prompt",
+        output="Working",
+        started_at=10,
+        completed_at=None,
+        status="inProgress",
+    )
+    turn["items"].append(
+        {
+            "type": "userMessage",
+            "id": "item-steer",
+            "content": [{"type": "text", "text": "Also update docs"}],
+        }
+    )
+    client = FakeSuperAgentsClient(
+        {
+            "read_thread": [
+                {
+                    "thread": _thread(
+                        "thr-1", str(project_dir), status="active", turns=[turn]
+                    )
+                }
+            ]
+        }
+    )
+
+    session = asyncio.run(_manager(client).get_session_state("thr-1"))
+
+    assert session is not None and session.current_run is not None
+    assert session.current_run.message == "Original prompt"
+    assert [steer.text for steer in session.current_run.steers] == ["Also update docs"]
+    payload = session.model_dump(mode="json")
+    assert payload["current_turn"]["prompt"] == "Original prompt"
+    assert payload["current_turn"]["steers"][0]["text"] == "Also update docs"
+
+
+def test_session_state_includes_queued_turns(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+
+    class QueueClient(FakeSuperAgentsClient):
+        def queued_turn_summary(self) -> list[dict[str, Any]]:
+            return [
+                {
+                    "threadId": "thr-1",
+                    "queueDepth": 1,
+                    "items": [
+                        {
+                            "id": "q_1",
+                            "status": "queued",
+                            "queuedAt": "2026-07-10T00:00:00Z",
+                            "inputData": {"prompt": "Follow up work"},
+                        }
+                    ],
+                },
+                {
+                    "threadId": "thr-2",
+                    "items": [{"id": "q_2", "inputData": {"prompt": "Other thread"}}],
+                },
+            ]
+
+    client = QueueClient(
+        {
+            "read_thread": [
+                {
+                    "thread": _thread(
+                        "thr-1",
+                        str(project_dir),
+                        status="active",
+                        turns=[
+                            _turn(
+                                "turn-1",
+                                message="Inspect",
+                                output="Working",
+                                started_at=10,
+                                completed_at=None,
+                                status="inProgress",
+                            )
+                        ],
+                    )
+                }
+            ]
+        }
+    )
+
+    session = asyncio.run(_manager(client).get_session_state("thr-1"))
+
+    assert session is not None
+    assert [(item.queue_id, item.prompt) for item in session.queued_turns] == [
+        ("q_1", "Follow up work")
+    ]
+    payload = session.model_dump(mode="json")
+    assert payload["queued_turns"][0]["prompt"] == "Follow up work"
+
+
+def test_turn_started_notification_announces_externally_started_turn(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    async def fake_broadcast(session_id: str, event: dict[str, Any]) -> None:
+        events.append((session_id, event))
+
+    monkeypatch.setattr(
+        "openbase_coder_cli.mcp.session_manager._broadcast",
+        fake_broadcast,
+    )
+    active_thread = {
+        "thread": _thread(
+            "thr-1",
+            str(project_dir),
+            status="active",
+            turns=[
+                _turn(
+                    "turn-2",
+                    message="Queued prompt",
+                    output="",
+                    started_at=20,
+                    completed_at=None,
+                    status="inProgress",
+                )
+            ],
+        )
+    }
+    client = FakeSuperAgentsClient({"read_thread": [active_thread]})
+    manager = _manager(client)
+
+    asyncio.run(
+        manager._handle_client_event(
+            "turn/started",
+            {"threadId": "thr-1", "turn": {"id": "turn-2", "startedAt": 20}},
+        )
+    )
+
+    assert [event["type"] for _, event in events] == ["turn_started", "thread_state"]
+    assert events[0][1]["data"]["turn_id"] == "turn-2"
+    assert events[0][1]["data"]["prompt"] == "Queued prompt"
+    assert events[1][1]["data"]["current_turn"]["turn_id"] == "turn-2"
+
+
 def test_interrupt_turn_uses_active_turn_id(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -1553,3 +1959,75 @@ def test_turn_failed_broadcasts_error_envelope(monkeypatch, tmp_path: Path) -> N
         }
     ]
     assert [event["type"] for _sid, event in events].count("turn_completed") == 1
+
+
+def test_agent_message_item_boundaries_are_preserved_in_live_output(
+    monkeypatch,
+) -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    async def fake_broadcast(session_id: str, event: dict[str, Any]) -> None:
+        events.append((session_id, event))
+
+    monkeypatch.setattr(
+        "openbase_coder_cli.mcp.session_manager._broadcast",
+        fake_broadcast,
+    )
+    manager = _manager(FakeSuperAgentsClient({}))
+
+    async def check() -> None:
+        await manager._handle_client_event(
+            "item/agentMessage/delta",
+            {
+                "threadId": "thr-1",
+                "turnId": "turn-1",
+                "itemId": "item-1",
+                "delta": "plus console.",
+            },
+        )
+        await manager._handle_client_event(
+            "item/completed",
+            {
+                "threadId": "thr-1",
+                "turnId": "turn-1",
+                "item": {
+                    "id": "item-1",
+                    "type": "agentMessage",
+                    "text": "plus console.",
+                },
+            },
+        )
+        await manager._handle_client_event(
+            "item/agentMessage/delta",
+            {
+                "threadId": "thr-1",
+                "turnId": "turn-1",
+                "itemId": "item-2",
+                "delta": "The new agent is Cindy. ",
+            },
+        )
+        await manager._handle_client_event(
+            "item/completed",
+            {
+                "threadId": "thr-1",
+                "turnId": "turn-1",
+                "item": {
+                    "id": "item-2",
+                    "type": "agentMessage",
+                    "text": "The new agent is Cindy. I'm starting her now.",
+                },
+            },
+        )
+
+    asyncio.run(check())
+
+    output_lines = [
+        event["data"]["line"]
+        for _session_id, event in events
+        if event["type"] == "output_update"
+    ]
+    assert output_lines == [
+        "plus console.",
+        "\n\nThe new agent is Cindy. ",
+        "I'm starting her now.",
+    ]

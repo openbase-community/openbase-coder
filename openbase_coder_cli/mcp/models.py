@@ -19,6 +19,25 @@ class ThreadStatus(str, Enum):
     error = "error"
 
 
+class TurnSteerInfo(BaseModel):
+    """A user steering message sent to an in-progress turn."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    text: str
+    created_at: datetime | None = None
+
+
+class QueuedTurnInfo(BaseModel):
+    """A user prompt queued to run after the active turn completes."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    queue_id: str | None = None
+    prompt: str
+    queued_at: datetime | None = None
+
+
 class TurnInfo(BaseModel):
     """Information about a single turn within a thread."""
 
@@ -33,6 +52,7 @@ class TurnInfo(BaseModel):
     return_code: int | None = None
     message: str = Field(default="", serialization_alias="prompt")
     reasoning_effort: str | None = None
+    steers: list[TurnSteerInfo] = Field(default_factory=list)
 
 
 class ThreadInfo(BaseModel):
@@ -61,6 +81,7 @@ class ThreadInfo(BaseModel):
         default_factory=list,
         serialization_alias="turn_history",
     )
+    queued_turns: list[QueuedTurnInfo] = Field(default_factory=list)
 
     @computed_field
     @property

@@ -18,6 +18,7 @@ from openbase_coder_cli.livekit_agent.config import (
 from openbase_coder_cli.livekit_agent.spoken_commands import (
     _is_exit_to_dispatch_command,
 )
+from openbase_coder_cli.onboarding_reminder import append_onboarding_reminder
 from openbase_coder_cli.voice_tags import wrap_voice_prompt
 
 if TYPE_CHECKING:
@@ -85,13 +86,19 @@ class CodexLLMStream(llm.LLMStream):
             self._emit_delta("Back to dispatch.")
             return
 
+        # Wrap the verbatim speech first so appended system notes stay
+        # outside the <voice> tags (only direct speech may appear inside).
+        prompt = wrap_voice_prompt(prompt)
+        if self._voice_router.is_dispatcher_active:
+            prompt = append_onboarding_reminder(prompt)
+
         ack_task: asyncio.Task[None] | None = None
         if LIVEKIT_CODEX_ACK_DELAY_SECONDS > 0 and LIVEKIT_CODEX_ACK_MESSAGE:
             ack_task = asyncio.create_task(self._emit_ack_after_delay())
 
         try:
             voice_client = self._voice_router.active_client
-            result = await voice_client.run_turn(wrap_voice_prompt(prompt))
+            result = await voice_client.run_turn(prompt)
         finally:
             if ack_task is not None:
                 ack_task.cancel()

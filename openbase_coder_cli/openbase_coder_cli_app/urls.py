@@ -93,6 +93,7 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     stt_settings,
     tag_options,
     thread_activity,
+    thread_active_voice,
     thread_detail,
     thread_device_sync_conflict_resolve,
     thread_device_sync_conflicts,
@@ -101,7 +102,9 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     thread_favorite,
     thread_interrupt,
     thread_list,
+    thread_queue_turn,
     thread_start_turn,
+    thread_steer_turn,
     thread_sync_conflicts,
     thread_tags,
     tts_settings,
@@ -134,6 +137,7 @@ urlpatterns = [
     path("update/apply/", update_apply, name="update-apply"),
     path("threads/", thread_list, name="thread-list"),
     path("threads/activity/", thread_activity, name="thread-activity"),
+    path("threads/active-voice/", thread_active_voice, name="thread-active-voice"),
     path("threads/dispatcher/", thread_dispatcher, name="thread-dispatcher"),
     path("threads/<str:thread_id>/", thread_detail, name="thread-detail"),
     path(
@@ -152,6 +156,16 @@ urlpatterns = [
         name="thread-interrupt",
     ),
     path("threads/<str:thread_id>/turns/", thread_start_turn, name="thread-start-turn"),
+    path(
+        "threads/<str:thread_id>/turns/queue/",
+        thread_queue_turn,
+        name="thread-queue-turn",
+    ),
+    path(
+        "threads/<str:thread_id>/turns/steer/",
+        thread_steer_turn,
+        name="thread-steer-turn",
+    ),
     path("approval-requests/", approval_requests, name="approval-requests"),
     path(
         "approval-requests/<str:request_id>/",

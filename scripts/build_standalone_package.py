@@ -420,6 +420,7 @@ def validate_package(package_dir: Path, version: str) -> None:
     _validate_no_external_python_links(package_dir)
     _validate_no_host_macos_library_links(package_dir)
     _validate_relocatable_bin_shebangs(package_dir)
+    _validate_no_build_path_shebangs(package_dir)
     subprocess.run(
         [str(package_dir / "python" / "bin" / "pip"), "--version"],
         check=True,
@@ -487,6 +488,32 @@ def _uv_managed_python(version: str) -> Path | None:
         return None
     path = Path(result.stdout.strip())
     return path if path.is_file() else None
+
+
+def _validate_no_build_path_shebangs(package_dir: Path) -> None:
+    """Fail the build if any script hardcodes the build-time package directory.
+
+    ``bin/openbase-coder`` is a hand-written relocatable launcher, so the CLI
+    smoke test in validate_package() passes even when every pip-generated
+    console script in python/bin is broken. Check them directly.
+    """
+    for path in sorted((package_dir / "python" / "bin").iterdir()):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if not text.startswith("#!"):
+            continue
+        # Check the exec line too: the sh-wrapper form pip emits for paths
+        # containing spaces keeps the absolute interpreter path on line 2.
+        for line in text.split("\n", 2)[:2]:
+            if str(package_dir) in line:
+                raise RuntimeError(
+                    "Package validation failed; script has a non-relocatable "
+                    f"build-path reference: {path} -> {line.strip()}"
+                )
 
 
 def _validate_no_external_python_links(package_dir: Path) -> None:

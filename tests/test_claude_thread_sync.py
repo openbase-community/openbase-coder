@@ -82,6 +82,7 @@ def test_sync_claude_threads_once_transfers_normal_session_and_backfills_openbas
         ledger_path=tmp_path / "ledger.json",
         super_agents_db_path=db_path,
         stability_delay_seconds=0,
+        max_age_days=None,
     )
 
     assert results[0].status == "transferred"
@@ -133,6 +134,7 @@ def test_sync_claude_threads_once_transfers_openbase_session_to_normal(
         ledger_path=tmp_path / "ledger.json",
         super_agents_db_path=tmp_path / "state.sqlite3",
         stability_delay_seconds=0,
+        max_age_days=None,
     )
 
     assert results[0].status == "transferred"
@@ -161,6 +163,7 @@ def test_sync_claude_threads_once_copies_session_companion_files(tmp_path: Path)
         ledger_path=tmp_path / "ledger.json",
         super_agents_db_path=tmp_path / "state.sqlite3",
         stability_delay_seconds=0,
+        max_age_days=None,
     )
 
     assert results[0].status == "transferred"
@@ -192,6 +195,7 @@ def test_sync_claude_threads_once_skips_symlinked_companion_files(
         ledger_path=tmp_path / "ledger.json",
         super_agents_db_path=tmp_path / "state.sqlite3",
         stability_delay_seconds=0,
+        max_age_days=None,
     )
 
     assert results[0].status == "transferred"
@@ -213,6 +217,7 @@ def test_sync_claude_threads_once_marks_same_content_synced(tmp_path: Path) -> N
         ledger_path=tmp_path / "ledger.json",
         super_agents_db_path=tmp_path / "state.sqlite3",
         stability_delay_seconds=0,
+        max_age_days=None,
     )
 
     assert results[0].status == "already_synced"
@@ -248,6 +253,7 @@ def test_sync_claude_threads_once_repairs_append_only_prefix_conflict(
         ledger_path=tmp_path / "ledger.json",
         super_agents_db_path=tmp_path / "state.sqlite3",
         stability_delay_seconds=0,
+        max_age_days=None,
     )
 
     assert results[0].status == "transferred"
@@ -270,6 +276,7 @@ def test_sync_claude_threads_once_marks_divergent_sessions_conflicted(
         ledger_path=tmp_path / "ledger.json",
         super_agents_db_path=tmp_path / "state.sqlite3",
         stability_delay_seconds=0,
+        max_age_days=None,
     )
 
     assert results[0].status == "conflict"
@@ -346,6 +353,7 @@ def test_sync_claude_threads_once_skips_active_backend_session(tmp_path: Path) -
         ledger_path=tmp_path / "ledger.json",
         super_agents_db_path=db_path,
         stability_delay_seconds=0,
+        max_age_days=None,
     )
 
     assert results[0].status == "skipped"
@@ -402,6 +410,7 @@ def test_sync_claude_threads_once_does_not_treat_idle_waiting_session_as_active(
         ledger_path=tmp_path / "ledger.json",
         super_agents_db_path=db_path,
         stability_delay_seconds=0,
+        max_age_days=None,
     )
 
     assert results[0].status == "transferred"
@@ -465,6 +474,7 @@ def test_backfill_preserves_custom_observed_state_while_updating_latest_message(
         ledger_path=tmp_path / "ledger.json",
         super_agents_db_path=db_path,
         stability_delay_seconds=0,
+        max_age_days=None,
     )
 
     assert results[0].status == "transferred"
@@ -687,6 +697,7 @@ def test_claude_thread_sync_smoke_local_and_cross_device(tmp_path: Path) -> None
         ledger_path=tmp_path / "local-ledger.json",
         super_agents_db_path=tmp_path / "source-state.sqlite3",
         stability_delay_seconds=0,
+        max_age_days=None,
     )
     device_result = sync_claude_thread_snapshots_once(
         openbase_home=source_openbase_home,
