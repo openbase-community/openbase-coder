@@ -128,7 +128,6 @@ from openbase_coder_cli.openbase_coder_cli_app.threads import (
 )
 from openbase_coder_cli.paths import (
     CODEX_AGENTS_MD_PATH,
-    CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
     CODEX_DISPATCHER_INSTRUCTIONS_PATH,
     CODEX_HOME_DIR,
     CODEX_SUPER_AGENT_INSTRUCTIONS_PATH,
@@ -142,9 +141,6 @@ from openbase_coder_cli.paths import (
 
 def _sync_agents_md_compat_globals() -> None:
     _agents_md.CODEX_AGENTS_MD_PATH = CODEX_AGENTS_MD_PATH
-    _agents_md.CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH = (
-        CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH
-    )
     _agents_md.CODEX_DISPATCHER_INSTRUCTIONS_PATH = CODEX_DISPATCHER_INSTRUCTIONS_PATH
     _agents_md.CODEX_HOME_DIR = CODEX_HOME_DIR
     _agents_md.CODEX_SUPER_AGENT_INSTRUCTIONS_PATH = CODEX_SUPER_AGENT_INSTRUCTIONS_PATH

@@ -122,21 +122,21 @@ def test_ensure_rendered_instruction_file_updates_managed_template(
 def test_ensure_rendered_instruction_file_records_template_source(
     tmp_path,
 ) -> None:
-    source = tmp_path / "instructions" / "VOICE_INSTRUCTIONS.md"
-    target = tmp_path / "openbase" / "instructions" / "VOICE_INSTRUCTIONS.md"
+    source = tmp_path / "instructions" / "DISPATCHER_INSTRUCTIONS.md"
+    target = tmp_path / "openbase" / "instructions" / "DISPATCHER_INSTRUCTIONS.md"
     source.parent.mkdir(parents=True)
-    source.write_text("Voice instructions.\n", encoding="utf-8")
+    source.write_text("Dispatcher instructions.\n", encoding="utf-8")
 
     changed = codex_home_instructions.ensure_rendered_instruction_file(
         source,
         target,
-        document_label="Voice instructions",
+        document_label="Dispatcher instructions",
     )
 
     assert changed is True
     assert target.read_text(encoding="utf-8") == (
         f"<!-- Generated from {source}; edit the source template instead. -->\n\n"
-        "Voice instructions.\n"
+        "Dispatcher instructions.\n"
     )
 
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from rest_framework import serializers, status
@@ -13,7 +12,6 @@ from rest_framework.response import Response
 from openbase_coder_cli.mcp.session_manager import resolve_super_agent_instructions_path
 from openbase_coder_cli.paths import (
     CODEX_AGENTS_MD_PATH,
-    CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
     CODEX_DISPATCHER_INSTRUCTIONS_PATH,
     CODEX_HOME_DIR,
     CODEX_SUPER_AGENT_INSTRUCTIONS_PATH,
@@ -34,7 +32,6 @@ class AgentsMdSerializer(serializers.Serializer):
             "normal",
             "claude",
             "super_agent",
-            "direct_livekit",
             "dispatcher",
         ],
         default="voice",
@@ -45,12 +42,6 @@ class AgentsMdSerializer(serializers.Serializer):
 @api_view(["GET", "PUT"])
 def agents_md(request):
     """Read or write Codex home AGENTS.md files."""
-    direct_livekit_path = Path(
-        os.environ.get(
-            "LIVEKIT_DIRECT_CODEX_DEVELOPER_INSTRUCTIONS_PATH",
-            str(CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH),
-        )
-    ).expanduser()
     dispatcher_path = CODEX_DISPATCHER_INSTRUCTIONS_PATH
     super_agent_path = Path(
         resolve_super_agent_instructions_path(
@@ -78,13 +69,6 @@ def agents_md(request):
             "description": "Affects regular non-voice Codex sessions that use the standard Codex home directory.",
             "path": NORMAL_CODEX_AGENTS_MD_PATH,
             "codex_home": NORMAL_CODEX_HOME_DIR,
-        },
-        "direct_livekit": {
-            "id": "direct_livekit",
-            "label": "Direct voice session instructions",
-            "description": "Affects agent threads that are directly connected to a LiveKit voice session after a voice transfer.",
-            "path": direct_livekit_path,
-            "codex_home": CODEX_HOME_DIR,
         },
         "super_agent": {
             "id": "super_agent",

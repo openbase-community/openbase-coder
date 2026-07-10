@@ -14,13 +14,9 @@ from openbase_coder_cli.livekit_voice_history import (
     record_voice_assignment,
 )
 from openbase_coder_cli.livekit_voice_route import (
-    DIRECT_LIVEKIT_BUILTIN_DEVELOPER_INSTRUCTIONS,
-    DIRECT_LIVEKIT_INSTRUCTIONS_PATH_ENV,
-    DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV,
     VOICE_ROUTE_TOPIC,
     clear_livekit_thread_state,
     get_livekit_voice_route_state,
-    load_direct_livekit_developer_instructions,
     prepare_livekit_dispatcher_recreation,
     publish_exit_to_dispatch,
     publish_transfer_to_thread,
@@ -92,21 +88,24 @@ class FakeSessionManager:
         self.fail = fail
         self.calls = []
 
-    async def resume_thread_with_developer_instructions(
+    async def resume_thread_without_developer_instructions(
         self,
         thread_id: str,
         directory: str,
-        developer_instructions: str,
     ) -> None:
-        self.calls.append((thread_id, directory, developer_instructions))
+        self.calls.append((thread_id, directory))
         if self.fail:
             raise RuntimeError("resume failed")
 
 
-def test_warm_livekit_dispatcher_uses_configured_super_agents_client(tmp_path: Path, monkeypatch):
+def test_warm_livekit_dispatcher_uses_configured_super_agents_client(
+    tmp_path: Path, monkeypatch
+):
     calls = []
     instruction_path = tmp_path / "dispatcher.md"
-    instruction_path.write_text("dispatcher says random fruit is persimmon\n", encoding="utf-8")
+    instruction_path.write_text(
+        "dispatcher says random fruit is persimmon\n", encoding="utf-8"
+    )
 
     class FakeSuperAgentsLiveKitClient:
         def __init__(self, **kwargs):
@@ -121,7 +120,9 @@ def test_warm_livekit_dispatcher_uses_configured_super_agents_client(tmp_path: P
 
     monkeypatch.setenv("LIVEKIT_CODEX_THREAD_CWD", str(tmp_path))
     monkeypatch.setenv("LIVEKIT_CODEX_THREAD_STATE_PATH", str(tmp_path / "route.json"))
-    monkeypatch.setattr(voice_route, "CODEX_DISPATCHER_INSTRUCTIONS_PATH", instruction_path)
+    monkeypatch.setattr(
+        voice_route, "CODEX_DISPATCHER_INSTRUCTIONS_PATH", instruction_path
+    )
 
     from openbase_coder_cli.livekit_agent import super_agents_client
 
@@ -138,7 +139,10 @@ def test_warm_livekit_dispatcher_uses_configured_super_agents_client(tmp_path: P
     init_kwargs = calls[0][1]
     assert init_kwargs["cwd"] == str(tmp_path)
     assert init_kwargs["state_path"] == str(tmp_path / "route.json")
-    assert init_kwargs["developer_instructions"] == "dispatcher says random fruit is persimmon"
+    assert (
+        init_kwargs["developer_instructions"]
+        == "dispatcher says random fruit is persimmon"
+    )
     assert calls[1:] == [("prepare", {}), ("close", {})]
 
 
@@ -171,8 +175,7 @@ def test_kokoro_super_agent_voices_are_english_only(monkeypatch):
     assert "jf_tebukuro" not in {voice.voice_id for voice in voices}
     assert "zm_yunjian" not in {voice.voice_id for voice in voices}
     assert (
-        super_agent_voice_id_for_context("thread-1", "Build", "Yunjian")
-        != "zm_yunjian"
+        super_agent_voice_id_for_context("thread-1", "Build", "Yunjian") != "zm_yunjian"
     )
 
 
@@ -194,16 +197,18 @@ def test_super_agent_voice_context_prefers_agent_name(monkeypatch):
         voice_route, "SUPER_AGENT_VOICE_IDS", ("voice-carl", "voice-dottie")
     )
 
-    assert super_agent_voice_id_for_context("thread-1", "Build", "Dottie") == "voice-dottie"
     assert (
-        super_agent_voice_id_for_context("thread-1", "Build", "Unknown")
-        == stable_super_agent_voice_id("thread-1", "Build")
-    )
-    assert super_agent_voice_id_for_context("thread-1", "Build", "dottie") == "voice-dottie"
-    assert (
-        super_agent_voice_id_for_context(None, None, "Dottie")
+        super_agent_voice_id_for_context("thread-1", "Build", "Dottie")
         == "voice-dottie"
     )
+    assert super_agent_voice_id_for_context(
+        "thread-1", "Build", "Unknown"
+    ) == stable_super_agent_voice_id("thread-1", "Build")
+    assert (
+        super_agent_voice_id_for_context("thread-1", "Build", "dottie")
+        == "voice-dottie"
+    )
+    assert super_agent_voice_id_for_context(None, None, "Dottie") == "voice-dottie"
 
 
 def test_super_agent_voice_context_can_use_catalog_name(monkeypatch):
@@ -304,61 +309,12 @@ def test_prepare_livekit_dispatcher_recreation_resets_dispatcher_route(
     assert state.active_route == "dispatcher"
 
 
-def test_direct_livekit_instruction_loader_priority(tmp_path: Path):
-    explicit = tmp_path / "explicit.md"
-    default = tmp_path / "default.md"
-    explicit.write_text("explicit file instructions\n", encoding="utf-8")
-    default.write_text("default file instructions\n", encoding="utf-8")
-
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={
-                DIRECT_LIVEKIT_INSTRUCTIONS_PATH_ENV: str(explicit),
-                DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV: "env text instructions",
-            },
-            default_path=default,
-        )
-        == "explicit file instructions"
-    )
-
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV: "env text instructions"},
-            default_path=default,
-        )
-        == "default file instructions"
-    )
-
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV: "env text instructions"},
-            default_path=tmp_path / "missing.md",
-        )
-        == "env text instructions"
-    )
-
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={},
-            default_path=tmp_path / "missing.md",
-        )
-        == DIRECT_LIVEKIT_BUILTIN_DEVELOPER_INSTRUCTIONS
-    )
-
-
 def test_transfer_to_thread_prepares_then_publishes(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("OPENBASE_CODER_CLI_DATA_DIR", str(tmp_path))
-    voice_instructions_path = tmp_path / "VOICE_INSTRUCTIONS.md"
-    voice_instructions_path.write_text("direct voice instructions\n", encoding="utf-8")
     monkeypatch.setattr(
         voice_route,
         "selected_tts_provider_id",
         lambda: voice_route.CARTESIA_PROVIDER_ID,
-    )
-    monkeypatch.setattr(
-        voice_route,
-        "CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH",
-        voice_instructions_path,
     )
     monkeypatch.setattr(
         voice_route,
@@ -390,7 +346,7 @@ def test_transfer_to_thread_prepares_then_publishes(tmp_path: Path, monkeypatch)
     )
 
     assert result.state.active_target_thread_id == "target-1"
-    assert manager.calls == [("target-1", "/tmp/project", "direct voice instructions")]
+    assert manager.calls == [("target-1", "/tmp/project")]
     sent = client.room.sent[0]
     payload = json.loads(sent.data.decode("utf-8"))
     assert payload["action"] == "transfer_to_thread"

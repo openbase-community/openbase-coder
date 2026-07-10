@@ -9,7 +9,6 @@ from openbase_coder_cli.instruction_templates import (
     text_matches_instruction_template,
 )
 from openbase_coder_cli.paths import (
-    CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
     CODEX_DISPATCHER_INSTRUCTIONS_PATH,
     CODEX_HOME_DIR,
     CODEX_SUPER_AGENT_INSTRUCTIONS_PATH,
@@ -22,7 +21,6 @@ from openbase_coder_cli.services.installation import InstallationConfig
 CODEX_HOME_DEFAULT_SOURCE_DIR = "instructions"
 MANAGED_AGENTS_HEADING = "## Openbase Coder Instructions"
 OPENBASE_DEFAULT_INSTRUCTION_FILES = (
-    ("VOICE_INSTRUCTIONS.md", CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH),
     ("DISPATCHER_INSTRUCTIONS.md", CODEX_DISPATCHER_INSTRUCTIONS_PATH),
     ("SUPER_AGENT_INSTRUCTIONS.md", CODEX_SUPER_AGENT_INSTRUCTIONS_PATH),
 )
@@ -61,10 +59,7 @@ def refresh_openbase_instruction_files_from_installation(
             codex_home_dir=CODEX_HOME_DIR,
             report=report,
         )
-        changed = (
-            ensure_openbase_claude_md_symlink(report=report)
-            or changed
-        )
+        changed = ensure_openbase_claude_md_symlink(report=report) or changed
         for resource_name, target_path in OPENBASE_DEFAULT_INSTRUCTION_FILES:
             changed = (
                 ensure_rendered_instruction_file(
@@ -188,11 +183,15 @@ def _generated_agents_md(
     include_normal_codex_agents: bool,
 ) -> str:
     sections: list[str] = []
-    normal_agents = _normal_codex_agents_section(source_path) if include_normal_codex_agents else ""
+    normal_agents = (
+        _normal_codex_agents_section(source_path) if include_normal_codex_agents else ""
+    )
     if normal_agents:
         sections.append(normal_agents)
     sections.append(_managed_agents_md_section(source_text, source_path))
-    return "\n\n".join(section.rstrip() for section in sections if section.strip()) + "\n"
+    return (
+        "\n\n".join(section.rstrip() for section in sections if section.strip()) + "\n"
+    )
 
 
 def _normal_codex_agents_section(openbase_source_path: Path) -> str:
@@ -254,7 +253,8 @@ def ensure_rendered_instruction_file(
             return False
         if not force and (
             existing != rendered
-            and existing != _rendered_instruction_file(source_text, source_path, render=False)
+            and existing
+            != _rendered_instruction_file(source_text, source_path, render=False)
             and not text_matches_instruction_template(
                 _without_generated_instruction_header(existing),
                 source_text,

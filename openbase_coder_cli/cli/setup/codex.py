@@ -16,7 +16,6 @@ from openbase_coder_cli.codex_home_instructions import (
     ensure_rendered_instruction_file,
 )
 from openbase_coder_cli.paths import (
-    CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
     CODEX_DISPATCHER_INSTRUCTIONS_PATH,
     CODEX_HOME_DIR,
     CODEX_SUPER_AGENT_INSTRUCTIONS_PATH,
@@ -34,7 +33,6 @@ from openbase_coder_cli.toml_text import replace_toml_table
 CODEX_HOME_DEFAULT_SOURCE_DIR = "instructions"
 CODEX_HOME_SKILLS_SOURCE_DIR = "skills"
 CODEX_HOME_DEFAULT_FILES = (
-    ("VOICE_INSTRUCTIONS.md", CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH),
     ("DISPATCHER_INSTRUCTIONS.md", CODEX_DISPATCHER_INSTRUCTIONS_PATH),
     ("SUPER_AGENT_INSTRUCTIONS.md", CODEX_SUPER_AGENT_INSTRUCTIONS_PATH),
 )
@@ -108,7 +106,6 @@ def _ensure_codex_home_default_files(workspace_dir: str) -> None:
             document_label=f"Openbase instruction {resource_name}",
             report=click.echo,
         )
-
 
 
 def _ensure_matching_symlink_or_file(

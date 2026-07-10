@@ -29,14 +29,12 @@ def test_agents_md_lists_all_instruction_targets(tmp_path: Path, monkeypatch) ->
     voice_agents = voice_home / "AGENTS.md"
     normal_agents = normal_home / "AGENTS.md"
     claude_md = claude_config / "CLAUDE.md"
-    direct_instructions = voice_home / "VOICE_INSTRUCTIONS.md"
     dispatcher_instructions = voice_home / "DISPATCHER_INSTRUCTIONS.md"
     super_agent_instructions = voice_home / "SUPER_AGENT_INSTRUCTIONS.md"
     voice_home.mkdir(parents=True)
     claude_config.mkdir(parents=True)
     voice_agents.write_text("voice instructions", encoding="utf-8")
     claude_md.write_text("claude instructions", encoding="utf-8")
-    direct_instructions.write_text("direct instructions", encoding="utf-8")
     super_agent_instructions.write_text("super instructions", encoding="utf-8")
 
     monkeypatch.setattr(views, "CODEX_HOME_DIR", voice_home)
@@ -46,16 +44,10 @@ def test_agents_md_lists_all_instruction_targets(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr(views, "OPENBASE_CLAUDE_CONFIG_DIR", claude_config)
     monkeypatch.setattr(views, "OPENBASE_CLAUDE_MD_PATH", claude_md)
     monkeypatch.setattr(
-        views, "CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH", direct_instructions
-    )
-    monkeypatch.setattr(
         views, "CODEX_DISPATCHER_INSTRUCTIONS_PATH", dispatcher_instructions
     )
     monkeypatch.setattr(
         views, "CODEX_SUPER_AGENT_INSTRUCTIONS_PATH", super_agent_instructions
-    )
-    monkeypatch.delenv(
-        "LIVEKIT_DIRECT_CODEX_DEVELOPER_INSTRUCTIONS_PATH", raising=False
     )
     monkeypatch.delenv("CODEX_SUPER_AGENT_INSTRUCTIONS_PATH", raising=False)
 
@@ -71,7 +63,6 @@ def test_agents_md_lists_all_instruction_targets(tmp_path: Path, monkeypatch) ->
         "voice",
         "claude",
         "normal",
-        "direct_livekit",
         "super_agent",
         "dispatcher",
     ]
@@ -83,8 +74,6 @@ def test_agents_md_lists_all_instruction_targets(tmp_path: Path, monkeypatch) ->
     assert documents["claude"]["content"] == "claude instructions"
     assert documents["claude"]["exists"] is True
     assert documents["claude"]["path"] == str(claude_md)
-    assert documents["direct_livekit"]["content"] == "direct instructions"
-    assert documents["direct_livekit"]["exists"] is True
     assert documents["super_agent"]["label"] == "Super Agent instructions"
     assert documents["super_agent"]["content"] == "super instructions"
     assert documents["super_agent"]["exists"] is True
@@ -112,18 +101,10 @@ def test_agents_md_lists_super_agent_target_when_file_is_absent(
         views, "NORMAL_CODEX_AGENTS_MD_PATH", tmp_path / "codex" / "AGENTS.md"
     )
     monkeypatch.setattr(
-        views,
-        "CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH",
-        voice_home / "VOICE_INSTRUCTIONS.md",
-    )
-    monkeypatch.setattr(
         views, "CODEX_DISPATCHER_INSTRUCTIONS_PATH", voice_home / "dispatcher.md"
     )
     monkeypatch.setattr(
         views, "CODEX_SUPER_AGENT_INSTRUCTIONS_PATH", super_agent_instructions
-    )
-    monkeypatch.delenv(
-        "LIVEKIT_DIRECT_CODEX_DEVELOPER_INSTRUCTIONS_PATH", raising=False
     )
     monkeypatch.delenv("CODEX_SUPER_AGENT_INSTRUCTIONS_PATH", raising=False)
 
@@ -153,7 +134,6 @@ def test_agents_md_put_creates_normal_codex_home_file(
     normal_home = tmp_path / "codex"
     voice_agents = voice_home / "AGENTS.md"
     normal_agents = normal_home / "AGENTS.md"
-    direct_instructions = voice_home / "VOICE_INSTRUCTIONS.md"
     dispatcher_instructions = voice_home / "DISPATCHER_INSTRUCTIONS.md"
     super_agent_instructions = voice_home / "SUPER_AGENT_INSTRUCTIONS.md"
 
@@ -162,16 +142,10 @@ def test_agents_md_put_creates_normal_codex_home_file(
     monkeypatch.setattr(views, "NORMAL_CODEX_HOME_DIR", normal_home)
     monkeypatch.setattr(views, "NORMAL_CODEX_AGENTS_MD_PATH", normal_agents)
     monkeypatch.setattr(
-        views, "CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH", direct_instructions
-    )
-    monkeypatch.setattr(
         views, "CODEX_DISPATCHER_INSTRUCTIONS_PATH", dispatcher_instructions
     )
     monkeypatch.setattr(
         views, "CODEX_SUPER_AGENT_INSTRUCTIONS_PATH", super_agent_instructions
-    )
-    monkeypatch.delenv(
-        "LIVEKIT_DIRECT_CODEX_DEVELOPER_INSTRUCTIONS_PATH", raising=False
     )
     monkeypatch.delenv("CODEX_SUPER_AGENT_INSTRUCTIONS_PATH", raising=False)
 

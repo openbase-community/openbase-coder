@@ -26,10 +26,7 @@ from openbase_coder_cli.livekit_voice_history import (
     get_voice_history_entry,
     record_voice_assignment,
 )
-from openbase_coder_cli.paths import (
-    CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
-    CODEX_DISPATCHER_INSTRUCTIONS_PATH,
-)
+from openbase_coder_cli.paths import CODEX_DISPATCHER_INSTRUCTIONS_PATH
 from openbase_coder_cli.tts_providers import (
     CARTESIA_PROVIDER_ID,
     DEFAULT_CARTESIA_ANNOUNCER_VOICE_ID,
@@ -45,21 +42,6 @@ CARTESIA_ANNOUNCER_VOICE_ID = os.getenv(
     "CARTESIA_ANNOUNCER_VOICE_ID", DEFAULT_CARTESIA_ANNOUNCER_VOICE_ID
 )
 
-DIRECT_LIVEKIT_INSTRUCTIONS_PATH_ENV = (
-    "LIVEKIT_DIRECT_CODEX_DEVELOPER_INSTRUCTIONS_PATH"
-)
-DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV = "LIVEKIT_DIRECT_CODEX_DEVELOPER_INSTRUCTIONS"
-DIRECT_LIVEKIT_BUILTIN_DEVELOPER_INSTRUCTIONS = """
-You are receiving direct user speech from a LiveKit voice session.
-Keep final spoken responses concise and directly useful.
-Do not read code, logs, stack traces, JSON, diffs, or long file paths aloud unless explicitly asked.
-When code or logs matter, summarize their practical meaning in plain English.
-If transcription is unclear, ask the user to confirm the intended request before acting.
-When the user asks to return to dispatch, or you need to hand the voice session
-back to dispatch, run:
-openbase-coder exit-to-dispatch
-Do not assume dispatcher responsibilities, delegation policy, or Super Agents coordination rules from these instructions.
-""".strip()
 DISPATCHER_BUILTIN_DEVELOPER_INSTRUCTIONS = """
 You are the Openbase Coder LiveKit dispatcher for a private voice session.
 Route voice sessions when the user asks to speak with an agent.
@@ -227,42 +209,18 @@ def _normalize_voice_name(value: str | None) -> str:
     return " ".join(value.casefold().split())
 
 
-def load_direct_livekit_developer_instructions(
-    *,
-    env: dict[str, str] | None = None,
-    default_path: Path | None = None,
-) -> str:
-    values = env if env is not None else os.environ
-    explicit_path = values.get(DIRECT_LIVEKIT_INSTRUCTIONS_PATH_ENV, "").strip()
-    if explicit_path:
-        loaded = _read_instruction_file(Path(explicit_path).expanduser())
-        if loaded:
-            return loaded
-
-    loaded = _read_instruction_file(
-        default_path or CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH
-    )
-    if loaded:
-        return loaded
-
-    text = values.get(DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV, "").strip()
-    if text:
-        return text
-
-    return DIRECT_LIVEKIT_BUILTIN_DEVELOPER_INSTRUCTIONS
-
-
 async def prepare_target_thread_for_direct_livekit(
     *,
     thread_id: str,
     directory: str,
 ) -> None:
+    # Voice etiquette comes from the <voice> tag convention plus the
+    # responding-to-voice-tag skill, not injected developer instructions.
     from openbase_coder_cli.mcp.session_manager import get_session_manager
 
-    await get_session_manager().resume_thread_with_developer_instructions(
+    await get_session_manager().resume_thread_without_developer_instructions(
         thread_id,
         directory,
-        load_direct_livekit_developer_instructions(),
     )
 
 
@@ -578,7 +536,11 @@ def _current_super_agent_voice_for_id(voice_id: str | None) -> CartesiaVoice | N
     if not voice_id:
         return None
     return next(
-        (voice for voice in _current_super_agent_voices() if voice.voice_id == voice_id),
+        (
+            voice
+            for voice in _current_super_agent_voices()
+            if voice.voice_id == voice_id
+        ),
         None,
     )
 

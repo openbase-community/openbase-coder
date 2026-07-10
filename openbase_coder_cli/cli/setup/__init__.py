@@ -137,7 +137,6 @@ from openbase_coder_cli.dispatcher_config import (
     set_dispatcher_service_tier,
 )
 from openbase_coder_cli.paths import (
-    CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,  # noqa: F401
     CODEX_DISPATCHER_CONFIG_PATH,  # noqa: F401
     CODEX_DISPATCHER_INSTRUCTIONS_PATH,  # noqa: F401
     CODEX_HOME_DIR,  # noqa: F401

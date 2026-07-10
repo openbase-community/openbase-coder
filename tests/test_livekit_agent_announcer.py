@@ -15,9 +15,6 @@ from openbase_coder_cli.livekit_agent.livekit import (
     ANNOUNCER_AUDIO_KIND,
     ANNOUNCER_TOPIC,
     DEFAULT_CARTESIA_TTS_VOLUME,
-    DIRECT_LIVEKIT_BUILTIN_DEVELOPER_INSTRUCTIONS,
-    DIRECT_LIVEKIT_INSTRUCTIONS_PATH_ENV,
-    DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV,
     EXIT_TO_DISPATCH_PHRASE,
     VOICE_ROUTE_TOPIC,
     AnnouncerAudioMessage,
@@ -30,7 +27,6 @@ from openbase_coder_cli.livekit_agent.livekit import (
     _is_exit_to_dispatch_command,
     _normalize_spoken_command,
     cartesia,
-    load_direct_livekit_developer_instructions,
     parse_announcer_audio_packet,
     parse_announcer_packet,
     parse_voice_route_packet,
@@ -485,45 +481,6 @@ def test_exit_to_dispatch_command_accepts_short_variants(spoken):
 def test_exit_to_dispatch_command_rejects_embedded_variants():
     assert not _is_exit_to_dispatch_command("dispatch")
     assert not _is_exit_to_dispatch_command("please dispatch me")
-
-
-def test_direct_livekit_instruction_loader_priority(tmp_path):
-    explicit = tmp_path / "explicit.md"
-    default = tmp_path / "default.md"
-    explicit.write_text("explicit file instructions\n", encoding="utf-8")
-    default.write_text("default file instructions\n", encoding="utf-8")
-
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={
-                DIRECT_LIVEKIT_INSTRUCTIONS_PATH_ENV: str(explicit),
-                DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV: "env text instructions",
-            },
-            default_path=default,
-        )
-        == "explicit file instructions"
-    )
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV: "env text instructions"},
-            default_path=default,
-        )
-        == "default file instructions"
-    )
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV: "env text instructions"},
-            default_path=tmp_path / "missing.md",
-        )
-        == "env text instructions"
-    )
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={},
-            default_path=tmp_path / "missing.md",
-        )
-        == DIRECT_LIVEKIT_BUILTIN_DEVELOPER_INSTRUCTIONS
-    )
 
 
 def test_super_agent_voices_use_builtin_catalog_pool(monkeypatch):
@@ -1012,11 +969,6 @@ async def test_session_final_transcript_proactively_steers_when_logging_disabled
 async def test_voice_router_transfers_to_prepared_target(monkeypatch, tmp_path):
     dispatcher = PreparedClient()
     prepared = []
-    monkeypatch.setattr(
-        config,
-        "DEFAULT_DIRECT_LIVEKIT_INSTRUCTIONS_PATH",
-        tmp_path / "missing-direct-instructions.md",
-    )
     monkeypatch.setattr(
         voices,
         "SUPER_AGENT_VOICES",

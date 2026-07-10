@@ -94,11 +94,7 @@ from openbase_coder_cli.livekit_agent.config import (  # noqa: F401
     CARTESIA_ANNOUNCER_VOICE_ID,
     CARTESIA_VOICE_ID,
     CODEX_APP_SERVER_URL,
-    DEFAULT_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
     DEFAULT_LIVEKIT_DISPATCHER_CONFIG_PATH,
-    DIRECT_LIVEKIT_BUILTIN_DEVELOPER_INSTRUCTIONS,
-    DIRECT_LIVEKIT_INSTRUCTIONS_PATH_ENV,
-    DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV,
     DISPATCHER_BUILTIN_DEVELOPER_INSTRUCTIONS,
     LIVEKIT_AGENT_HOST,
     LIVEKIT_AGENT_LOAD_THRESHOLD_ENV,
@@ -129,7 +125,6 @@ from openbase_coder_cli.livekit_agent.config import (  # noqa: F401
     _optional_float_env,
     _optional_int_env,
     _read_instruction_file,
-    load_direct_livekit_developer_instructions,
 )
 from openbase_coder_cli.livekit_agent.logging_utils import (  # noqa: F401
     _event_text_hash,

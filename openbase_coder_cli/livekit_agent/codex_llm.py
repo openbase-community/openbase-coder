@@ -14,11 +14,11 @@ from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 from openbase_coder_cli.livekit_agent.config import (
     LIVEKIT_CODEX_ACK_DELAY_SECONDS,
     LIVEKIT_CODEX_ACK_MESSAGE,
-    load_direct_livekit_developer_instructions,
 )
 from openbase_coder_cli.livekit_agent.spoken_commands import (
     _is_exit_to_dispatch_command,
 )
+from openbase_coder_cli.voice_tags import wrap_voice_prompt
 
 if TYPE_CHECKING:
     from openbase_coder_cli.livekit_agent.voice_routing import LiveKitVoiceRouter
@@ -91,10 +91,7 @@ class CodexLLMStream(llm.LLMStream):
 
         try:
             voice_client = self._voice_router.active_client
-            result = await voice_client.run_turn(
-                prompt,
-                developer_instructions=load_direct_livekit_developer_instructions(),
-            )
+            result = await voice_client.run_turn(wrap_voice_prompt(prompt))
         finally:
             if ack_task is not None:
                 ack_task.cancel()

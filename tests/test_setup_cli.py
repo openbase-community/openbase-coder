@@ -29,7 +29,6 @@ def _patch_setup(monkeypatch, name, value):
             monkeypatch.setattr(module, name, value)
 
 
-
 def _patch_openbase_agent_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path]:
     codex_home = tmp_path / "codex_home"
     claude_config = tmp_path / "claude_config"
@@ -66,11 +65,6 @@ def _patch_openbase_agent_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path
         codex_home_instructions,
         "NORMAL_CODEX_AGENTS_MD_PATH",
         tmp_path / "normal_codex" / "AGENTS.md",
-    )
-    _patch_setup(
-        monkeypatch,
-        "CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH",
-        instructions / "VOICE_INSTRUCTIONS.md",
     )
     _patch_setup(
         monkeypatch,
@@ -125,9 +119,7 @@ def test_resolve_dev_workspace_dir_uses_recorded_installation(
     assert setup_cli.resolve_dev_workspace_dir(None) == str(workspace)
 
 
-def test_resolve_dev_workspace_dir_uses_editable_install(
-    tmp_path, monkeypatch
-) -> None:
+def test_resolve_dev_workspace_dir_uses_editable_install(tmp_path, monkeypatch) -> None:
     workspace = _make_workspace_checkout(tmp_path / "editable")
     from openbase_coder_cli.cli.setup import workspace as workspace_phase
 
@@ -177,7 +169,6 @@ def test_ensure_codex_home_default_files_links_missing_files(
     codex_home, _claude_config = _patch_openbase_agent_paths(monkeypatch, tmp_path)
     shared_instructions = tmp_path / "openbase" / "instructions"
     targets = (
-        ("VOICE_INSTRUCTIONS.md", shared_instructions / "VOICE_INSTRUCTIONS.md"),
         (
             "DISPATCHER_INSTRUCTIONS.md",
             shared_instructions / "DISPATCHER_INSTRUCTIONS.md",
@@ -248,12 +239,12 @@ def test_ensure_codex_home_default_files_preserves_custom_existing_files(
     codex_home, _claude_config = _patch_openbase_agent_paths(monkeypatch, tmp_path)
     shared_instructions = tmp_path / "openbase" / "instructions"
     existing_path = codex_home / "AGENTS.md"
-    missing_path = shared_instructions / "VOICE_INSTRUCTIONS.md"
+    missing_path = shared_instructions / "DISPATCHER_INSTRUCTIONS.md"
     existing_path.parent.mkdir(parents=True)
     existing_path.write_text("custom instructions\n", encoding="utf-8")
     (instructions / "AGENTS.md").write_text("default agents\n", encoding="utf-8")
-    (instructions / "VOICE_INSTRUCTIONS.md").write_text(
-        "default voice\n",
+    (instructions / "DISPATCHER_INSTRUCTIONS.md").write_text(
+        "default dispatcher\n",
         encoding="utf-8",
     )
     _patch_setup(
@@ -261,7 +252,7 @@ def test_ensure_codex_home_default_files_preserves_custom_existing_files(
         "CODEX_HOME_DEFAULT_FILES",
         (
             ("AGENTS.md", existing_path),
-            ("VOICE_INSTRUCTIONS.md", missing_path),
+            ("DISPATCHER_INSTRUCTIONS.md", missing_path),
         ),
     )
 
@@ -278,9 +269,9 @@ def test_ensure_codex_home_default_files_preserves_custom_existing_files(
     assert missing_path.is_file()
     assert not missing_path.is_symlink()
     assert missing_path.read_text(encoding="utf-8") == (
-        f"<!-- Generated from {instructions / 'VOICE_INSTRUCTIONS.md'}; "
+        f"<!-- Generated from {instructions / 'DISPATCHER_INSTRUCTIONS.md'}; "
         "edit the source template instead. -->\n\n"
-        "default voice\n"
+        "default dispatcher\n"
     )
 
 
@@ -1158,12 +1149,8 @@ def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
     (workspace / "multi.json").write_text("{}", encoding="utf-8")
     _patch_setup(monkeypatch, "ensure_backend_binary", lambda _backend: None)
     _patch_setup(monkeypatch, "_ensure_normal_codex_mcp", lambda _workspace_dir: None)
-    _patch_setup(
-        monkeypatch, "_ensure_normal_claude_mcp", lambda _workspace_dir: None
-    )
-    _patch_setup(
-        monkeypatch, "_ensure_claude_auth_bridge", lambda **_kwargs: None
-    )
+    _patch_setup(monkeypatch, "_ensure_normal_claude_mcp", lambda _workspace_dir: None)
+    _patch_setup(monkeypatch, "_ensure_claude_auth_bridge", lambda **_kwargs: None)
     _patch_setup(
         monkeypatch,
         "_ensure_thread_sync_exchange_dir",
