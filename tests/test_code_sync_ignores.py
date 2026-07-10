@@ -25,7 +25,13 @@ def test_render_stignore_contains_vcs_and_default_patterns() -> None:
         "(?d)target",
     ):
         assert pattern in content
-    for pattern in ("(?d).DS_Store", "(?d)*.sqlite3", "(?d).pytest_cache"):
+    for pattern in (
+        "(?d).DS_Store",
+        "(?d)*.sqlite3",
+        "(?d).pytest_cache",
+        "(?d).terraform",
+        "(?d).stversions",
+    ):
         assert pattern in content
     # Bare-name patterns (no `**/` prefix) so the folder root is covered too.
     assert "\n**/.jj" not in content

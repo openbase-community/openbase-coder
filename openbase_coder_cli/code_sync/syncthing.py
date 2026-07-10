@@ -344,3 +344,17 @@ class SyncthingClient:
     def rescan(self, folder_id: str | None = None) -> None:
         query = f"?folder={folder_id}" if folder_id else ""
         self._request("POST", f"/rest/db/scan{query}")
+
+    def latest_event_time(self, event_type: str) -> str | None:
+        """RFC3339 time of the most recent buffered event of a type, if any."""
+        events = (
+            self._request(
+                "GET",
+                f"/rest/events?events={event_type}&since=0&limit=1&timeout=0",
+            )
+            or []
+        )
+        if not isinstance(events, list) or not events:
+            return None
+        value = events[-1].get("time")
+        return value if isinstance(value, str) else None

@@ -28,7 +28,9 @@ for split work).
 
 from __future__ import annotations
 
+import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -72,7 +74,7 @@ def local_activity_recent(
     now: float | None = None,
     signal_files: tuple[Path, ...] = ACTIVITY_SIGNAL_FILES,
 ) -> bool:
-    """Whether this device had voice/agent activity in the last 15 minutes."""
+    """Whether this device had voice/agent/editing activity recently."""
     current = now if now is not None else time.time()
     for path in signal_files:
         try:
@@ -81,7 +83,31 @@ def local_activity_recent(
             continue
         if current - mtime <= ACTIVITY_WINDOW_SECONDS:
             return True
-    return False
+    return _local_file_edit_recent(current)
+
+
+def _local_file_edit_recent(now: float) -> bool:
+    """Local file edits inside managed folders, per Syncthing's own watcher.
+
+    Plain hand-editing leaves no voice/agent signal; without this the lease
+    would flip a machine receive-only under the user's hands. Syncthing only
+    emits LocalChangeDetected for locally-originated changes, so pulls from
+    peers never count as activity.
+    """
+    try:
+        stamp = SyncthingClient().latest_event_time("LocalChangeDetected")
+    except CodeSyncError:
+        return False
+    if not stamp:
+        return False
+    # Syncthing emits RFC3339 with nanoseconds; fromisoformat takes <= 6
+    # fractional digits.
+    normalized = re.sub(r"(\.\d{1,6})\d*", r"\1", stamp)
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return False
+    return now - parsed.timestamp() <= ACTIVITY_WINDOW_SECONDS
 
 
 def _peer_status(peer: SyncPeer, auth_header: str | None) -> dict[str, Any] | None:

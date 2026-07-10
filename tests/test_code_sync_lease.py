@@ -134,3 +134,41 @@ def test_unreachable_peer_holder_reclaims(monkeypatch, tmp_path: Path) -> None:
     assert summary["action"] == "reclaimed"
     folder_id = sync_config.folder_id_for_relpath("Projects/demo")
     assert applied == [(folder_id, "sendreceive")]
+
+
+def test_local_file_edit_signal_from_syncthing_events(monkeypatch) -> None:
+    import time as time_module
+
+    now = time_module.time()
+    stamp = (
+        __import__("datetime")
+        .datetime.fromtimestamp(now - 60)
+        .astimezone()
+        .isoformat()
+    )
+    # Simulate Syncthing's RFC3339-with-nanoseconds formatting.
+    stamp = stamp.replace("+", "123+") if "." in stamp else stamp
+
+    class FakeClient:
+        def latest_event_time(self, event_type):
+            assert event_type == "LocalChangeDetected"
+            return stamp
+
+    monkeypatch.setattr(lease, "SyncthingClient", FakeClient)
+    assert lease._local_file_edit_recent(now) is True
+
+    class StaleClient:
+        def latest_event_time(self, event_type):
+            return "2020-01-01T00:00:00.000000000-05:00"
+
+    monkeypatch.setattr(lease, "SyncthingClient", StaleClient)
+    assert lease._local_file_edit_recent(now) is False
+
+    class DownClient:
+        def __init__(self):
+            from openbase_coder_cli.code_sync import CodeSyncError
+
+            raise CodeSyncError("no api key")
+
+    monkeypatch.setattr(lease, "SyncthingClient", DownClient)
+    assert lease._local_file_edit_recent(now) is False

@@ -58,6 +58,10 @@ CACHE_PATTERNS = (
     "(?d).pytest_cache",
     "(?d).ruff_cache",
     "(?d).mypy_cache",
+    "(?d).terraform",
+    # A user-managed Syncthing writes version copies inside the folder;
+    # those must never ride along to peers.
+    "(?d).stversions",
 )
 
 
