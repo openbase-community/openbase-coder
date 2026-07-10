@@ -64,10 +64,23 @@ def ensure_openbase_cloud_audio_subscription(
 def openbase_cloud_subscription_entitlement(
     *,
     web_backend_url: str = DEFAULT_WEB_BACKEND_URL,
+    access_token: str | None = None,
 ) -> dict[str, object]:
     """Return Cloud-backed subscription state for paid local app features."""
-    usage = _audio_usage_summary(web_backend_url.rstrip("/"))
-    has_active_subscription = _numeric_usage_value(usage, "monthly_limit_cents") > 0
+    profile = _cloud_user_profile(
+        web_backend_url.rstrip("/"),
+        access_token=access_token,
+    )
+    if "active_subscription" in profile:
+        has_active_subscription = _has_active_subscription_value(
+            profile.get("active_subscription")
+        )
+    else:
+        usage = _audio_usage_summary(
+            web_backend_url.rstrip("/"),
+            access_token=access_token,
+        )
+        has_active_subscription = _numeric_usage_value(usage, "monthly_limit_cents") > 0
     detail = "" if has_active_subscription else OPENBASE_CLOUD_SUBSCRIBE_DETAIL
     return {
         "has_active_subscription": has_active_subscription,
@@ -75,39 +88,64 @@ def openbase_cloud_subscription_entitlement(
     }
 
 
-def _audio_usage_summary(web_backend_url: str) -> dict:
-    token_manager = get_token_manager(web_backend_url)
-    try:
-        token = token_manager.get_access_token()
-    except AuthLoginRequiredError:
-        raise
-    except AuthTransientError:
-        raise
+def _audio_usage_summary(
+    web_backend_url: str,
+    *,
+    access_token: str | None = None,
+) -> dict:
+    return _cloud_json_get(
+        web_backend_url,
+        "/api/openbase/audio/usage/",
+        access_token=access_token,
+    )
+
+
+def _cloud_user_profile(web_backend_url: str, *, access_token: str | None) -> dict:
+    return _cloud_json_get(web_backend_url, "/api/users/me/", access_token=access_token)
+
+
+def _cloud_json_get(
+    web_backend_url: str,
+    path: str,
+    *,
+    access_token: str | None = None,
+) -> dict:
+    if access_token is None:
+        token_manager = get_token_manager(web_backend_url)
+        try:
+            access_token = token_manager.get_access_token()
+        except AuthLoginRequiredError:
+            raise
+        except AuthTransientError:
+            raise
 
     try:
         response = httpx.get(
-            f"{web_backend_url}/api/openbase/audio/usage/",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            f"{web_backend_url}{path}",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/json",
+            },
             timeout=10,
         )
     except httpx.HTTPError as exc:
-        raise AuthTransientError(f"Audio subscription check failed: {exc}") from exc
+        raise AuthTransientError(f"Cloud subscription check failed: {exc}") from exc
 
     if response.status_code == 401:
         raise AuthLoginRequiredError(
-            "Openbase Cloud rejected the current login while checking audio subscription."
+            "Openbase Cloud rejected the current login while checking subscription."
         )
     if response.status_code == 403:
         raise OpenbaseCloudAudioSubscriptionError(_response_detail(response))
     if response.status_code >= 500:
         raise AuthTransientError(
-            f"Audio subscription check failed with backend status {response.status_code}"
+            f"Cloud subscription check failed with backend status {response.status_code}"
         )
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         raise AuthTransientError(
-            f"Audio subscription check failed with backend status {response.status_code}: "
+            f"Cloud subscription check failed with backend status {response.status_code}: "
             f"{_response_detail(response)}"
         ) from exc
 
@@ -115,11 +153,11 @@ def _audio_usage_summary(web_backend_url: str) -> dict:
         payload = response.json()
     except ValueError as exc:
         raise AuthTransientError(
-            "Audio subscription check returned invalid JSON."
+            "Cloud subscription check returned invalid JSON."
         ) from exc
     if not isinstance(payload, dict):
         raise AuthTransientError(
-            "Audio subscription check returned an invalid payload."
+            "Cloud subscription check returned an invalid payload."
         )
     return payload
 
@@ -147,6 +185,15 @@ def _numeric_usage_value(payload: dict, key: str) -> float:
         except ValueError:
             return 0.0
     return 0.0
+
+
+def _has_active_subscription_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        return normalized not in {"", "0", "false", "none", "null"}
+    return value is not None
 
 
 def _provider_names(providers: Iterable[str]) -> str:

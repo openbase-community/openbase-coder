@@ -24,6 +24,14 @@ def usage_response(status_code: int = 200, **payload) -> httpx.Response:
     )
 
 
+def user_profile_response(status_code: int = 200, **payload) -> httpx.Response:
+    return httpx.Response(
+        status_code,
+        json=payload,
+        request=httpx.Request("GET", "https://backend.example/api/users/me/"),
+    )
+
+
 def test_openbase_cloud_audio_check_skips_direct_and_local_providers(monkeypatch):
     monkeypatch.setattr(
         cloud_audio,
@@ -69,11 +77,7 @@ def test_openbase_cloud_subscription_entitlement_allows_paid_feature(monkeypatch
         "get_token_manager",
         lambda web_backend_url: FakeTokenManager(),
     )
-    response = usage_response(
-        monthly_limit_cents=100,
-        cartesia_remaining_cents=100,
-        assemblyai_remaining_cents=100,
-    )
+    response = user_profile_response(active_subscription="pro")
 
     with mock.patch.object(httpx, "get", return_value=response):
         entitlement = cloud_audio.openbase_cloud_subscription_entitlement(
@@ -92,7 +96,7 @@ def test_openbase_cloud_subscription_entitlement_locks_without_subscription(monk
         "get_token_manager",
         lambda web_backend_url: FakeTokenManager(),
     )
-    response = usage_response(monthly_limit_cents=0)
+    response = user_profile_response(active_subscription=None)
 
     with mock.patch.object(httpx, "get", return_value=response):
         entitlement = cloud_audio.openbase_cloud_subscription_entitlement(
@@ -101,6 +105,45 @@ def test_openbase_cloud_subscription_entitlement_locks_without_subscription(monk
 
     assert entitlement["has_active_subscription"] is False
     assert "Apple Music playback requires" in entitlement["detail"]
+
+
+def test_openbase_cloud_subscription_entitlement_can_use_request_token(monkeypatch):
+    monkeypatch.setattr(
+        cloud_audio,
+        "get_token_manager",
+        lambda web_backend_url: pytest.fail("request token should be used"),
+    )
+    response = user_profile_response(active_subscription="manual_lifetime_infinite_cap")
+
+    with mock.patch.object(httpx, "get", return_value=response) as mocked_get:
+        entitlement = cloud_audio.openbase_cloud_subscription_entitlement(
+            web_backend_url="https://backend.example",
+            access_token="caller.jwt.token",
+        )
+
+    assert entitlement["has_active_subscription"] is True
+    assert mocked_get.call_args.kwargs["headers"]["Authorization"] == (
+        "Bearer caller.jwt.token"
+    )
+
+
+def test_openbase_cloud_subscription_entitlement_falls_back_to_usage_cap(monkeypatch):
+    monkeypatch.setattr(
+        cloud_audio,
+        "get_token_manager",
+        lambda web_backend_url: FakeTokenManager(),
+    )
+    responses = [
+        user_profile_response(email="legacy@example.com"),
+        usage_response(monthly_limit_cents=100),
+    ]
+
+    with mock.patch.object(httpx, "get", side_effect=responses):
+        entitlement = cloud_audio.openbase_cloud_subscription_entitlement(
+            web_backend_url="https://backend.example",
+        )
+
+    assert entitlement["has_active_subscription"] is True
 
 
 def test_openbase_cloud_audio_check_rejects_exhausted_selected_provider(monkeypatch):
