@@ -177,6 +177,17 @@ jobs:
           "$livekit_server" --version
           echo "LIVEKIT_SERVER_BIN=${livekit_server}" >> "$GITHUB_ENV"
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+          cache-dependency-path: cli/tunneld/go.sum
+
+      - name: Build openbase-tunneld
+        run: |
+          (cd cli/tunneld && go build -trimpath -ldflags="-s -w" -o "$RUNNER_TEMP/openbase-tunneld" .)
+          echo "TUNNELD_BIN=$RUNNER_TEMP/openbase-tunneld" >> "$GITHUB_ENV"
+
       - name: Install Syncthing
         run: |
 
@@ -195,6 +206,7 @@ jobs:
             --repo-shas '${{ steps.shas.outputs.repo_shas }}' \
             --python "$python_bin" \
             --livekit-server-bin "$LIVEKIT_SERVER_BIN" \
+            --tunneld-bin "$TUNNELD_BIN" \
             --package-dir "$package_dir" \
             --force
           echo "PACKAGE_DIR=${package_dir}" >> "$GITHUB_ENV"
@@ -222,6 +234,7 @@ jobs:
             --package-dir "$PACKAGE_DIR" \
             --identity "$identity"
           codesign --verify --deep --strict "$PACKAGE_DIR/bin/livekit-server"
+          codesign --verify --deep --strict "$PACKAGE_DIR/bin/openbase-tunneld"
           codesign --verify --deep --strict "$PACKAGE_DIR/python/bin/python3.12"
 
       - name: Archive release assets
