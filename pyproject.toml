@@ -35,13 +35,21 @@ dependencies = [
     "langchain-google-genai==4.2.4",
     "langgraph==1.2.2",
     "langgraph-sdk==0.3.15",
-    "uv>=0.9.22",
+    # uv is deliberately NOT a dependency: nothing imports it, no code invokes
+    # the bundled python/bin/uv (uv_tools and plugin install resolve a
+    # user/system uv and fall back to `python -m pip`), and the binary alone
+    # added ~49 MB to the standalone package.
     "livekit-agents[silero,turn-detector]==1.5.17",
     "livekit-api>=1.1.0",
     "livekit-plugins-assemblyai==1.5.17",
     "livekit-plugins-cartesia==1.5.17",
     "livekit-plugins-deepgram==1.5.4",
-    "livekit-plugins-noise-cancellation>=0.2.5",
+    # livekit-plugins-noise-cancellation is deliberately NOT a dependency: the
+    # voice pipeline never imports it and its models/dylib added ~74 MB to the
+    # standalone package. If noise cancellation is (re)introduced, add the
+    # dependency back here FIRST — otherwise it works in dev environments that
+    # happen to have the plugin installed and fails only in packaged
+    # production builds, which is confusing to debug.
     "aiohttp>=3.13.3",
     "multi-workspace>=3.2.3",
     "open-approvals>=0.1.0",

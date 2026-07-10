@@ -61,6 +61,7 @@ def main() -> int:
     install_cli_package(python_dir)
     rewrite_bin_shebangs(python_dir)
     prune_runtime(python_dir)
+    strip_native_binaries(python_dir)
     relocate_macos_python(python_dir)
     stage_bin(
         package_dir,
@@ -212,11 +213,16 @@ def prune_runtime(python_dir: Path) -> None:
       the standalone runtime (see ``backend_binaries.py``).
     - Tk/Tcl data trees, ``tkinter``, ``idlelib``, ``turtledemo``: the bundled
       Python has no ``_tkinter`` extension module, so none of these can load.
+    - ``bin/uv``/``bin/uvx``: belt-and-braces — uv is no longer a dependency
+      (nothing imports it or invokes the bundled binary; see pyproject.toml),
+      but a stray transitive install must not ship 49 MB.
     """
     lib_dir = python_dir / "lib"
     doomed: set[Path] = set()
 
     doomed.update(path for path in python_dir.rglob("__pycache__") if path.is_dir())
+    doomed.update(python_dir.glob("bin/uv"))
+    doomed.update(python_dir.glob("bin/uvx"))
 
     for site_packages in lib_dir.glob("python*/site-packages"):
         for name in ("tests", "test"):
@@ -247,6 +253,34 @@ def prune_runtime(python_dir: Path) -> None:
             freed += path.stat().st_size
             path.unlink()
     print(f"Pruned runtime: freed {freed / 1024 / 1024:.0f} MB")
+
+
+def strip_native_binaries(python_dir: Path) -> None:
+    """Strip local symbols from bundled Mach-O files (``strip -x``).
+
+    Debug/local symbols in the big native extensions (onnxruntime, grpc, …)
+    cost tens of MB and serve no purpose in the shipped runtime. Conservative
+    by design: only ``-x`` (keep global symbols), best-effort per file (some
+    binaries refuse and are left untouched), and it runs before the ad-hoc
+    codesign pass so signatures stay valid.
+    """
+    if platform.system() != "Darwin" or not shutil.which("strip"):
+        return
+    freed = 0
+    stripped = 0
+    for path in _macho_files(python_dir):
+        before = path.stat().st_size
+        result = subprocess.run(
+            ["strip", "-x", str(path)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            continue
+        stripped += 1
+        freed += before - path.stat().st_size
+    print(f"Stripped {stripped} native binaries: freed {freed / 1024 / 1024:.0f} MB")
 
 
 def relocate_macos_python(python_dir: Path) -> None:
