@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 
 from rest_framework import serializers, status
@@ -19,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 IOS_LOG_UPLOAD_FILENAME = "ios-app.log"
 IOS_LOG_UPLOAD_MAX_ENTRIES = 1000
+REDACTED_VALUE = "<redacted>"
+REDACTED_EMAIL_VALUE = "<redacted-email>"
+SENSITIVE_KEY_SUFFIXES = ("password", "secret", "key", "token")
+SENSITIVE_KEY_NAMES = {"authorization", "name", "x-session-token"}
+SENSITIVE_KEY_PATTERN = r"(?:password|secret|key|token)"
 
 
 class IOSLogEntrySerializer(serializers.Serializer):
@@ -66,8 +72,8 @@ def ios_logs_upload(request):
     """Append uploaded iOS diagnostics to the Openbase Coder log directory."""
     serializer = IOSLogUploadSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    entries = serializer.validated_data["entries"]
-    device = serializer.validated_data.get("device") or {}
+    entries = [_sanitize_mapping(entry) for entry in serializer.validated_data["entries"]]
+    device = _sanitize_mapping(serializer.validated_data.get("device") or {})
     uploaded_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     DEFAULT_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -96,6 +102,54 @@ def ios_logs_upload(request):
         },
         status=status.HTTP_201_CREATED,
     )
+
+
+def _is_sensitive_key(name: str) -> bool:
+    lowered = name.lower()
+    return lowered in SENSITIVE_KEY_NAMES or lowered.endswith(SENSITIVE_KEY_SUFFIXES)
+
+
+def _redact_sensitive_text(value: str) -> str:
+    redacted = re.sub(
+        rf'("[\w-]*{SENSITIVE_KEY_PATTERN}"\s*:\s*)"[^"]*"',
+        rf"\1\"{REDACTED_VALUE}\"",
+        value,
+        flags=re.IGNORECASE,
+    )
+    redacted = re.sub(
+        rf"([\w-]*{SENSITIVE_KEY_PATTERN}=)[^&\s\"]+",
+        rf"\1{REDACTED_VALUE}",
+        redacted,
+        flags=re.IGNORECASE,
+    )
+    redacted = re.sub(
+        r"(Bearer\s+)[A-Za-z0-9._~+/\-=]+",
+        rf"\1{REDACTED_VALUE}",
+        redacted,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(
+        r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}",
+        REDACTED_EMAIL_VALUE,
+        redacted,
+        flags=re.IGNORECASE,
+    )
+
+
+def _sanitize_value(key: str, value):
+    if isinstance(value, dict):
+        return _sanitize_mapping(value)
+    if isinstance(value, list):
+        return [_sanitize_value(key, item) for item in value]
+    if _is_sensitive_key(key):
+        return REDACTED_VALUE
+    if isinstance(value, str):
+        return _redact_sensitive_text(value)
+    return value
+
+
+def _sanitize_mapping(payload: dict) -> dict:
+    return {key: _sanitize_value(str(key), value) for key, value in payload.items()}
 
 
 @api_view(["GET"])

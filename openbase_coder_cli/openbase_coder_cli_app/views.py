@@ -110,13 +110,16 @@ from openbase_coder_cli.openbase_coder_cli_app.services_views import (
 from openbase_coder_cli.openbase_coder_cli_app.skills import _home_skills_dir
 from openbase_coder_cli.openbase_coder_cli_app.tags import tag_options
 from openbase_coder_cli.openbase_coder_cli_app.threads import (
+    thread_active_voice,  # noqa: F401
     thread_activity,  # noqa: F401
     thread_detail,
     thread_dispatcher,  # noqa: F401
     thread_favorite,
     thread_interrupt,
     thread_list,
+    thread_queue_turn,
     thread_start_turn,
+    thread_steer_turn,
     thread_tags,
 )
 from openbase_coder_cli.paths import (
@@ -343,12 +346,16 @@ __all__ = [
     "tag_options",
     "stt_settings",
     "tts_settings",
+    "thread_active_voice",
     "thread_activity",
     "thread_detail",
+    "thread_dispatcher",
     "thread_favorite",
     "thread_interrupt",
     "thread_list",
+    "thread_queue_turn",
     "thread_start_turn",
+    "thread_steer_turn",
     "thread_tags",
     "_build_livekit_client",
     "_resolve_target_room",

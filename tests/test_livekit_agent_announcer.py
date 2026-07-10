@@ -1117,6 +1117,60 @@ def test_publish_agent_error_packet_publishes_status_topic():
     }
 
 
+def test_cloud_audio_handshake_error_is_clear_and_redacted():
+    class CloudAudioHandshakeError(RuntimeError):
+        status = 403
+
+    exc = CloudAudioHandshakeError(
+        "403, message='Forbidden', url='wss://app.openbase.cloud/api/openbase/audio/cartesia/tts/websocket?token=secret-token', "
+        "headers={'X-API-Key': 'machine-secret', 'Authorization': 'Bearer access-secret'}"
+    )
+
+    assert livekit._agent_error_code(exc) == "cloud_audio_auth_failed"
+    detail = livekit._agent_error_detail(exc)
+    assert "Openbase Cloud audio authorization failed" in detail
+    assert "machine-secret" not in detail
+    assert "access-secret" not in detail
+    assert "secret-token" not in livekit.exception_chain_summary(exc)
+
+
+@pytest.mark.asyncio
+async def test_session_error_reports_agent_status_when_logging_disabled():
+    class FakeSession:
+        def __init__(self):
+            self.handlers = {}
+
+        def on(self, event_name, handler):
+            self.handlers[event_name] = handler
+
+    session = FakeSession()
+    room = _FakeRoom()
+    router = LiveKitVoiceRouter(PreparedClient())
+    livekit._register_session_diagnostics(
+        session,
+        router,
+        enable_logging=False,
+        on_unrecoverable_error=lambda exc: livekit._report_agent_error(room, exc),
+    )
+
+    session.handlers["error"](
+        SimpleNamespace(error=RuntimeError("provider startup failed"))
+    )
+
+    for _ in range(20):
+        if room.local_participant.published:
+            break
+        await asyncio.sleep(0.01)
+
+    assert len(room.local_participant.published) == 1
+    data, _reliable, topic = room.local_participant.published[0]
+    assert topic == config.AGENT_STATUS_TOPIC
+    payload = json.loads(data.decode("utf-8"))
+    assert payload["type"] == "agent_error"
+    assert payload["code"] == "agent_start_failed"
+    assert "provider startup failed" in payload["detail"]
+
+
 def test_verify_cloud_audio_subscription_reports_lapsed_subscription(monkeypatch):
     room = _FakeRoom()
     spoken: list[str] = []

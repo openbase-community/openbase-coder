@@ -41,8 +41,22 @@ def test_ios_logs_upload_appends_jsonl_to_openbase_logs(monkeypatch, tmp_path) -
 
     response = _upload_ios_logs(
         {
-            "device": {"model": "iPhone", "system_version": "18.5"},
-            "entries": [_ios_log_entry(0)],
+            "device": {
+                "model": "iPhone",
+                "name": "Gabe's iPhone",
+                "system_version": "18.5",
+            },
+            "entries": [
+                {
+                    **_ios_log_entry(0),
+                    "message": "request complete for gabe@example.com",
+                    "metadata": {
+                        "authorization": "Bearer abcdefghijklmnop",
+                        "status": "200",
+                    },
+                    "line": "[AuthDiagnostics][AuthDiagnostics] request complete authorization=Bearer abcdefghijklmnop email=gabe@example.com",
+                }
+            ],
         }
     )
 
@@ -55,8 +69,15 @@ def test_ios_logs_upload_appends_jsonl_to_openbase_logs(monkeypatch, tmp_path) -
     payload = json.loads(lines[0])
     assert payload["source"] == "ios"
     assert payload["device"]["model"] == "iPhone"
+    assert payload["device"]["name"] == diagnostics.REDACTED_VALUE
     assert payload["entry"]["component"] == "AuthDiagnostics"
-    assert payload["entry"]["metadata"] == {"status": "200"}
+    assert payload["entry"]["metadata"] == {
+        "authorization": diagnostics.REDACTED_VALUE,
+        "status": "200",
+    }
+    assert "gabe@example.com" not in payload["entry"]["message"]
+    assert "abcdefghijklmnop" not in payload["entry"]["line"]
+    assert diagnostics.REDACTED_EMAIL_VALUE in payload["entry"]["message"]
 
 
 def test_ios_logs_upload_rejects_empty_entries(monkeypatch, tmp_path) -> None:

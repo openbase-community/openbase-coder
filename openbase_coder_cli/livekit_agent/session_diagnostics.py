@@ -2,10 +2,14 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 
 from livekit.agents import AgentSession
 
-from openbase_coder_cli.livekit_agent.logging_utils import _event_text_hash
+from openbase_coder_cli.livekit_agent.logging_utils import (
+    _event_text_hash,
+    exception_chain_summary,
+)
 from openbase_coder_cli.livekit_agent.spoken_commands import (
     _is_exit_to_dispatch_command,
 )
@@ -19,8 +23,10 @@ def _register_session_diagnostics(
     voice_router: LiveKitVoiceRouter,
     *,
     enable_logging: bool,
+    on_unrecoverable_error: Callable[[Exception], Awaitable[None]] | None = None,
 ):
     proactive_steer_tasks: set[asyncio.Task[None]] = set()
+    error_reported = False
 
     async def proactively_steer_final_transcript(transcript: str) -> None:
         try:
@@ -125,25 +131,44 @@ def _register_session_diagnostics(
         )
 
     def on_error(event) -> None:
-        if not enable_logging:
-            return
+        nonlocal error_reported
         error = getattr(event, "error", None)
-        logger.warning(
-            "dispatch_timing stage=session_error source=%s error_type=%s error=%s",
-            type(getattr(event, "source", None)).__name__,
-            type(error).__name__,
-            error,
-        )
+        if enable_logging:
+            logger.warning(
+                "dispatch_timing stage=session_error source=%s error_type=%s error=%s",
+                type(getattr(event, "source", None)).__name__,
+                type(error).__name__,
+                exception_chain_summary(error)
+                if isinstance(error, Exception)
+                else str(error),
+            )
+        if (
+            not error_reported
+            and on_unrecoverable_error is not None
+            and isinstance(error, Exception)
+        ):
+            error_reported = True
+            asyncio.create_task(on_unrecoverable_error(error))
 
     def on_close(event) -> None:
-        if not enable_logging:
-            return
-        logger.info(
-            "dispatch_timing stage=session_close reason=%s error_type=%s error=%s",
-            getattr(event, "reason", ""),
-            type(getattr(event, "error", None)).__name__,
-            getattr(event, "error", None),
-        )
+        nonlocal error_reported
+        error = getattr(event, "error", None)
+        if enable_logging:
+            logger.info(
+                "dispatch_timing stage=session_close reason=%s error_type=%s error=%s",
+                getattr(event, "reason", ""),
+                type(error).__name__,
+                exception_chain_summary(error)
+                if isinstance(error, Exception)
+                else error,
+            )
+        if (
+            not error_reported
+            and on_unrecoverable_error is not None
+            and isinstance(error, Exception)
+        ):
+            error_reported = True
+            asyncio.create_task(on_unrecoverable_error(error))
 
     handlers = (
         ("user_state_changed", on_user_state_changed),

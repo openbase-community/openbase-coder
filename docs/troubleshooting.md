@@ -108,7 +108,7 @@ The service wrapper validates the derived Tailscale IPv4 address before exportin
 
 ## Enable iOS Auth Diagnostics
 
-iOS `AuthDiagnostics` logging is disabled by default. Enable it only while debugging auth, CLI API, or LiveKit call setup.
+iOS keeps a small redacted `AuthDiagnostics` buffer in memory for the Upload iOS Logs action. Verbose console printing is disabled by default. Enable it only while debugging auth, CLI API, or LiveKit call setup.
 
 You can enable it from code with:
 
@@ -122,4 +122,4 @@ Or set the process environment variable in an Xcode scheme:
 OPENBASE_AUTH_DIAGNOSTICS=1
 ```
 
-When enabled, diagnostics intentionally do not redact backend URLs, LiveKit URLs, or room names so local connectivity issues can be debugged directly. Do not leave it enabled for routine development sessions unless you need the extra logs.
+Upload payloads redact secret-like values and email addresses before they are written to the local runtime log directory. Do not leave verbose console diagnostics enabled for routine development sessions unless you need the extra local output.
