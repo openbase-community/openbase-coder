@@ -688,40 +688,6 @@ def test_livekit_companion_session_api_returns_current_room(monkeypatch):
     assert response.data["companionTokenExpiresAt"]
 
 
-def test_livekit_companion_session_keeps_local_livekit_url_in_tailscale_mode(
-    monkeypatch,
-):
-    async def fake_resolve_companion_target_room(room_name=None):
-        assert room_name is None
-        return SimpleNamespace(room_name="room-1")
-
-    monkeypatch.setenv("LIVEKIT_API_KEY", "devkey")
-    monkeypatch.setenv("LIVEKIT_API_SECRET", "devsecret")
-    monkeypatch.setenv("LIVEKIT_CLIENT_API_KEY", "clientkey")
-    monkeypatch.setenv("LIVEKIT_CLIENT_API_SECRET", "clientsecret")
-    monkeypatch.setenv("LIVEKIT_NETWORK_MODE", "tailscale")
-    monkeypatch.setenv("LIVEKIT_URL", "ws://localhost:7880")
-    monkeypatch.setenv("LIVEKIT_NODE_IP", "100.107.129.9")
-    monkeypatch.setattr(
-        views._livekit,
-        "_resolve_companion_target_room",
-        fake_resolve_companion_target_room,
-    )
-
-    request = APIRequestFactory().get("/api/livekit-companion-session/")
-    force_authenticate(
-        request,
-        user=SimpleNamespace(is_authenticated=True),
-        token={"email": "gabe@example.com"},
-    )
-
-    response = views.livekit_companion_session(request)
-
-    assert response.status_code == 200
-    assert response.data["roomUrl"] == "ws://localhost:7880"
-    assert response.data["roomName"] == "room-1"
-
-
 def test_livekit_companion_session_api_guides_missing_client_credentials(monkeypatch):
     monkeypatch.setenv("LIVEKIT_API_KEY", "devkey")
     monkeypatch.setenv("LIVEKIT_API_SECRET", "devsecret")

@@ -10,7 +10,6 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
 import livekit.api as livekit_api
 from asgiref.sync import async_to_sync
@@ -162,31 +161,6 @@ def _livekit_client_token_credentials() -> tuple[str, str]:
             }
         )
     return api_key, api_secret
-
-
-def _livekit_room_url() -> str:
-    """Return the LiveKit URL clients should use for room connections."""
-    configured_url = (
-        os.environ.get("LIVEKIT_PUBLIC_URL")
-        or os.environ.get("LIVEKIT_URL")
-        or "ws://localhost:7880"
-    ).strip()
-
-    if os.environ.get("LIVEKIT_NETWORK_MODE", "").strip().lower() != "tailscale":
-        return configured_url
-
-    parsed = urlsplit(configured_url)
-    if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
-        return configured_url
-
-    livekit_node_ip = os.environ.get("LIVEKIT_NODE_IP", "").strip()
-    if not livekit_node_ip:
-        return configured_url
-
-    scheme = parsed.scheme or "ws"
-    port = parsed.port or 7880
-    host = f"[{livekit_node_ip}]" if ":" in livekit_node_ip else livekit_node_ip
-    return urlunsplit((scheme, f"{host}:{port}", parsed.path, parsed.query, ""))
 
 
 class VoiceRouteCommandSerializer(serializers.Serializer):
@@ -845,15 +819,7 @@ def livekit_room_token(request):
         .to_jwt()
     )
 
-    livekit_url = _livekit_room_url()
-    return Response(
-        {
-            "token": token,
-            "room_name": room_name,
-            "livekit_url": livekit_url,
-            "roomUrl": livekit_url,
-        }
-    )
+    return Response({"token": token, "room_name": room_name})
 
 
 @api_view(["GET"])
