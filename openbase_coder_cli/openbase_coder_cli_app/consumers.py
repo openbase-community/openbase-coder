@@ -106,19 +106,9 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
                 )
                 return
             try:
+                # queue_turn broadcasts refreshed thread_state to the group.
                 result = await manager.queue_turn(self.thread_id, prompt)
                 await self.send_json({"type": "turn_queued", "data": result})
-                thread = await manager.get_thread_state(self.thread_id)
-                if thread:
-                    await self.send_json(
-                        {
-                            "type": "thread_state",
-                            "data": annotate_thread_payload(
-                                thread.model_dump(mode="json"),
-                                thread_id=self.thread_id,
-                            ),
-                        }
-                    )
             except (ValueError, RuntimeError) as exc:
                 logger.warning(
                     "queue_turn failed for thread %s: %s", self.thread_id, exc
@@ -135,19 +125,9 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
                 )
                 return
             try:
+                # steer_turn broadcasts refreshed thread_state to the group.
                 result = await manager.steer_turn(self.thread_id, prompt)
                 await self.send_json({"type": "turn_steered", "data": result})
-                thread = await manager.get_thread_state(self.thread_id)
-                if thread:
-                    await self.send_json(
-                        {
-                            "type": "thread_state",
-                            "data": annotate_thread_payload(
-                                thread.model_dump(mode="json"),
-                                thread_id=self.thread_id,
-                            ),
-                        }
-                    )
             except (ValueError, RuntimeError) as exc:
                 logger.warning(
                     "steer_turn failed for thread %s: %s", self.thread_id, exc
