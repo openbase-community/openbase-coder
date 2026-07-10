@@ -253,7 +253,8 @@ SERVICES: list[ServiceDefinition] = [
         name="code-sync",
         description="Code Sync (managed Syncthing)",
         command_template=(
-            'exec {syncthing} serve --config "{data_dir}/code-sync" '
+            # --home sets config+data together (Syncthing v2 requires both).
+            'exec {syncthing} serve --home "{data_dir}/code-sync" '
             "--no-browser --no-restart --no-upgrade"
         ),
         workdir_template="{data_dir}",
