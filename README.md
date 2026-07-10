@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://discord.gg/nYzsn3Vh6y"><img src="Images/github.png" alt="Openbase Coder" width="900"></a>
+  <a href="https://discord.gg/nYzsn3Vh6y"><img src="Images/github.svg" alt="Openbase Coder" width="900"></a>
 </p>
 
 <p align="center">
