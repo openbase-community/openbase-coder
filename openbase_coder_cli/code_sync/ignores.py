@@ -23,36 +23,41 @@ MANAGED_HEADER = (
     "// Note: .env files and gitignored secrets are deliberately NOT ignored;\n"
     "// syncing them between your machines is a feature of code sync.\n"
 )
+# Bare names match at every level including the folder root (Syncthing
+# expands `name` to `name`, `**/name`, `name/**`, `**/name/**`); `**/name`
+# alone misses the root. `(?d)` marks entries deletable so an ignored child
+# never blocks propagating its parent directory's deletion.
 VCS_PATTERNS = (
     "// VCS metadata must never sync (torn git state)",
     "(?d).git",
-    "(?d)**/.git",
-    "**/.jj",
-    "**/.hg",
+    "(?d)**/.git",  # redundant with the bare pattern; kept as insurance
+    "(?d).jj",
+    "(?d).hg",
 )
 DEPENDENCY_PATTERNS = (
     "// Dependencies and virtualenvs",
     "(?d)node_modules",
-    "(?d)**/node_modules",
-    "**/.venv",
-    "**/venv",
+    "(?d).venv",
+    "(?d)venv",
 )
 BUILD_PATTERNS = (
     "// Build outputs",
-    "**/dist",
-    "**/build",
-    "**/out",
-    "**/release",
-    "**/DerivedData",
-    "(?d)**/__pycache__",
-    "**/.next",
-    "**/target",
+    "(?d)dist",
+    "(?d)build",
+    "(?d)out",
+    "(?d)release",
+    "(?d)DerivedData",
+    "(?d)__pycache__",
+    "(?d).next",
+    "(?d)target",
 )
 CACHE_PATTERNS = (
     "// Caches and local databases",
-    "(?d)**/.DS_Store",
-    "*.sqlite3",
-    "**/*.sqlite3",
+    "(?d).DS_Store",
+    "(?d)*.sqlite3",
+    "(?d).pytest_cache",
+    "(?d).ruff_cache",
+    "(?d).mypy_cache",
 )
 
 

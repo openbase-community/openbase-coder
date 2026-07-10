@@ -79,6 +79,52 @@ def test_fast_forward_when_ancestor_and_worktree_matches(tmp_path: Path) -> None
     assert conflicts_module.unresolved_conflicts(tmp_path / "conflicts.json") == []
 
 
+def test_fast_forward_when_peer_commit_adds_a_new_file(tmp_path: Path) -> None:
+    """Syncthing-delivered new files are untracked locally; ff must still fire."""
+    local, peer = _pair(tmp_path)
+    (peer / "extra.py").write_text("print('new')\n", encoding="utf-8")
+    _git(peer, "add", "-A")
+    _git(peer, "commit", "-m", "peer adds a file")
+    peer_head = _git(peer, "rev-parse", "HEAD")
+    # Simulate Syncthing having already delivered the new file content.
+    (local / "extra.py").write_text("print('new')\n", encoding="utf-8")
+
+    result = _reconcile(local, peer, tmp_path / "conflicts.json")
+
+    assert result.action == reconciler.ACTION_FAST_FORWARDED
+    assert _git(local, "rev-parse", "main") == peer_head
+    assert _git(local, "status", "--porcelain") == ""
+
+
+def test_gitignored_secrets_do_not_block_fast_forward(tmp_path: Path) -> None:
+    local, peer = _pair(tmp_path)
+    peer_head = _commit(peer, ".gitignore", ".env\n", "ignore env")
+    (local / ".gitignore").write_text(".env\n", encoding="utf-8")
+    (local / ".env").write_text("SECRET=only-here\n", encoding="utf-8")
+
+    result = _reconcile(local, peer, tmp_path / "conflicts.json")
+
+    assert result.action == reconciler.ACTION_FAST_FORWARDED
+    assert _git(local, "rev-parse", "main") == peer_head
+    assert (local / ".env").read_text(encoding="utf-8") == "SECRET=only-here\n"
+
+
+def test_staged_changes_defer_fast_forward(tmp_path: Path) -> None:
+    local, peer = _pair(tmp_path)
+    _commit(peer, "app.py", "print('v2')\n", "peer change")
+    (local / "app.py").write_text("print('v2')\n", encoding="utf-8")
+    (local / "wip.py").write_text("work in progress\n", encoding="utf-8")
+    _git(local, "add", "wip.py")
+    local_head = _git(local, "rev-parse", "main")
+
+    result = _reconcile(local, peer, tmp_path / "conflicts.json")
+
+    assert result.action == reconciler.ACTION_SKIPPED_IN_PROGRESS
+    assert _git(local, "rev-parse", "main") == local_head
+    # The staged entry survives untouched.
+    assert "A  wip.py" in _git(local, "status", "--porcelain")
+
+
 def test_waits_when_ancestor_but_files_still_arriving(tmp_path: Path) -> None:
     local, peer = _pair(tmp_path)
     _commit(peer, "app.py", "print('v2')\n", "peer change")
@@ -211,7 +257,7 @@ def test_discover_git_repos_respects_depth_and_skips_noise(tmp_path: Path) -> No
     _init_repo(root / "repo-a")
     _init_repo(root / "group" / "repo-b")
     _init_repo(root / "node_modules" / "dep")  # skipped
-    _init_repo(root / "d1" / "d2" / "d3" / "too-deep")
+    _init_repo(root / "d1" / "d2" / "d3" / "d4" / "d5" / "too-deep")
 
     repos = reconciler.discover_git_repos(root)
 
@@ -219,6 +265,20 @@ def test_discover_git_repos_respects_depth_and_skips_noise(tmp_path: Path) -> No
     assert root / "group" / "repo-b" in repos
     assert all("node_modules" not in str(repo) for repo in repos)
     assert all("too-deep" not in str(repo) for repo in repos)
+
+
+def test_discover_git_repos_includes_nested_multi_workspace_subrepos(
+    tmp_path: Path,
+) -> None:
+    """A workspace repo's subrepos (own .git each) reconcile too."""
+    root = tmp_path / "folder"
+    workspace = _init_repo(root / "workspace")
+    subrepo = _init_repo(workspace / "cli")
+
+    repos = reconciler.discover_git_repos(root)
+
+    assert workspace in repos
+    assert subrepo in repos
 
 
 def test_scan_file_conflicts_records_sync_conflict_copies(tmp_path: Path) -> None:

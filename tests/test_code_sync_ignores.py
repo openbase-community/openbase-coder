@@ -10,23 +10,26 @@ def test_render_stignore_contains_vcs_and_default_patterns() -> None:
     content = ignores.render_stignore()
 
     assert content.startswith("// Managed by openbase-coder")
-    for pattern in ("(?d).git", "(?d)**/.git", "**/.jj", "**/.hg"):
+    for pattern in ("(?d).git", "(?d)**/.git", "(?d).jj", "(?d).hg"):
         assert pattern in content
-    for pattern in ("(?d)node_modules", "**/.venv", "**/venv"):
+    for pattern in ("(?d)node_modules", "(?d).venv", "(?d)venv"):
         assert pattern in content
     for pattern in (
-        "**/dist",
-        "**/build",
-        "**/out",
-        "**/release",
-        "**/DerivedData",
-        "(?d)**/__pycache__",
-        "**/.next",
-        "**/target",
+        "(?d)dist",
+        "(?d)build",
+        "(?d)out",
+        "(?d)release",
+        "(?d)DerivedData",
+        "(?d)__pycache__",
+        "(?d).next",
+        "(?d)target",
     ):
         assert pattern in content
-    for pattern in ("(?d)**/.DS_Store", "*.sqlite3"):
+    for pattern in ("(?d).DS_Store", "(?d)*.sqlite3", "(?d).pytest_cache"):
         assert pattern in content
+    # Bare-name patterns (no `**/` prefix) so the folder root is covered too.
+    assert "\n**/.jj" not in content
+    assert "\n**/venv" not in content
     # Secrets sync by design; the file must say so and never ignore .env.
     assert "deliberately NOT ignored" in content
     assert "\n.env\n" not in content

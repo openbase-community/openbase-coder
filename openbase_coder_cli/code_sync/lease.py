@@ -14,10 +14,16 @@ Activity heuristic (v1, deliberately cheap and local): this device is
 - the codex/claude thread-sync ledgers (agent turns are being synced)
 
 Peer activity is read from the peer's ``GET /api/sync/status/`` over
-Tailscale (the same channel the reconciler already uses); when no peer is
-reachable the lease is sticky — the current holder keeps send-receive, so
-two idle machines never deadlock in receive-only. ``lease_mode: manual``
-disables all automatic flipping (console override for split work).
+Tailscale (the same channel the reconciler already uses). When nobody is
+provably active the lease is sticky, but a recorded peer holder is honored
+only while that peer is reachable and its own status agrees it holds;
+otherwise this device reclaims. Holder records live per-device (they cannot
+sync), so without that validation crossed records would flip both machines
+receive-only and nothing would propagate. When both devices are active,
+both stay send-receive — demoting a machine with live work would strand its
+edits, and Syncthing's conflict copies cover genuine simultaneous edits.
+``lease_mode: manual`` disables all automatic flipping (console override
+for split work).
 """
 
 from __future__ import annotations
@@ -78,7 +84,7 @@ def local_activity_recent(
     return False
 
 
-def _peer_active(peer: SyncPeer, auth_header: str | None) -> bool:
+def _peer_status(peer: SyncPeer, auth_header: str | None) -> dict[str, Any] | None:
     host = peer.tailscale_magic_dns.rstrip(".")
     headers = {"Authorization": auth_header} if auth_header else {}
     try:
@@ -90,21 +96,23 @@ def _peer_active(peer: SyncPeer, auth_header: str | None) -> bool:
         response.raise_for_status()
         payload = response.json()
     except (httpx.HTTPError, ValueError):
-        return False
-    return isinstance(payload, dict) and payload.get("active") is True
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
-def _active_peer(peers: tuple[SyncPeer, ...]) -> SyncPeer | None:
-    auth_header = None
+def _peer_statuses(peers: tuple[SyncPeer, ...]) -> dict[str, dict[str, Any]]:
+    """Reachable peers' status payloads, keyed by cloud device ID."""
     try:
         token = TokenManager(web_backend_url()).get_access_token()
         auth_header = f"Bearer {token}"
     except (AuthLoginRequiredError, AuthTransientError):
-        return None
+        return {}
+    statuses: dict[str, dict[str, Any]] = {}
     for peer in peers:
-        if _peer_active(peer, auth_header):
-            return peer
-    return None
+        payload = _peer_status(peer, auth_header)
+        if payload is not None:
+            statuses[peer.device_id] = payload
+    return statuses
 
 
 def _set_all_folder_types(folder_type: str, config_path: Path | None) -> list[str]:
@@ -140,20 +148,39 @@ def run_lease_tick(config_path: Path | None = None) -> dict[str, Any]:
             return summary
 
         peers = syncable_peers(current_eligibility())
-        active_peer = _active_peer(peers)
-        if active_peer is not None:
-            if holder != active_peer.device_id:
-                set_lease_holder_device_id(active_peer.device_id, config_path)
+        statuses = _peer_statuses(peers)
+        active_id = next(
+            (
+                device_id
+                for device_id, payload in statuses.items()
+                if payload.get("active") is True
+            ),
+            None,
+        )
+        if active_id is not None:
+            if holder != active_id:
+                set_lease_holder_device_id(active_id, config_path)
             _set_all_folder_types("receiveonly", config_path)
-            summary.update({"action": "yielded", "holder": active_peer.device_id})
+            summary.update({"action": "yielded", "holder": active_id})
             return summary
 
-        # Nobody is provably active: the lease is sticky. The last holder
-        # keeps send-receive so plain manual edits still propagate.
+        # Nobody is provably active: the lease is sticky, so plain manual
+        # edits (which leave no activity signal) still propagate. A peer
+        # holder is honored only while that peer is reachable and its own
+        # record agrees it holds; holder records are per-device, so crossed
+        # or stale records would otherwise leave BOTH machines receive-only
+        # with nothing propagating until an activity signal appears.
         if holder and holder != self_id:
-            _set_all_folder_types("receiveonly", config_path)
-        else:
+            peer_record = statuses.get(holder, {}).get("lease_holder_device_id")
+            if peer_record == holder:
+                _set_all_folder_types("receiveonly", config_path)
+                summary["action"] = "sticky"
+                return summary
+            set_lease_holder_device_id(self_id, config_path)
             _set_all_folder_types("sendreceive", config_path)
+            summary.update({"action": "reclaimed", "holder": self_id})
+            return summary
+        _set_all_folder_types("sendreceive", config_path)
         summary["action"] = "sticky"
     except CodeSyncError as exc:
         summary.update({"action": "error", "error": str(exc)})

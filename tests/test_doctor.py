@@ -283,3 +283,49 @@ def test_doctor_reports_missing_tailscale_as_setup_action(monkeypatch, tmp_path)
     assert "SETUP tailscale: not found on PATH" in result.output
     assert "setup actions" in result.output
     assert "FAIL" not in result.output
+
+
+def test_stignore_content_follows_includes(tmp_path):
+    (tmp_path / ".stglobalignore").write_text(
+        "// shared\n(?d).git\n", encoding="utf-8"
+    )
+    stignore = tmp_path / ".stignore"
+    stignore.write_text("#include .stglobalignore\n/foo/data\n", encoding="utf-8")
+
+    content = doctor_cli._stignore_content_with_includes(stignore)
+
+    assert "(?d).git" in content
+    assert "/foo/data" in content
+
+
+def test_check_code_sync_fails_when_managed_stignore_lacks_git(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    from openbase_coder_cli.sync_config import SyncFolder
+
+    folder = SyncFolder(relpath="Projects/demo")
+    folder_root = tmp_path / "Projects" / "demo"
+    folder_root.mkdir(parents=True)
+    (folder_root / ".stignore").write_text("node_modules\n", encoding="utf-8")
+
+    monkeypatch.setattr(doctor_cli, "_syncthing_process_running", lambda: False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "openbase_coder_cli.sync_config.code_sync_enabled", lambda: True
+    )
+    monkeypatch.setattr(
+        "openbase_coder_cli.sync_config.sync_folders", lambda: (folder,)
+    )
+    monkeypatch.setattr(
+        doctor_cli, "launchctl_status", lambda service: {"installed": True, "pid": 1}
+    )
+    monkeypatch.setattr(
+        "openbase_coder_cli.code_sync.manager.versions_usage_bytes", lambda: 0
+    )
+
+    failures: list[str] = []
+    doctor_cli._check_code_sync(
+        lambda msg: None, lambda msg: None, failures.append
+    )
+
+    assert any("no .git ignore" in message for message in failures)

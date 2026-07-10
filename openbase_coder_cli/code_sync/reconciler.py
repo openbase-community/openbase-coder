@@ -50,11 +50,11 @@ from openbase_coder_cli.sync_config import (
     sync_folders,
 )
 
-MAX_REPO_DEPTH = 3
+MAX_REPO_DEPTH = 5
 PEER_API_PORT = 18080  # Django CLI server exposed on the tailnet.
 GIT_TIMEOUT_SECONDS = 60
 RECONCILE_STATE_PATH = CODE_SYNC_DIR / "reconcile-state.json"
-SKIP_DIR_NAMES = {"node_modules", ".venv", "venv", "__pycache__"}
+SKIP_DIR_NAMES = {"node_modules", ".venv", "venv", "__pycache__", "DerivedData"}
 
 ACTION_FAST_FORWARDED = "fast_forwarded"
 ACTION_UP_TO_DATE = "up_to_date"
@@ -84,7 +84,9 @@ def discover_git_repos(
     def _walk(directory: Path, depth: int) -> None:
         if (directory / ".git").exists():
             repos.append(directory)
-            return  # Nested repos are separate sync concerns of their parent.
+            # Keep descending: multi workspaces nest subrepos (each with its
+            # own .git) inside the workspace repo, and each needs its own
+            # branch reconciliation.
         if depth >= max_depth:
             return
         try:
@@ -112,20 +114,29 @@ def peer_git_url(peer: SyncPeer, folder_id: str, repo_relpath: str) -> str:
 
 
 def _git(
-    args: list[str], cwd: Path, extra_config: list[str] | None = None
+    args: list[str], cwd: Path, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess:
-    command = ["git"]
-    for entry in extra_config or []:
-        command += ["-c", entry]
-    command += args
     return subprocess.run(
-        command,
+        ["git", *args],
         cwd=cwd,
         capture_output=True,
         text=True,
         check=False,
         timeout=GIT_TIMEOUT_SECONDS,
+        env=env,
     )
+
+
+def _auth_env(auth_header: str | None) -> dict[str, str] | None:
+    """git config via environment so the token never appears in ``ps``."""
+    if not auth_header:
+        return None
+    return {
+        **os.environ,
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraHeader",
+        "GIT_CONFIG_VALUE_0": f"Authorization: {auth_header}",
+    }
 
 
 def current_branch(repo: Path) -> str | None:
@@ -141,8 +152,37 @@ def operation_in_progress(repo: Path) -> bool:
     git_dir = (repo / git_dir_result.stdout.strip()).resolve()
     return any(
         (git_dir / marker).exists()
-        for marker in ("MERGE_HEAD", "rebase-merge", "rebase-apply")
+        for marker in (
+            "MERGE_HEAD",
+            "rebase-merge",
+            "rebase-apply",
+            "CHERRY_PICK_HEAD",
+            "REVERT_HEAD",
+            "BISECT_LOG",
+        )
     )
+
+
+def worktree_matches_commit(repo: Path, commit_sha: str) -> bool:
+    """Whether the working tree content equals ``commit_sha``'s tree.
+
+    ``git diff <commit>`` alone reports paths the commit adds but the local
+    index does not know as deletions — even when Syncthing has already
+    delivered identical content as untracked files. Build a throwaway index
+    from the worktree instead and compare tree hashes. Seeding from the
+    commit keeps files that are tracked there but locally gitignored, while
+    untracked-and-gitignored files (e.g. ``.env``) never block a match.
+    """
+    target_tree = _git(["rev-parse", f"{commit_sha}^{{tree}}"], repo).stdout.strip()
+    if not target_tree:
+        return False
+    with tempfile.TemporaryDirectory(prefix="code-sync-index-") as tmp:
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
+        for args in (["read-tree", commit_sha], ["add", "-A", "."]):
+            if _git(args, repo, env=env).returncode != 0:
+                return False
+        actual_tree = _git(["write-tree"], repo, env=env).stdout.strip()
+    return bool(actual_tree) and actual_tree == target_tree
 
 
 def reconcile_repo(
@@ -171,10 +211,9 @@ def reconcile_repo(
     if branch is None:
         return result(ACTION_SKIPPED_DETACHED)
 
-    extra_config = (
-        [f"http.extraHeader=Authorization: {auth_header}"] if auth_header else []
+    fetch = _git(
+        ["fetch", "--quiet", remote_url, branch], repo, env=_auth_env(auth_header)
     )
-    fetch = _git(["fetch", "--quiet", remote_url, branch], repo, extra_config)
     if fetch.returncode != 0:
         return result(ACTION_FETCH_FAILED, branch, fetch.stderr.strip()[:200])
 
@@ -190,10 +229,11 @@ def reconcile_repo(
         == 0
     )
     if local_is_ancestor:
-        worktree_matches = (
-            _git(["diff", "--quiet", fetched_sha, "--"], repo).returncode == 0
-        )
-        if not worktree_matches:
+        if _git(["diff", "--cached", "--quiet"], repo).returncode != 0:
+            # Staged work means an agent is mid-change here; the mixed reset
+            # below would silently unstage it. Wait for a quiet tick.
+            return result(ACTION_SKIPPED_IN_PROGRESS, branch, "staged changes present")
+        if not worktree_matches_commit(repo, fetched_sha):
             # Files are still arriving via Syncthing; try again next tick.
             return result(ACTION_AWAITING_FILES, branch)
         update = _git(
@@ -287,14 +327,21 @@ def run_reconcile_once(
             if repo_relpath == ".":
                 repo_relpath = ""
             for peer in peers:
-                outcome = reconcile_repo(
-                    repo,
-                    folder_id=folder.folder_id,
-                    repo_relpath=repo_relpath,
-                    remote_url=peer_git_url(peer, folder.folder_id, repo_relpath),
-                    auth_header=auth_header,
-                    conflicts_path=conflicts_path,
-                )
+                try:
+                    outcome = reconcile_repo(
+                        repo,
+                        folder_id=folder.folder_id,
+                        repo_relpath=repo_relpath,
+                        remote_url=peer_git_url(peer, folder.folder_id, repo_relpath),
+                        auth_header=auth_header,
+                        conflicts_path=conflicts_path,
+                    )
+                except subprocess.TimeoutExpired:
+                    # One hung repo must not abort the rest of the tick.
+                    summary["errors"].append(
+                        f"git timed out in {folder.folder_id}/{repo_relpath}"
+                    )
+                    continue
                 summary["repos"].append({"peer": peer.name, **asdict(outcome)})
 
     summary["conflicts_count"] = len(unresolved_conflicts(conflicts_path))
