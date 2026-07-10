@@ -8,6 +8,9 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from openbase_coder_cli.openbase_coder_cli_app.git_http import git_http_backend
+from openbase_coder_cli.openbase_coder_cli_app.provenance_hooks_settings import (
+    openbase_hooks_settings,
+)
 from openbase_coder_cli.openbase_coder_cli_app.sync_settings import (
     sync_conflicts,
     sync_conflicts_resolve,
@@ -303,6 +306,11 @@ urlpatterns = [
         "settings/openbase-services/<str:service_name>/",
         openbase_service_action,
         name="openbase-service-action",
+    ),
+    path(
+        "settings/openbase-hooks/",
+        openbase_hooks_settings,
+        name="openbase-hooks-settings",
     ),
     path(
         "settings/coding-backend/",

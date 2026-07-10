@@ -7,6 +7,7 @@ from pathlib import Path
 
 from openbase_coder_cli.backend_config import CODEX_BACKEND, OPENBASE_CLOUD_BACKEND
 from openbase_coder_cli.paths import CODEX_HOME_DIR
+from openbase_coder_cli.toml_text import remove_toml_table, replace_toml_table
 
 CODEX_CONFIG_NAME = "config.toml"
 OPENBASE_CLOUD_PROVIDER = "openbase_cloud"
@@ -69,13 +70,13 @@ def _apply_openbase_cloud_config(text: str, web_backend_url: str | None) -> str:
         'env_key = "OPENBASE_CLOUD_CODEX_API_KEY"\n'
         'wire_api = "responses"\n'
     )
-    return _replace_toml_table(updated, OPENBASE_CLOUD_PROVIDER_TABLE, block)
+    return replace_toml_table(updated, OPENBASE_CLOUD_PROVIDER_TABLE, block)
 
 
 def _apply_direct_codex_config(text: str) -> str:
     model = os.getenv("CODEX_MODEL", DEFAULT_CODEX_MODEL)
     updated = _remove_toml_root_keys(text, {"model", "model_provider"})
-    updated = _remove_toml_table(updated, OPENBASE_CLOUD_PROVIDER_TABLE)
+    updated = remove_toml_table(updated, OPENBASE_CLOUD_PROVIDER_TABLE)
     return _ensure_toml_root_values(updated, (("model", json.dumps(model)),))
 
 
@@ -158,38 +159,3 @@ def _toml_root_key(line: str) -> str | None:
     if not stripped or stripped.startswith("#") or "=" not in stripped:
         return None
     return stripped.split("=", 1)[0].strip()
-
-
-def _replace_toml_table(text: str, table_name: str, block: str) -> str:
-    updated = _remove_toml_table(text, table_name)
-    updated = updated.rstrip()
-    if updated:
-        return f"{updated}\n\n{block}"
-    return block
-
-
-def _remove_toml_table(text: str, table_name: str) -> str:
-    target_header = f"[{table_name}]"
-    lines = text.splitlines()
-    output: list[str] = []
-    index = 0
-
-    while index < len(lines):
-        if lines[index].strip() == target_header:
-            index += 1
-            while index < len(lines):
-                stripped = lines[index].strip()
-                if stripped.startswith("[") and stripped.endswith("]"):
-                    break
-                index += 1
-            while output and not output[-1].strip():
-                output.pop()
-            continue
-
-        output.append(lines[index])
-        index += 1
-
-    while output and not output[-1].strip():
-        output.pop()
-
-    return "\n".join(output) + ("\n" if output else "")

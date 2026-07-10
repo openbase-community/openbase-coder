@@ -59,7 +59,6 @@ from openbase_coder_cli.cli.setup.codex import (
     _ensure_matching_symlink_or_file,  # noqa: F401
     _ensure_normal_codex_mcp,
     _ensure_toml_root_values,  # noqa: F401
-    _replace_toml_table,  # noqa: F401
     _super_agents_mcp_command,  # noqa: F401
     _symlink_codex_auth,
     _symlink_codex_home_config,  # noqa: F401
@@ -171,6 +170,9 @@ from openbase_coder_cli.stt_providers import (
     LOCAL_MLX_WHISPER_STT_PROVIDER_ID,  # noqa: F401
     OPENBASE_CLOUD_STT_PROVIDER_ID,  # noqa: F401
     download_local_mlx_whisper,  # noqa: F401
+)
+from openbase_coder_cli.toml_text import (
+    replace_toml_table as _replace_toml_table,  # noqa: F401
 )
 from openbase_coder_cli.tts_providers import (
     CARTESIA_PROVIDER_ID,  # noqa: F401
@@ -299,9 +301,7 @@ class _SetupProgress:
 @click.option(
     "--link-claude-config",
     is_flag=True,
-    help=(
-        "Symlink Openbase's Claude settings to the normal ~/.claude/settings.json."
-    ),
+    help=("Symlink Openbase's Claude settings to the normal ~/.claude/settings.json."),
 )
 @click.option(
     "--fast-mode/--no-fast-mode",

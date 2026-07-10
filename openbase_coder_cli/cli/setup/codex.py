@@ -29,6 +29,7 @@ from openbase_coder_cli.runtime import (
     packaged_instructions_dir,
     packaged_skills_dir,
 )
+from openbase_coder_cli.toml_text import replace_toml_table
 
 CODEX_HOME_DEFAULT_SOURCE_DIR = "instructions"
 CODEX_HOME_SKILLS_SOURCE_DIR = "skills"
@@ -221,7 +222,7 @@ def _ensure_codex_home_config(
         existing = config_path.read_text(encoding="utf-8")
 
     updated = _ensure_toml_root_values(existing, CODEX_HOME_PERMISSION_VALUES)
-    updated = _replace_toml_table(updated, SUPER_AGENTS_MCP_TABLE, block)
+    updated = replace_toml_table(updated, SUPER_AGENTS_MCP_TABLE, block)
     if updated == existing:
         click.echo(f"Codex home config already configured at {config_path}")
     else:
@@ -251,7 +252,7 @@ def _ensure_normal_codex_mcp(workspace_dir: str) -> None:
     if config_path.is_file():
         existing = config_path.read_text(encoding="utf-8")
 
-    updated = _replace_toml_table(existing, SUPER_AGENTS_MCP_TABLE, block)
+    updated = replace_toml_table(existing, SUPER_AGENTS_MCP_TABLE, block)
     if updated == existing:
         click.echo(f"Normal Codex config already has super-agents at {config_path}")
         return
@@ -401,35 +402,6 @@ def _toml_root_key(line: str) -> str | None:
     if not stripped or stripped.startswith("#") or "=" not in stripped:
         return None
     return stripped.split("=", 1)[0].strip()
-
-
-def _replace_toml_table(text: str, table_name: str, block: str) -> str:
-    target_header = f"[{table_name}]"
-    lines = text.splitlines()
-    output: list[str] = []
-    index = 0
-
-    while index < len(lines):
-        if lines[index].strip() == target_header:
-            index += 1
-            while index < len(lines):
-                stripped = lines[index].strip()
-                if stripped.startswith("[") and stripped.endswith("]"):
-                    break
-                index += 1
-            while output and not output[-1].strip():
-                output.pop()
-            continue
-
-        output.append(lines[index])
-        index += 1
-
-    while output and not output[-1].strip():
-        output.pop()
-
-    if output:
-        return "\n".join(output) + "\n\n" + block
-    return block
 
 
 def _workspace_skill_sources(source_root: Path) -> list[Path]:
