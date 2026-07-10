@@ -82,7 +82,13 @@ def discover_git_repos(
     repos: list[Path] = []
 
     def _walk(directory: Path, depth: int) -> None:
-        if (directory / ".git").exists():
+        try:
+            # Path.exists() raises (not returns False) on EACCES — e.g. a
+            # root-owned docker volume inside a synced folder.
+            is_repo = (directory / ".git").exists()
+        except OSError:
+            return  # Unreadable directory: nothing to reconcile below it.
+        if is_repo:
             repos.append(directory)
             # Keep descending: multi workspaces nest subrepos (each with its
             # own .git) inside the workspace repo, and each needs its own

@@ -299,3 +299,19 @@ def test_scan_file_conflicts_records_sync_conflict_copies(tmp_path: Path) -> Non
     records = conflicts_module.unresolved_conflicts(conflicts_path)
     assert len(records) == 1
     assert records[0]["kind"] == "file"
+
+
+def test_discover_git_repos_skips_unreadable_directories(tmp_path: Path) -> None:
+    import os
+
+    root = tmp_path / "folder"
+    _init_repo(root / "repo-a")
+    locked = root / "locked"
+    locked.mkdir(parents=True)
+    os.chmod(locked, 0o000)
+    try:
+        repos = reconciler.discover_git_repos(root)
+    finally:
+        os.chmod(locked, 0o755)
+
+    assert root / "repo-a" in repos
