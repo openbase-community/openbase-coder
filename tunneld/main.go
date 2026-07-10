@@ -39,8 +39,10 @@ func main() {
 		err = runServe(args)
 	case "peer":
 		err = runPeer(args)
+	case "voicetest":
+		err = runVoiceTest(args)
 	default:
-		err = fmt.Errorf("unknown subcommand %q (expected \"serve\" or \"peer\")", cmd)
+		err = fmt.Errorf("unknown subcommand %q (expected \"serve\", \"peer\", or \"voicetest\")", cmd)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "openbase-tunneld:", err)

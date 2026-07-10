@@ -11,6 +11,7 @@ plan in Notion for the full architecture.
 | ---------------------------------------------------- | ------------------------------------ |
 | `tailscale serve --http=18080 http://127.0.0.1:7999` | tailnet `:18080` reverse proxy       |
 | `tailscale serve --tcp=7880 tcp://127.0.0.1:7880`    | tailnet `:7880` TCP forward          |
+| LiveKit media direct to tailnet IP `:7881/:7882`     | tailnet `:7881` ICE-TCP forward      |
 | `tailscale status --json` subprocess calls           | `GET http://127.0.0.1:7998/status`   |
 | host-network HTTP probes of tailnet peers            | `GET http://127.0.0.1:7998/probe`    |
 
@@ -66,11 +67,65 @@ nothing changes.
    Expected: `GET ... -> 200` with `{"status": "ok"}` — the same health check
    the iOS app performs during pairing.
 
+## Phone-side loopback forwards (Option 1 plumbing)
+
+The `peer` subcommand can hold open loopback forwards through the embedded
+node — the same mechanism TailscaleKit's loopback proxy uses on iOS:
+
+```sh
+./bin/openbase-tunneld peer --host <desktop-dns> --forward 17880=7880,17881=7881
+```
+
+A LiveKit client pointed at `ws://127.0.0.1:17880` then signals through the
+tailnet, and ICE-TCP media dialed to `127.0.0.1:17881` rides the tailnet to
+the desktop's LiveKit `:7881`.
+
+## Voice media measurements
+
+`voicetest` sends synthetic voice frames (default 50 fps × 160 B, the
+LiveKit/opus cadence) between two embedded nodes and reports RTT, jitter,
+and loss for both transports under consideration:
+
+```sh
+# Echo node (desktop side):
+TS_AUTHKEY=... ./bin/openbase-tunneld voicetest serve
+
+# Measure (phone side): --proto udp (in-app relay option) or tcp (ICE-TCP option)
+TS_AUTHKEY=... ./bin/openbase-tunneld voicetest client --host <echo-dns> --proto udp
+
+# Loopback baseline without tsnet:
+./bin/openbase-tunneld voicetest serve --direct 127.0.0.1:19100
+./bin/openbase-tunneld voicetest client --direct 127.0.0.1:19100 --proto udp
+```
+
+### Measured results (2026-07-10, both nodes on one Mac)
+
+45 s at 50 fps × 160 B, 25 s warmup excluded, real tailnet:
+
+| Transport            | RTT p50 | RTT p95 | Jitter (mean) | Loss  |
+| -------------------- | ------- | ------- | ------------- | ----- |
+| loopback baseline    | 0.3 ms  | 0.4 ms  | 0.05 ms       | 0%    |
+| tsnet UDP            | 43 ms   | 125 ms  | 8.1 ms        | 0%    |
+| tsnet TCP            | 44 ms   | 126 ms  | 8.2 ms        | 0.4%  |
+
+Interpretation:
+
+- Two userspace nodes on the *same host* cannot hairpin a direct path, so
+  this traffic rode a DERP relay — treat these numbers as the **worst-case
+  floor**, not the expected phone↔desktop path.
+- Even fully relayed, sustained voice cadence saw zero UDP loss and ~8 ms
+  jitter; ~21 ms added one-way is within the ~150 ms mouth-to-ear budget.
+- TCP ≈ UDP here because DERP itself is a TCP relay. The direct-path
+  UDP-vs-TCP comparison (the real ICE-TCP question) requires two physical
+  devices; the harness is ready for that run.
+
 ## Prototype limitations
 
-- LiveKit WebRTC media (voice) is not addressed here; only the `:7880`
-  signaling forward. Media transport over the userspace stack is the open
-  Phase 0 question in the plan.
+- The voicetest harness quantifies transport quality, but a real LiveKit
+  room join with forced ICE-TCP through the forwards (and the client-SDK
+  wiring to prefer `127.0.0.1:17881`) is still to be proven.
+- Same-host node pairs pin to DERP (no hairpin); cross-device runs are the
+  meaningful benchmark.
 - The daemon binds the control API to loopback without auth; production needs
   a local auth story (unix socket or token) before shipping.
 - Electron (`desktop/electron/main.cjs`) still shells out to the Tailscale

@@ -24,6 +24,8 @@ const (
 	openbaseLocalAddr   = "127.0.0.1:7999"
 	livekitTailnetPort  = 7880
 	livekitLocalAddr    = "127.0.0.1:7880"
+	livekitICETCPPort   = 7881
+	livekitICETCPAddr   = "127.0.0.1:7881"
 	localAPIAddr        = "127.0.0.1:7998"
 
 	probeTimeout = 5 * time.Second
@@ -120,9 +122,19 @@ func runServe(args []string) error {
 	}
 	go forwardTCP(livekitLn, livekitLocalAddr)
 
+	// tailnet :7881 -> LiveKit ICE-TCP, so WebRTC media can ride the tailnet
+	// as TCP when the phone has no OS-level tunnel (v1 sent media directly to
+	// the desktop's tailnet IP, which only worked with the Tailscale app).
+	iceLn, err := srv.Listen("tcp", ":"+strconv.Itoa(livekitICETCPPort))
+	if err != nil {
+		return fmt.Errorf("listen tailnet :%d: %w", livekitICETCPPort, err)
+	}
+	go forwardTCP(iceLn, livekitICETCPAddr)
+
 	api.markForwardsUp()
-	log.Printf("forwarding tailnet :%d -> %s and :%d -> %s",
-		openbaseTailnetPort, openbaseLocalAddr, livekitTailnetPort, livekitLocalAddr)
+	log.Printf("forwarding tailnet :%d -> %s, :%d -> %s, :%d -> %s",
+		openbaseTailnetPort, openbaseLocalAddr, livekitTailnetPort, livekitLocalAddr,
+		livekitICETCPPort, livekitICETCPAddr)
 
 	select {} // run until killed
 }
