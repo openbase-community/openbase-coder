@@ -39,3 +39,12 @@ def test_compat_permission_response_handles_mcp_elicitation() -> None:
     )
 
     assert result == {"action": "accept", "content": None, "_meta": None}
+
+
+def test_compat_permission_response_does_not_generalize_elicitation_methods() -> None:
+    result = super_agents_backend._compat_permission_response_for_request(
+        {"method": "custom/elicitation/request"},
+        "decline",
+    )
+
+    assert result == {"decision": "decline"}

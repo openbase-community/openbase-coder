@@ -30,7 +30,7 @@ def _compat_permission_response_for_request(
         if isinstance(request, dict)
         else getattr(request, "method", "")
     )
-    if "elicitation" in str(method).lower():
+    if str(method) == "mcpServer/elicitation/request":
         return {"action": decision, "content": None, "_meta": None}
     return {"decision": decision}
 
@@ -82,7 +82,9 @@ try:
     from super_agents.app_permissions import (
         permission_response_for_request,  # type: ignore[attr-defined]
     )
-except ImportError:
+except ImportError as exc:
+    if exc.name != "super_agents.app_permissions":
+        raise
     permission_response_for_request = _compat_permission_response_for_request
 
 
