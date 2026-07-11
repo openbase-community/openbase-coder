@@ -130,6 +130,15 @@ SERVICES: list[ServiceDefinition] = [
         backends=(CODEX_BACKEND, OPENBASE_CLOUD_BACKEND),
     ),
     ServiceDefinition(
+        name="team-activity-report",
+        description="Team Activity Report",
+        command_template=(
+            'TEAM_ACTIVITY_INTERVAL="${{TEAM_ACTIVITY_INTERVAL:-45}}"\n'
+            'exec {openbase_coder} team-activity run --interval "$TEAM_ACTIVITY_INTERVAL"'
+        ),
+        workdir_template="{data_dir}",
+    ),
+    ServiceDefinition(
         name="codex-thread-sync",
         description="Codex Thread Sync",
         command_template=(
