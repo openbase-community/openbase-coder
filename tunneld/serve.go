@@ -139,10 +139,27 @@ func runServe(args []string) error {
 	}
 	go forwardTCP(iceLn, livekitICETCPAddr)
 
+	// tailnet :3478 -> embedded TURN relay for WebRTC media (see turn.go).
+	var turnIP net.IP
+	for _, ip := range status.TailscaleIPs {
+		if ip.Is4() {
+			turnIP = ip.AsSlice()
+			break
+		}
+	}
+	if turnIP == nil {
+		return fmt.Errorf("start turn: node has no IPv4 tailnet address")
+	}
+	turnCreds, err := startTURN(srv, cfg.stateDir, turnIP)
+	if err != nil {
+		return fmt.Errorf("start turn: %w", err)
+	}
+	api.turnCreds = turnCreds
+
 	api.markForwardsUp()
-	log.Printf("forwarding tailnet :%d -> %s, :%d -> %s, :%d -> %s",
+	log.Printf("forwarding tailnet :%d -> %s, :%d -> %s, :%d -> %s; turn on tailnet :%d (user %s)",
 		openbaseTailnetPort, openbaseLocalAddr, livekitTailnetPort, livekitLocalAddr,
-		livekitICETCPPort, livekitICETCPAddr)
+		livekitICETCPPort, livekitICETCPAddr, turnTailnetPort, turnCreds.Username)
 
 	select {} // run until killed
 }

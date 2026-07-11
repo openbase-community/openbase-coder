@@ -71,6 +71,30 @@ def tsnet_enabled() -> bool:
     return False
 
 
+def voice_turn_info() -> dict[str, Any] | None:
+    """TURN relay credentials for embedded-mode WebRTC media.
+
+    The daemon mints them into ``<statedir>/turn.json`` and runs the relay on
+    the tailnet; the phone forces its LiveKit media through it because an
+    in-app tsnet node has no OS route for WebRTC's UDP sockets. Served only
+    over loopback and the user's own tailnet.
+    """
+    import json
+
+    try:
+        raw = json.loads((_state_dir() / "turn.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict) or not raw.get("username") or not raw.get("password"):
+        return None
+    return {
+        "username": raw["username"],
+        "password": raw["password"],
+        "port": raw.get("port", 3478),
+        "realm": raw.get("realm", "openbase"),
+    }
+
+
 def tunneld_status() -> tuple[bool, dict[str, Any] | None, str | None]:
     """Fetch node status from tunneld.
 

@@ -47,6 +47,7 @@ type localAPI struct {
 	srv        *tsnet.Server
 	lc         *local.Client
 	token      string
+	turnCreds  *turnCredentials
 	forwardsUp atomic.Bool
 }
 
@@ -57,6 +58,7 @@ func (a *localAPI) handler() http.Handler {
 	mux.HandleFunc("GET /status", a.handleStatus)
 	mux.HandleFunc("GET /health", a.handleHealth)
 	mux.HandleFunc("GET /probe", a.handleProbe)
+	mux.HandleFunc("GET /turnprobe", a.handleTurnProbe)
 	mux.HandleFunc("POST /login", a.handleLogin)
 	return a.requireToken(mux)
 }
