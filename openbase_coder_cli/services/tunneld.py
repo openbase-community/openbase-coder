@@ -51,7 +51,24 @@ def _packaged_binary() -> str | None:
 
 
 def tsnet_enabled() -> bool:
-    return os.environ.get("OPENBASE_TSNET", "").strip().lower() in {"1", "true", "yes"}
+    """Whether this install uses embedded Tailscale instead of the app.
+
+    ``OPENBASE_TSNET`` is an explicit local override in either direction;
+    otherwise the cloud's rollout decision (cached from device-registration
+    responses) applies.
+    """
+    override = os.environ.get("OPENBASE_TSNET", "").strip().lower()
+    if override in {"1", "true", "yes"}:
+        return True
+    if override in {"0", "false", "no"}:
+        return False
+    # Imported lazily: onboarding imports tailscale_serve, which imports us.
+    from openbase_coder_cli.services.onboarding import read_onboarding_cache
+
+    cloud_policy = read_onboarding_cache().get("cloud_policy")
+    if isinstance(cloud_policy, dict):
+        return bool(cloud_policy.get("embedded_tailscale"))
+    return False
 
 
 def tunneld_status() -> tuple[bool, dict[str, Any] | None, str | None]:
@@ -118,6 +135,32 @@ def tunneld_probe(host: str, port: int = 18080, path: str = "/api/health/") -> d
         return response.json()
     except (httpx.HTTPError, ValueError) as exc:
         return {"ok": False, "error": f"tunneld probe failed: {exc}"}
+
+
+REAUTH_MIN_INTERVAL_SECONDS = 600
+_last_reauth_attempt = 0.0
+
+
+def try_tunneld_reauth() -> bool:
+    """Mint a fresh cloud key and log the daemon back in (throttled).
+
+    Tailnet node keys eventually expire; health polls call this so an
+    expired daemon self-heals instead of requiring a re-setup.
+    """
+    global _last_reauth_attempt
+    now = time.monotonic()
+    if now - _last_reauth_attempt < REAUTH_MIN_INTERVAL_SECONDS:
+        return False
+    _last_reauth_attempt = now
+    # Imported lazily: cloud_registration imports tailscale_serve -> us.
+    from openbase_coder_cli.services.cloud_registration import (
+        mint_tailscale_auth_key,
+    )
+
+    auth_key = mint_tailscale_auth_key()
+    if not auth_key:
+        return False
+    return tunneld_login(auth_key)
 
 
 def tunneld_login(auth_key: str) -> bool:

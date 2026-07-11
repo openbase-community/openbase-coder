@@ -162,13 +162,15 @@ from openbase_coder_cli.runtime import (
     packaged_instructions_dir,  # noqa: F401
     packaged_skills_dir,  # noqa: F401
 )
+from openbase_coder_cli.services.definitions import TUNNELD_SERVICE
 from openbase_coder_cli.services.installation import InstallationConfig
-from openbase_coder_cli.services.launchd import install_all_services
+from openbase_coder_cli.services.launchd import install_all_services, install_service
 from openbase_coder_cli.services.onboarding import compute_cli_configured
 from openbase_coder_cli.services.tailscale_serve import (
     configure_tailscale_serve,
     tailscale_serve_health,
 )
+from openbase_coder_cli.services.tunneld import tsnet_enabled
 from openbase_coder_cli.stt_providers import (
     ASSEMBLYAI_STT_PROVIDER_ID,  # noqa: F401
     LOCAL_MLX_WHISPER_STT_PROVIDER_ID,  # noqa: F401
@@ -567,6 +569,9 @@ def _run_setup_phases(
         service_manager = "launchd" if platform.system() == "Darwin" else "systemd"
         click.echo(f"Installing {service_manager} services...")
         install_all_services(config)
+        if tsnet_enabled():
+            click.echo("  Installing openbase-tunneld (embedded Tailscale)...")
+            install_service(config, TUNNELD_SERVICE)
         progress.step("services", "ok")
     else:
         click.echo("Skipped service installation (--skip-services).")

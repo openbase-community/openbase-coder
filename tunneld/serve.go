@@ -89,7 +89,11 @@ func runServe(args []string) error {
 	api := &localAPI{srv: srv, lc: lc, token: token}
 	apiLn, err := net.Listen("tcp", cfg.localAPI)
 	if err != nil {
-		return fmt.Errorf("listen local api %s: %w", cfg.localAPI, err)
+		// The control port doubles as a single-instance lock.
+		return fmt.Errorf(
+			"listen local api %s (another openbase-tunneld already running?): %w",
+			cfg.localAPI, err,
+		)
 	}
 	go func() {
 		if err := http.Serve(apiLn, api.handler()); err != nil {

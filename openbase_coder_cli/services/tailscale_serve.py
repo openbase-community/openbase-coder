@@ -168,6 +168,13 @@ def _tunneld_serve_health() -> TailscaleServeHealth:
         )
 
     running = health.get("backend_state") == "Running"
+    if not running and health.get("backend_state") == "NeedsLogin":
+        # Node key expired or was revoked; self-heal with a fresh cloud key.
+        from openbase_coder_cli.services.tunneld import try_tunneld_reauth
+
+        if try_tunneld_reauth():
+            health = tunneld_health()
+            running = health.get("backend_state") == "Running"
     host = _normalize_host(health.get("self_dns_name"))
     forwards_up = bool(health.get("forwards_up"))
     openbase_url = _openbase_url(host)

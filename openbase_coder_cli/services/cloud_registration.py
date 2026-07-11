@@ -166,11 +166,14 @@ def report_cli_state(
             **result.to_dict(),
         }
     }
+    cloud_policy: dict[str, Any] = {}
     if result.response and result.response.get("minimum_cli_version"):
-        cache_update["cloud_policy"] = {
-            "minimum_cli_version": str(result.response["minimum_cli_version"]),
-            "at": _timestamp(),
-        }
+        cloud_policy["minimum_cli_version"] = str(result.response["minimum_cli_version"])
+    embedded = (result.response or {}).get("embedded_tailscale")
+    if isinstance(embedded, dict):
+        cloud_policy["embedded_tailscale"] = bool(embedded.get("enabled"))
+    if cloud_policy:
+        cache_update["cloud_policy"] = {**cloud_policy, "at": _timestamp()}
     write_onboarding_cache(cache_update)
     return result
 
