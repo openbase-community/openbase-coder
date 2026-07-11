@@ -950,6 +950,31 @@ def test_selected_coding_backend_reads_existing_env(tmp_path) -> None:
     assert setup_cli._selected_coding_backend(env_file, None) == "claude_code"
 
 
+def test_symlink_codex_auth_links_before_codex_login(tmp_path, monkeypatch) -> None:
+    """The service auth symlink dangles until `codex login` writes auth.json."""
+    codex_module = importlib.import_module("openbase_coder_cli.cli.setup.codex")
+    codex_home = tmp_path / "openbase" / "codex_home"
+    monkeypatch.setattr(codex_module, "CODEX_HOME_DIR", codex_home)
+    monkeypatch.setattr(
+        codex_module.Path, "home", classmethod(lambda cls: tmp_path)
+    )
+
+    setup_cli._symlink_codex_auth()
+
+    service_auth = codex_home / "auth.json"
+    assert service_auth.is_symlink()
+    assert not service_auth.is_file()
+
+    normal_auth = tmp_path / ".codex" / "auth.json"
+    normal_auth.parent.mkdir(parents=True)
+    normal_auth.write_text('{"tokens": {}}', encoding="utf-8")
+    assert service_auth.is_file()
+
+    # Re-running keeps the existing link.
+    setup_cli._symlink_codex_auth()
+    assert service_auth.resolve() == normal_auth.resolve()
+
+
 def test_ensure_codex_home_config_can_link_normal_codex_config(
     tmp_path, monkeypatch
 ) -> None:

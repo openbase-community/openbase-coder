@@ -537,8 +537,12 @@ def _run_setup_phases(
         workspace_dir if use_dev_workspace else "",
         link_claude_config=link_claude_config,
     )
+    # UI-driven setup (--json-progress) must never block on an interactive
+    # browser OAuth flow; the desktop app renders a dedicated backend sign-in
+    # step after setup instead (see specs/onboarding).
     _ensure_claude_auth_bridge(
-        login_if_needed=selected_coding_backend == CLAUDE_CODE_BACKEND,
+        login_if_needed=selected_coding_backend == CLAUDE_CODE_BACKEND
+        and not progress.enabled,
         required=selected_coding_backend == CLAUDE_CODE_BACKEND,
     )
 

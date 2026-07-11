@@ -42,6 +42,9 @@ def onboarding_status_cmd(as_json: bool) -> None:
         line(value, name, indent="    ")
     line(payload["authenticated"], "authenticated")
 
+    backend_auth = payload["backend_auth"]
+    line(backend_auth["ready"], f"backend auth ({backend_auth['backend']})")
+
     tailscale_self = payload["tailscale_self"]
     dns_name = tailscale_self["dns_name"]
     line(

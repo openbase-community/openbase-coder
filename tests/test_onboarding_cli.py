@@ -23,6 +23,7 @@ def _fake_status_payload() -> dict:
             "services_installed": False,
         },
         "authenticated": True,
+        "backend_auth": {"backend": "codex", "ready": False},
         "tailscale_self": {
             "available": True,
             "tailscale_available": True,
@@ -63,6 +64,7 @@ def test_onboarding_status_human_readable(monkeypatch) -> None:
     assert result.exit_code == 0
     assert "cli_configured" in result.output
     assert "services_installed" in result.output
+    assert "backend auth (codex)" in result.output
     assert "mac.tailnet.ts.net" in result.output
     assert "not reachable" in result.output
 
@@ -283,3 +285,100 @@ def test_setup_phases_do_not_report_to_cloud(monkeypatch, tmp_path) -> None:
 
     assert serve_healthy is True
     assert all(event[0] != "cloud_report" for event in progress.events)
+
+
+def _run_claude_code_setup_phases(monkeypatch, tmp_path, *, json_progress: bool):
+    """Run _run_setup_phases with a claude_code backend, capturing auth calls."""
+
+    class FakeInstallationConfig:
+        console_build_dir = ""
+
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def save(self) -> None:
+            return None
+
+    class CaptureProgress:
+        def __init__(self, enabled: bool):
+            self.enabled = enabled
+
+        def step(self, step_id: str, step_status: str, detail: str | None = None):
+            return None
+
+    def noop(*args, **kwargs):
+        return None
+
+    auth_bridge_calls: list[dict] = []
+
+    def capture_auth_bridge(**kwargs):
+        auth_bridge_calls.append(kwargs)
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setattr(setup_cli, "OPENBASE_BASE_DIR", tmp_path / ".openbase")
+    monkeypatch.setattr(setup_cli, "InstallationConfig", FakeInstallationConfig)
+    monkeypatch.setattr(setup_cli, "current_runtime_package", lambda: None)
+    monkeypatch.setattr(
+        setup_cli, "resolve_dev_workspace_dir", lambda value: str(workspace)
+    )
+    for name in (
+        "_ensure_thread_sync_exchange_dir",
+        "_ensure_bundled_sounds",
+        "_ensure_env_file",
+        "ensure_backend_binary",
+        "_symlink_codex_auth",
+        "_ensure_normal_claude_md_symlink",
+        "_ensure_codex_home_default_files",
+        "_ensure_codex_home_dispatcher_config",
+        "set_dispatcher_service_tier",
+        "_symlink_codex_home_skills",
+        "_init_cli_workspace",
+        "_ensure_codex_home_config",
+        "_ensure_claude_config",
+        "_ensure_normal_codex_mcp",
+        "_ensure_normal_claude_mcp",
+        "_install_cli_shim",
+        "_build_console",
+        "configure_tailscale_serve",
+        "_ensure_session_id_hook_script",
+    ):
+        monkeypatch.setattr(setup_cli, name, noop)
+    monkeypatch.setattr(setup_cli, "_ensure_claude_auth_bridge", capture_auth_bridge)
+    monkeypatch.setattr(
+        setup_cli, "_selected_coding_backend", lambda *args: "claude_code"
+    )
+    monkeypatch.setattr(
+        setup_cli,
+        "tailscale_serve_health",
+        lambda: SimpleNamespace(healthy=True, openbase_url="", error=None),
+    )
+
+    setup_cli._run_setup_phases(
+        CaptureProgress(json_progress),
+        workspace_dir=str(workspace),
+        env_file=str(tmp_path / ".env"),
+        assembly_ai_api_key="",
+        cartesia_api_key="",
+        skip_services=True,
+        link_codex_config=False,
+        link_claude_config=False,
+        fast_mode=True,
+        coding_backend="claude_code",
+        audio_provider="openbase-cloud",
+    )
+    return auth_bridge_calls
+
+
+def test_json_progress_setup_never_runs_interactive_claude_login(
+    monkeypatch, tmp_path
+) -> None:
+    calls = _run_claude_code_setup_phases(monkeypatch, tmp_path, json_progress=True)
+
+    assert calls == [{"login_if_needed": False, "required": True}]
+
+
+def test_interactive_setup_still_runs_claude_login(monkeypatch, tmp_path) -> None:
+    calls = _run_claude_code_setup_phases(monkeypatch, tmp_path, json_progress=False)
+
+    assert calls == [{"login_if_needed": True, "required": True}]

@@ -59,11 +59,12 @@ def _symlink_codex_auth() -> None:
     CODEX_HOME_DIR.mkdir(parents=True, exist_ok=True)
 
     if not codex_auth.is_file():
+        # Still link (dangling until `codex login` writes the file) so a
+        # post-setup login is picked up without re-running setup.
         click.echo(
             f"Codex auth not found at {codex_auth}; run 'codex login' before "
             "using voice Codex services."
         )
-        return
 
     if service_auth.is_symlink():
         if service_auth.resolve() == codex_auth.resolve():
