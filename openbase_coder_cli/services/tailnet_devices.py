@@ -9,6 +9,12 @@ from typing import Any
 
 import httpx
 
+from openbase_coder_cli.services.tunneld import (
+    tsnet_enabled,
+    tunneld_probe,
+    tunneld_status,
+)
+
 OPENBASE_CODER_TAILNET_PORT = 18080
 OPENBASE_HEALTH_PATH = "/api/health/"
 TAILSCALE_STATUS_TIMEOUT_SECONDS = 5
@@ -48,6 +54,9 @@ def _tailscale_status_payload() -> tuple[bool, dict[str, Any] | None, str | None
     Returns ``(tailscale_available, status_payload, error)``; ``status_payload``
     is ``None`` whenever ``error`` is set.
     """
+    if tsnet_enabled():
+        return tunneld_status()
+
     tailscale_bin = shutil.which("tailscale")
     if not tailscale_bin:
         return False, None, "tailscale was not found on PATH."
@@ -218,6 +227,15 @@ def _probe_openbase_devices(devices: list[TailnetDevice]) -> None:
 def _probe_openbase_device(device: TailnetDevice) -> None:
     url = f"http://{_url_host_literal(device.host)}:{OPENBASE_CODER_TAILNET_PORT}{OPENBASE_HEALTH_PATH}"
     device.openbase_url = url.removesuffix(OPENBASE_HEALTH_PATH)
+    if tsnet_enabled():
+        # The host network stack can't reach tailnet addresses when Tailscale
+        # is embedded; dial through the tunneld node instead.
+        result = tunneld_probe(device.host, OPENBASE_CODER_TAILNET_PORT, OPENBASE_HEALTH_PATH)
+        device.openbase_available = bool(result.get("ok"))
+        device.probe_error = None if device.openbase_available else str(
+            result.get("error") or f"HTTP {result.get('status_code')}"
+        )
+        return
     try:
         response = httpx.get(url, timeout=OPENBASE_PROBE_TIMEOUT_SECONDS)
     except httpx.HTTPError as exc:

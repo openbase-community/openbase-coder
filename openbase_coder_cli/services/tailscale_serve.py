@@ -9,6 +9,13 @@ from typing import Any
 
 import httpx
 
+from openbase_coder_cli.services.tunneld import (
+    ensure_tunneld_running,
+    tsnet_enabled,
+    tunneld_health,
+    tunneld_probe,
+)
+
 OPENBASE_CODER_TAILNET_PORT = 18080
 OPENBASE_CODER_LOCAL_PORT = 7999
 LIVEKIT_TAILNET_PORT = 7880
@@ -54,6 +61,17 @@ class TailscaleServeHealth:
 
 
 def configure_tailscale_serve() -> None:
+    if tsnet_enabled():
+        # The embedded node forwards the routes itself; make sure it runs and
+        # is logged in, minting a cloud auth key when one is available.
+        # Imported lazily: cloud_registration imports this module at top level.
+        from openbase_coder_cli.services.cloud_registration import (
+            mint_tailscale_auth_key,
+        )
+
+        ensure_tunneld_running(auth_key=mint_tailscale_auth_key())
+        return
+
     tailscale_bin = _tailscale_bin()
     if not tailscale_bin:
         raise RuntimeError("tailscale was not found (checked PATH and /Applications/Tailscale.app).")
@@ -75,6 +93,9 @@ def configure_tailscale_serve() -> None:
 
 
 def tailscale_serve_health() -> TailscaleServeHealth:
+    if tsnet_enabled():
+        return _tunneld_serve_health()
+
     tailscale_bin = _tailscale_bin()
     if not tailscale_bin:
         return TailscaleServeHealth(
@@ -130,6 +151,70 @@ def tailscale_serve_health() -> TailscaleServeHealth:
         openbase_reachable=openbase_reachable,
         error=reachability_error,
     )
+
+
+def _tunneld_serve_health() -> TailscaleServeHealth:
+    health = tunneld_health()
+    if not health.get("reachable"):
+        return TailscaleServeHealth(
+            tailscale_available=False,
+            tailscale_running=False,
+            host=None,
+            openbase_url=None,
+            openbase_configured=False,
+            livekit_configured=False,
+            openbase_reachable=False,
+            error=str(health.get("error") or "openbase-tunneld is not reachable."),
+        )
+
+    running = health.get("backend_state") == "Running"
+    if not running and health.get("backend_state") == "NeedsLogin":
+        # Node key expired or was revoked; self-heal with a fresh cloud key.
+        from openbase_coder_cli.services.tunneld import try_tunneld_reauth
+
+        if try_tunneld_reauth():
+            health = tunneld_health()
+            running = health.get("backend_state") == "Running"
+    host = _normalize_host(health.get("self_dns_name"))
+    forwards_up = bool(health.get("forwards_up"))
+    openbase_url = _openbase_url(host)
+
+    error: str | None = None
+    if not running:
+        if health.get("auth_url"):
+            error = f"tunneld needs Tailscale login: {health['auth_url']}"
+        else:
+            error = f"tunneld backend state is {health.get('backend_state')}."
+
+    openbase_reachable = False
+    if running and forwards_up and host:
+        # The host network stack can't reach tailnet addresses, so verify the
+        # serve path by dialing our own node through tunneld. Fall back to the
+        # local backend health check if self-dial is unsupported.
+        probe = tunneld_probe(host, OPENBASE_CODER_TAILNET_PORT, OPENBASE_HEALTH_PATH)
+        if probe.get("ok"):
+            openbase_reachable = True
+        else:
+            openbase_reachable, error = _openbase_reachable(
+                f"http://127.0.0.1:{OPENBASE_CODER_LOCAL_PORT}"
+            )
+
+    return TailscaleServeHealth(
+        tailscale_available=True,
+        tailscale_running=running,
+        host=host,
+        openbase_url=openbase_url,
+        openbase_configured=forwards_up,
+        livekit_configured=forwards_up,
+        openbase_reachable=openbase_reachable,
+        error=error,
+    )
+
+
+def _normalize_host(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value.strip().rstrip(".") or None
 
 
 TAILSCALE_APP_BUNDLE_CLI = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"

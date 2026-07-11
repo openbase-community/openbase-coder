@@ -42,6 +42,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--package-dir", type=Path)
     parser.add_argument("--archive-output", type=Path)
     parser.add_argument("--livekit-server-bin", type=Path, required=True)
+    parser.add_argument(
+        "--tunneld-bin",
+        type=Path,
+        help="Optional openbase-tunneld binary (embedded Tailscale) to bundle.",
+    )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--skip-console-build", action="store_true")
     return parser.parse_args()
@@ -65,6 +70,7 @@ def main() -> int:
         package_dir,
         python_dir,
         args.livekit_server_bin.resolve(),
+        tunneld_bin=args.tunneld_bin.resolve() if args.tunneld_bin else None,
     )
     stage_console(package_dir, skip_build=args.skip_console_build)
     stage_optional_tree(INSTRUCTIONS_ROOT, package_dir / "instructions")
@@ -233,9 +239,13 @@ def stage_bin(
     package_dir: Path,
     python_dir: Path,
     livekit_server_bin: Path,
+    *,
+    tunneld_bin: Path | None = None,
 ) -> None:
     if not livekit_server_bin.is_file():
         raise RuntimeError(f"LiveKit binary not found: {livekit_server_bin}")
+    if tunneld_bin is not None and not tunneld_bin.is_file():
+        raise RuntimeError(f"openbase-tunneld binary not found: {tunneld_bin}")
     bin_dir = package_dir / "bin"
     bin_dir.mkdir()
     launcher = bin_dir / "openbase-coder"
@@ -249,6 +259,9 @@ def stage_bin(
     launcher.chmod(0o755)
     shutil.copy2(livekit_server_bin, bin_dir / "livekit-server")
     (bin_dir / "livekit-server").chmod(0o755)
+    if tunneld_bin is not None:
+        shutil.copy2(tunneld_bin, bin_dir / "openbase-tunneld")
+        (bin_dir / "openbase-tunneld").chmod(0o755)
 
 
 def stage_console(package_dir: Path, *, skip_build: bool) -> None:
@@ -312,6 +325,8 @@ def write_metadata(
         "livekit": "bin/livekit-server",
         "repo_shas": repo_shas,
     }
+    if (package_dir / "bin" / "openbase-tunneld").is_file():
+        metadata["tunneld"] = "bin/openbase-tunneld"
     (package_dir / METADATA_FILENAME).write_text(
         json.dumps(metadata, indent=2) + "\n",
         encoding="utf-8",

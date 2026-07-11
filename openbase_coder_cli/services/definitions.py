@@ -275,7 +275,22 @@ SERVICES: list[ServiceDefinition] = [
         # `openbase-coder provision`, never on normal local installs.
         install_by_default=False,
     ),
+    ServiceDefinition(
+        name="openbase-tunneld",
+        description="Openbase Tunneld (embedded Tailscale)",
+        command_template="exec {tunneld} serve",
+        workdir_template="{data_dir}",
+        # Installed by setup only when embedded Tailscale is enabled
+        # (OPENBASE_TSNET / the cloud rollout flag), not on v1 installs.
+        install_by_default=False,
+        port=7998,
+        cleanup_ports=(7998,),
+        cleanup_command_substrings=("openbase-tunneld",),
+    ),
 ]
+
+
+TUNNELD_SERVICE = next(s for s in SERVICES if s.name == "openbase-tunneld")
 
 
 def default_services(coding_backend: str | None = None) -> list[ServiceDefinition]:

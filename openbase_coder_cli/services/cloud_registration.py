@@ -34,6 +34,7 @@ from openbase_coder_cli.services.tailnet_devices import tailscale_self_identity
 from openbase_coder_cli.services.tailscale_serve import tailscale_serve_health
 
 DEVICE_REGISTER_PATH = "/api/openbase/devices/register/"
+DEVICE_TAILSCALE_KEY_PATH = "/api/openbase/devices/tailscale-key/"
 REQUEST_TIMEOUT_SECONDS = 15
 
 
@@ -165,11 +166,14 @@ def report_cli_state(
             **result.to_dict(),
         }
     }
+    cloud_policy: dict[str, Any] = {}
     if result.response and result.response.get("minimum_cli_version"):
-        cache_update["cloud_policy"] = {
-            "minimum_cli_version": str(result.response["minimum_cli_version"]),
-            "at": _timestamp(),
-        }
+        cloud_policy["minimum_cli_version"] = str(result.response["minimum_cli_version"])
+    embedded = (result.response or {}).get("embedded_tailscale")
+    if isinstance(embedded, dict):
+        cloud_policy["embedded_tailscale"] = bool(embedded.get("enabled"))
+    if cloud_policy:
+        cache_update["cloud_policy"] = {**cloud_policy, "at": _timestamp()}
     write_onboarding_cache(cache_update)
     return result
 
@@ -184,6 +188,22 @@ def register_and_report(
     Returns the first failing result so callers can surface a single warning.
     """
     return report_cli_state(cli_configured=cli_configured, serve_healthy=serve_healthy)
+
+
+def mint_tailscale_auth_key() -> str | None:
+    """Ask openbase-cloud for a pre-authorized Tailscale auth key. Never raises.
+
+    Returns ``None`` when the cloud does not support minting yet (or errors),
+    so embedded-tsnet setup can fall back to interactive login.
+    """
+    result = _post_to_cloud(
+        DEVICE_TAILSCALE_KEY_PATH,
+        {"device_id": _device_id(), "kind": "desktop"},
+    )
+    if not result.ok or not isinstance(result.response, dict):
+        return None
+    key = result.response.get("auth_key")
+    return key if isinstance(key, str) and key else None
 
 
 def _post_to_cloud(

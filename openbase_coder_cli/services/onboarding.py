@@ -78,11 +78,12 @@ def web_backend_url() -> str:
 
 
 def onboarding_status_payload() -> dict[str, Any]:
-    """Local onboarding status consumed by the Mac app and console."""
+    """Local onboarding status consumed by the Mac app, iOS app, and console."""
     checks = cli_configured_checks()
     from openbase_coder_cli.self_update import version_info
+    from openbase_coder_cli.services.tunneld import tsnet_enabled, voice_turn_info
 
-    return {
+    payload = {
         "cli_configured": all(checks.values()),
         "checks": checks,
         "versions": version_info(),
@@ -91,3 +92,11 @@ def onboarding_status_payload() -> dict[str, Any]:
         "tailscale_serve": tailscale_serve_health().to_dict(),
         "cloud": read_onboarding_cache(),
     }
+    if tsnet_enabled():
+        # Embedded-mode phones route WebRTC media through the tunneld TURN
+        # relay; this endpoint is their credential channel (loopback and the
+        # user's own tailnet only).
+        turn = voice_turn_info()
+        if turn:
+            payload["voice_turn"] = turn
+    return payload
