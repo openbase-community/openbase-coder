@@ -18,6 +18,7 @@ from openbase_coder_cli.openbase_coder_cli_app import (  # noqa: E402
 
 
 def test_service_status_includes_background_openbase_services(monkeypatch) -> None:
+    monkeypatch.setattr(services_views, "configured_coding_backend", lambda: "codex")
     monkeypatch.setattr(services_views, "_check_port", lambda port: True)
     monkeypatch.setattr(services_views, "_check_tailscale", lambda: True)
     monkeypatch.setattr(services_views, "_check_web_backend", lambda: True)
@@ -87,6 +88,44 @@ def test_service_status_includes_background_openbase_services(monkeypatch) -> No
         "optional": False,
     }
     assert len(response.data["services"]) == 10
+
+
+def test_service_status_omits_codex_app_server_on_claude_code_backend(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        services_views, "configured_coding_backend", lambda: "claude_code"
+    )
+    monkeypatch.setattr(services_views, "_check_port", lambda port: True)
+    monkeypatch.setattr(services_views, "_check_tailscale", lambda: True)
+    monkeypatch.setattr(services_views, "_check_web_backend", lambda: True)
+    monkeypatch.setattr(
+        services_views,
+        "tailscale_serve_health",
+        lambda: SimpleNamespace(
+            healthy=True,
+            host="mac.tailnet.ts.net",
+            openbase_url="http://mac.tailnet.ts.net:18080",
+            openbase_configured=True,
+            livekit_configured=True,
+            openbase_reachable=True,
+            error=None,
+        ),
+    )
+    monkeypatch.setattr(
+        services_views,
+        "launchctl_status",
+        lambda service: {"installed": True, "pid": "123", "last_exit_code": None},
+    )
+
+    request = APIRequestFactory().get("/api/status/")
+    force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+
+    response = views.service_status(request)
+
+    assert response.status_code == 200
+    assert "codex_app_server" not in response.data["services"]
+    assert len(response.data["services"]) == 9
 
 
 def test_thread_device_sync_status_returns_snapshot_payload(monkeypatch) -> None:

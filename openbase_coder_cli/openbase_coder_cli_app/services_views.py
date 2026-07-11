@@ -46,6 +46,7 @@ from openbase_coder_cli.services.openbase_services import (
     schedule_openbase_restart_payload,
 )
 from openbase_coder_cli.services.restart import restart_target_names
+from openbase_coder_cli.services.selection import configured_coding_backend
 from openbase_coder_cli.services.tailscale_serve import tailscale_serve_health
 
 logger = logging.getLogger(__name__)
@@ -331,13 +332,24 @@ def service_status(request):
         },
         "tailscale": {"name": "Tailscale", "port": None, "optional": False},
     }
+    # Backend-scoped services (e.g. the Codex App Server on the claude_code
+    # backend) are intentionally not installed, so reporting them would raise
+    # a false "stopped" warning in the apps.
+    coding_backend = configured_coding_backend()
+    codex_app_server = next(
+        (svc for svc in SERVICES if svc.name == "codex-app-server"), None
+    )
+    if codex_app_server is not None and not codex_app_server.supports_backend(
+        coding_backend
+    ):
+        del services["codex_app_server"]
     for service_name in (
         "codex-thread-sync",
         "codex-thread-device-sync",
         "openbase-routines",
     ):
         service = next((svc for svc in SERVICES if svc.name == service_name), None)
-        if not service:
+        if not service or not service.supports_backend(coding_backend):
             continue
         status_payload = launchctl_status(service)
         services[service_name.replace("-", "_")] = {
