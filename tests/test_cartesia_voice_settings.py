@@ -419,6 +419,46 @@ def test_livekit_room_token_blocks_openbase_cloud_audio_without_subscription(
     assert response.data["code"] == "subscription_required"
 
 
+def test_livekit_room_token_blocks_uncached_local_audio(monkeypatch) -> None:
+    monkeypatch.setattr(
+        views._livekit,
+        "_livekit_client_token_credentials",
+        lambda: ("livekit-client-key", "livekit-client-secret"),
+    )
+    monkeypatch.setattr(
+        views._livekit,
+        "selected_tts_provider_id",
+        lambda: "kokoro",
+    )
+    monkeypatch.setattr(
+        views._livekit,
+        "selected_stt_provider_id",
+        lambda: "local_mlx_whisper",
+    )
+    monkeypatch.setattr(
+        views._livekit,
+        "get_tts_provider",
+        lambda _provider: SimpleNamespace(
+            readiness=lambda: SimpleNamespace(
+                ready=False,
+                detail="Kokoro language model is missing.",
+            )
+        ),
+    )
+
+    response = views.livekit_room_token(
+        _jwt_authenticated_request(
+            "POST",
+            "/api/livekit-room-token/",
+            {"livekit_dispatch_agent_name": "livekit-agent"},
+        )
+    )
+
+    assert response.status_code == 503
+    assert response.data["code"] == "local_audio_not_ready"
+    assert "setup --audio-provider local" in response.data["detail"]
+
+
 def test_apple_music_playback_entitlement_reports_subscription_required(
     monkeypatch,
 ) -> None:

@@ -1073,6 +1073,25 @@ def test_ensure_env_file_updates_existing_backend_only_when_requested(tmp_path) 
     assert "OPENBASE_CODING_BACKEND=claude_code" in content
 
 
+def test_ensure_env_file_removes_legacy_offline_model_flags(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "KEEP_ME=1\nHF_HUB_OFFLINE=1\nTRANSFORMERS_OFFLINE=1\n",
+        encoding="utf-8",
+    )
+
+    setup_cli._ensure_env_file(
+        str(env_file),
+        assembly_ai_api_key="",
+        cartesia_api_key="",
+    )
+
+    content = env_file.read_text(encoding="utf-8")
+    assert "KEEP_ME=1" in content
+    assert "HF_HUB_OFFLINE" not in content
+    assert "TRANSFORMERS_OFFLINE" not in content
+
+
 def test_ensure_thread_sync_exchange_dir_creates_syncthing_files(
     tmp_path, monkeypatch
 ) -> None:

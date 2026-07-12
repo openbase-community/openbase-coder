@@ -747,10 +747,41 @@ def livekit_room_token(request):
             }
         )
 
+    tts_provider_id = selected_tts_provider_id()
+    stt_provider_id = selected_stt_provider_id()
+    if tts_provider_id == KOKORO_PROVIDER_ID:
+        readiness = get_tts_provider(KOKORO_PROVIDER_ID).readiness()
+        if not readiness.ready:
+            return Response(
+                {
+                    "detail": (
+                        "Local Kokoro audio is not ready"
+                        + (f": {readiness.detail}" if readiness.detail else ".")
+                        + " Run "
+                        "`openbase-coder setup --audio-provider local` and try again."
+                    ),
+                    "code": "local_audio_not_ready",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+    if stt_provider_id == LOCAL_MLX_WHISPER_STT_PROVIDER_ID:
+        readiness = local_mlx_whisper_readiness()
+        if not readiness.ready:
+            return Response(
+                {
+                    "detail": (
+                        "Local Whisper speech recognition is missing. Run "
+                        "`openbase-coder setup --audio-provider local` and try again."
+                    ),
+                    "code": "local_audio_not_ready",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
     try:
         ensure_openbase_cloud_audio_subscription(
-            tts_provider_id=selected_tts_provider_id(),
-            stt_provider_id=selected_stt_provider_id(),
+            tts_provider_id=tts_provider_id,
+            stt_provider_id=stt_provider_id,
             web_backend_url=(
                 getattr(settings, "WEB_BACKEND_URL", "") or DEFAULT_WEB_BACKEND_URL
             ).rstrip("/"),
