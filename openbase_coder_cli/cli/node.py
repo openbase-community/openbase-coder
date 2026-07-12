@@ -88,6 +88,9 @@ def _which_node_binary(name: str) -> str | None:
             Path("/usr/local/bin") / name,
         ]
     )
+    candidates.extend(
+        sorted((Path.home() / ".nvm" / "versions" / "node").glob(f"*/bin/{name}"))
+    )
 
     for candidate in candidates:
         if candidate.is_file() and os.access(candidate, os.X_OK):

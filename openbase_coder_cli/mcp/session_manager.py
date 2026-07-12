@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from super_agents.app_models import LabelQueryInput
-from super_agents.app_permissions import permission_response_for_request
 from super_agents.app_server_client import (
     CodexAppServerClient,
     extract_notification_thread_id,
@@ -22,15 +21,12 @@ from super_agents.app_server_client import (
     extract_turn_id,
     find_latest_turn,
     login_shell_config_override,
+    read_permission_store,
     shared_permission_requests,
     write_shared_permission_decision,
 )
-from super_agents.backend_clients import (
-    CLAUDE_CODE_BACKEND,
-    backend_from_environment,
-    client_from_environment,
-)
 
+from openbase_coder_cli.backend_config import CLAUDE_CODE_BACKEND
 from openbase_coder_cli.livekit_voice_history import record_voice_assignment
 from openbase_coder_cli.livekit_voice_route import (
     get_livekit_voice_route_state,
@@ -38,6 +34,11 @@ from openbase_coder_cli.livekit_voice_route import (
 )
 from openbase_coder_cli.onboarding_reminder import append_onboarding_reminder
 from openbase_coder_cli.paths import CODEX_SUPER_AGENT_INSTRUCTIONS_PATH
+from openbase_coder_cli.super_agents_backend import (
+    backend_from_environment,
+    client_from_environment,
+    permission_response_for_request,
+)
 
 from .models import QueuedTurnInfo
 from .models import ThreadInfo as SessionInfo
@@ -414,10 +415,20 @@ class CodexAppServerSessionManager:
 
     async def list_approval_requests(self) -> list[dict[str, Any]]:
         """List currently pending app-server approval requests across threads."""
+        permission_store = read_permission_store()
+        queued_decision_ids = {
+            str(request_id)
+            for request_id in (
+                permission_store.get("decisions", {})
+                if isinstance(permission_store.get("decisions"), dict)
+                else {}
+            )
+        }
         requests_by_id = {
             str(request.get("id")): request
             for request in shared_permission_requests()
             if request.get("id") is not None
+            and str(request.get("id")) not in queued_decision_ids
         }
         try:
             await self._client.ensure_connected()
@@ -1273,7 +1284,13 @@ def _find_shared_permission_request(request_id: str | int) -> dict[str, Any] | N
     request_ids = {str(request_id)}
     if isinstance(request_id, str) and request_id.isdigit():
         request_ids.add(str(int(request_id)))
-    for request in shared_permission_requests():
+    permission_store = read_permission_store()
+    raw_requests = permission_store.get("requests", {})
+    if not isinstance(raw_requests, dict):
+        return None
+    for request in raw_requests.values():
+        if not isinstance(request, dict):
+            continue
         if str(request.get("id")) in request_ids:
             return request
     return None

@@ -751,7 +751,7 @@ class SuperAgentsLiveKitClient:
         return LabelQueryInput(**values)
 
     def _client_from_environment(self) -> Any:
-        from super_agents.backend_clients import client_from_environment
+        from openbase_coder_cli.super_agents_backend import client_from_environment
 
         return client_from_environment()
 
