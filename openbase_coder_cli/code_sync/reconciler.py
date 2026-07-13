@@ -54,7 +54,16 @@ MAX_REPO_DEPTH = 5
 PEER_API_PORT = 18080  # Django CLI server exposed on the tailnet.
 GIT_TIMEOUT_SECONDS = 60
 RECONCILE_STATE_PATH = CODE_SYNC_DIR / "reconcile-state.json"
-SKIP_DIR_NAMES = {"node_modules", ".venv", "venv", "__pycache__", "DerivedData"}
+SKIP_DIR_NAMES = {
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "DerivedData",
+    # Version copies from a (legacy) in-folder Syncthing versioner are
+    # archives, not live conflicts.
+    ".stversions",
+}
 
 ACTION_FAST_FORWARDED = "fast_forwarded"
 ACTION_UP_TO_DATE = "up_to_date"
@@ -227,7 +236,12 @@ def reconcile_repo(
     if fetch.returncode != 0:
         return result(ACTION_FETCH_FAILED, branch, fetch.stderr.strip()[:200])
 
-    fetched_sha = _git(["rev-parse", "FETCH_HEAD"], repo).stdout.strip()
+    # --verify: plain rev-parse echoes the ref name itself when it cannot
+    # resolve, which once minted a conflict record against a "remote" sha
+    # of literally FETCH_HEAD.
+    fetched_sha = _git(
+        ["rev-parse", "--verify", "--quiet", "FETCH_HEAD^{commit}"], repo
+    ).stdout.strip()
     local_sha = _git(["rev-parse", f"refs/heads/{branch}"], repo).stdout.strip()
     if not fetched_sha or not local_sha:
         return result(ACTION_FETCH_FAILED, branch, "could not resolve heads")
