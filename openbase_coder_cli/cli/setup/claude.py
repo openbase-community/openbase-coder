@@ -9,6 +9,10 @@ from pathlib import Path
 
 import click
 
+from openbase_coder_cli.backend_config import (
+    CLAUDE_CODE_BACKEND,
+    SUPER_AGENTS_DEFAULT_BACKEND_ENV_KEY,
+)
 from openbase_coder_cli.claude_auth import (
     claude_auth_status,
     copy_normal_claude_keychain,
@@ -125,6 +129,9 @@ def _ensure_claude_config(
                     "CODEX_SUPER_AGENT_INSTRUCTIONS_PATH": str(
                         CODEX_SUPER_AGENT_INSTRUCTIONS_PATH
                     ),
+                    # Claude Code sessions spawn Claude Code Super Agents by
+                    # default; explicit per-spawn backend params still win.
+                    SUPER_AGENTS_DEFAULT_BACKEND_ENV_KEY: CLAUDE_CODE_BACKEND,
                 },
             },
         },
@@ -156,6 +163,10 @@ def _ensure_normal_claude_mcp(workspace_dir: str) -> None:
         "type": "stdio",
         "command": str(command_path),
         **({"args": args} if args else {}),
+        # Never redirects CLAUDE_CONFIG_DIR; only makes normal Claude
+        # sessions spawn Claude Code Super Agents by default (explicit
+        # per-spawn backend params still win).
+        "env": {SUPER_AGENTS_DEFAULT_BACKEND_ENV_KEY: CLAUDE_CODE_BACKEND},
     }
     if mcp_servers.get("super-agents") == entry:
         click.echo(

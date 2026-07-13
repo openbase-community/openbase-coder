@@ -31,6 +31,8 @@ def test_ensure_normal_codex_mcp_adds_only_the_table(tmp_path, monkeypatch) -> N
     content = config_path.read_text(encoding="utf-8")
     assert "[mcp_servers.super-agents]" in content
     assert json.dumps(str(command)) in content
+    # Normal Codex sessions spawn Codex Super Agents by default.
+    assert 'env = { SUPER_AGENTS_DEFAULT_BACKEND = "codex" }' in content
     assert 'model_reasoning_effort = "high"' in content
     # Never the Openbase permission overrides.
     assert "danger-full-access" not in content
@@ -73,9 +75,11 @@ def test_ensure_normal_claude_mcp_adds_entry_and_preserves_state(
     assert payload["mcpServers"]["super-agents"] == {
         "type": "stdio",
         "command": str(command),
+        # Normal Claude sessions spawn Claude Code Super Agents by default.
+        "env": {"SUPER_AGENTS_DEFAULT_BACKEND": "claude_code"},
     }
     # Normal-home entry never redirects CLAUDE_CONFIG_DIR.
-    assert "env" not in payload["mcpServers"]["super-agents"]
+    assert "CLAUDE_CONFIG_DIR" not in payload["mcpServers"]["super-agents"]["env"]
 
 
 def test_copy_normal_claude_keychain_copies_secret(monkeypatch, tmp_path) -> None:

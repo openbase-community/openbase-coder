@@ -6,6 +6,10 @@ CLAUDE_CODE_BACKEND = "claude_code"
 SUPPORTED_BACKENDS = (CODEX_BACKEND, OPENBASE_CLOUD_BACKEND, CLAUDE_CODE_BACKEND)
 DEFAULT_CODING_BACKEND = "codex"
 CODING_BACKEND_ENV_KEY = "OPENBASE_CODING_BACKEND"
+# Per-process launch-default override read by super-agents-mcp: set in each
+# MCP server registration so spawned Super Agents default to the spawning
+# session's own backend type. Explicit per-spawn backend params still win.
+SUPER_AGENTS_DEFAULT_BACKEND_ENV_KEY = "SUPER_AGENTS_DEFAULT_BACKEND"
 BACKEND_ALIASES = {
     "codex": CODEX_BACKEND,
     "openbase cloud": OPENBASE_CLOUD_BACKEND,

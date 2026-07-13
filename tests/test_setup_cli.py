@@ -668,6 +668,7 @@ def test_ensure_codex_home_config_creates_config(tmp_path, monkeypatch) -> None:
         "\n"
         "[mcp_servers.super-agents]\n"
         f"command = {json.dumps(str(command))}\n"
+        'env = { SUPER_AGENTS_DEFAULT_BACKEND = "codex" }\n'
         + _expected_session_id_hook_suffix(codex_home)
     )
 
@@ -718,6 +719,7 @@ def test_ensure_codex_home_config_replaces_stale_values(tmp_path, monkeypatch) -
     assert "args =" not in updated
     assert '[projects."/Users/gabemontague"]\ntrust_level = "trusted"' in updated
     assert f"command = {json.dumps(str(command))}" in updated
+    assert 'env = { SUPER_AGENTS_DEFAULT_BACKEND = "codex" }' in updated
     assert '[mcp_servers.playwright]\ncommand = "npx"' in updated
 
 
@@ -750,6 +752,7 @@ def test_ensure_codex_home_config_falls_back_to_resolved_uv(
         "[mcp_servers.super-agents]\n"
         f"command = {json.dumps(str(uv_bin))}\n"
         f"args = {json.dumps(['--directory', str(cli_dir), 'run', 'super-agents-mcp'])}\n"
+        'env = { SUPER_AGENTS_DEFAULT_BACKEND = "codex" }\n'
         + _expected_session_id_hook_suffix(codex_home)
     )
 
@@ -812,6 +815,7 @@ def test_ensure_claude_config_installs_super_agents_mcp(tmp_path, monkeypatch) -
             "CODEX_SUPER_AGENT_INSTRUCTIONS_PATH": str(
                 setup_cli.CODEX_SUPER_AGENT_INSTRUCTIONS_PATH
             ),
+            "SUPER_AGENTS_DEFAULT_BACKEND": "claude_code",
         },
     }
     settings = json.loads((claude_config / "settings.json").read_text(encoding="utf-8"))
