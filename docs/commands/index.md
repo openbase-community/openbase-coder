@@ -28,7 +28,6 @@ openbase-coder [OPTIONS] COMMAND [ARGS]
 | [`claude-sync`](claude-sync.md) | Synchronize Claude Code sessions between normal and Openbase config homes |
 | [`defaults`](defaults.md) | Manage default dispatcher and Super Agents model/reasoning settings |
 | [`setup`](setup.md) | Full local bootstrap flow |
-| [`provision`](provision.md) | Non-interactive first-boot setup on Openbase Cloud workspace instances |
 | [`server`](server.md) | Run local Django/ASGI server |
 | [`restart`](restart.md) | Restart Openbase-managed services |
 | [`self-update`](self-update.md) | Update a standalone install to the latest release |
