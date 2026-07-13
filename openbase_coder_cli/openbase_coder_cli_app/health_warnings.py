@@ -34,6 +34,10 @@ def _code_sync_expected() -> bool:
 
 
 _CONDITIONAL_SERVICES["code-sync"] = _code_sync_expected
+# Cross-device thread sync rides the code-sync transport; when devices are
+# mirrored, both backends' device-sync services are expected too.
+_CONDITIONAL_SERVICES["codex-thread-device-sync"] = _code_sync_expected
+_CONDITIONAL_SERVICES["claude-thread-device-sync"] = _code_sync_expected
 
 
 def _warning(

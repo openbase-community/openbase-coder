@@ -48,7 +48,9 @@ from .thread_sync_common import (
 SCHEMA_VERSION = 1
 CLAUDE_SYNC_LEDGER_NAME = "claude-thread-sync-ledger.json"
 CLAUDE_DEVICE_LEDGER_NAME = "claude-thread-device-sync-ledger.json"
-DEFAULT_DEVICE_EXCHANGE_DIR = OPENBASE_BASE_DIR / "claude-thread-sync"
+# Shared with codex: one transported product-state exchange folder
+# carries both backends (importers skip the other backend's snapshots).
+DEFAULT_DEVICE_EXCHANGE_DIR = OPENBASE_BASE_DIR / "thread-sync"
 DEFAULT_DEVICE_LEDGER_PATH = OPENBASE_BASE_DIR / CLAUDE_DEVICE_LEDGER_NAME
 DEFAULT_SYNC_MAX_AGE_DAYS = 15
 IMPORT_STAGING_DIR_NAME = ".claude-thread-sync-staging"

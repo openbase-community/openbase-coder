@@ -154,3 +154,21 @@ def test_ensure_product_state_folders_adds_missing(monkeypatch, tmp_path) -> Non
 
     # Idempotent.
     assert manager.ensure_product_state_folders(config_path) == []
+
+
+def test_enable_installs_device_sync_companions(monkeypatch) -> None:
+    installed = []
+    monkeypatch.setattr(
+        "openbase_coder_cli.services.launchd.install_service",
+        lambda installation, svc: installed.append(svc.name),
+    )
+    monkeypatch.setattr(
+        "openbase_coder_cli.services.registry.require_installation",
+        lambda: object(),
+    )
+    manager.install_and_start_service()
+    assert installed == [
+        "code-sync",
+        "codex-thread-device-sync",
+        "claude-thread-device-sync",
+    ]
