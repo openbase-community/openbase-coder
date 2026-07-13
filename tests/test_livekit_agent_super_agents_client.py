@@ -623,6 +623,88 @@ async def test_super_agents_livekit_client_recovers_after_poll_gave_up(
 
 
 @pytest.mark.asyncio
+async def test_super_agents_livekit_client_delivers_orphaned_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        super_agents_client_module, "ORPHANED_RESULT_GRACE_SECONDS", 0.01
+    )
+    backend = FakeLongRunningSuperAgentsBackend()
+    state_path = tmp_path / "livekit-voice-route.json"
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(state_path),
+        backend_client=backend,
+    )
+    orphaned: list[tuple[str, str]] = []
+
+    def handler(source_client, turn_id: str, speech_text: str) -> None:
+        assert source_client is client
+        if client.claim_speech(turn_id):
+            orphaned.append((turn_id, speech_text))
+
+    client.set_orphaned_result_handler(handler)
+
+    first = asyncio.create_task(client.run_turn("find the old conversation"))
+    await backend.progress_called.wait()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    assert client.has_pending_voice_answer()
+
+    backend.release_progress.set()
+    await asyncio.sleep(0.1)
+
+    assert orphaned == [("turn-1", "The proactively steered turn is ready.")]
+    assert not client.has_pending_voice_answer()
+
+    # The delivered answer must not be re-joined; the next utterance starts a
+    # fresh turn.
+    result = await client.run_turn("next question")
+    assert len(backend.started_turns) == 2
+    assert result["_livekit_turn_id"] == "turn-1"
+
+
+@pytest.mark.asyncio
+async def test_super_agents_livekit_client_orphan_skipped_when_result_consumed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        super_agents_client_module, "ORPHANED_RESULT_GRACE_SECONDS", 0.01
+    )
+    backend = FakeLongRunningSuperAgentsBackend()
+    state_path = tmp_path / "livekit-voice-route.json"
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(state_path),
+        backend_client=backend,
+    )
+    orphaned: list[str] = []
+    client.set_orphaned_result_handler(
+        lambda _client, turn_id, _speech: orphaned.append(turn_id)
+    )
+
+    first = asyncio.create_task(client.run_turn("find the old conversation"))
+    await backend.progress_called.wait()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    backend.release_progress.set()
+    await asyncio.sleep(0)
+
+    # A rejoining dispatch consumes the result before the grace period ends.
+    result = await client.run_turn("are you there")
+    assert client.claim_speech(result["_livekit_turn_id"])
+    await asyncio.sleep(0.1)
+
+    assert orphaned == []
+
+
+@pytest.mark.asyncio
 async def test_super_agents_livekit_client_proactively_steers_active_turn(
     tmp_path: Path,
 ) -> None:

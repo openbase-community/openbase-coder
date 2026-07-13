@@ -34,6 +34,15 @@ class LiveKitVoiceRouter:
         self._active_target_voice_id: str | None = None
         self._active_target_voice_name: str | None = None
         self._proactive_steer_prompt_hashes: dict[str, float] = {}
+        self._orphaned_result_handler = None
+
+    def set_orphaned_result_handler(self, handler) -> None:
+        """Deliver completed turn answers that no voice dispatch consumed."""
+        self._orphaned_result_handler = handler
+        for client in (self._dispatcher_client, *self._target_clients.values()):
+            set_handler = getattr(client, "set_orphaned_result_handler", None)
+            if callable(set_handler):
+                set_handler(handler)
 
     @property
     def active_client(self):
@@ -85,6 +94,8 @@ class LiveKitVoiceRouter:
                 super_agent_agent_name=target_voice_name,
                 use_super_agent_reasoning=True,
             )
+            if self._orphaned_result_handler is not None:
+                target_client.set_orphaned_result_handler(self._orphaned_result_handler)
             self._target_clients[thread_id] = target_client
         else:
             target_client.set_super_agent_name(label)

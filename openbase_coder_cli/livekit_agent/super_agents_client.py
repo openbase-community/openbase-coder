@@ -6,6 +6,7 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,10 @@ TURN_POLL_INTERVAL_SECONDS = 0.5
 # failures.
 TURN_POLL_MAX_CONSECUTIVE_FAILURES = 10
 TURN_POLL_FAILURE_BACKOFF_MAX_SECONDS = 5.0
+# How long to wait after a turn finishes before treating its unclaimed answer
+# as orphaned (no voice dispatch consumed it) and handing it to the orphaned
+# result handler to be spoken directly.
+ORPHANED_RESULT_GRACE_SECONDS = 1.5
 
 
 def _model_name_for_role(
@@ -123,6 +128,10 @@ class SuperAgentsLiveKitClient:
         self._active_turn_prompt_hash: str | None = None
         self._active_turn_wait_task: asyncio.Task[dict[str, Any]] | None = None
         self._active_turn_wait_task_turn_id: str | None = None
+        self._active_turn_wait_waiters = 0
+        self._on_orphaned_result: (
+            Callable[[SuperAgentsLiveKitClient, str, str], None] | None
+        ) = None
         self._claimed_speech_turns: set[str] = set()
         self._state_lock = asyncio.Lock()
         self._turn_start_lock = asyncio.Lock()
@@ -171,6 +180,24 @@ class SuperAgentsLiveKitClient:
                 Path(self._cwd).name,
                 int((time.monotonic() - dispatch_started) * 1000),
             )
+
+            if (
+                self._active_turn_id
+                and self._active_turn_has_completed()
+                and self._active_turn_id in self._claimed_speech_turns
+            ):
+                # The completed answer was already spoken (for example via
+                # orphaned-result delivery); this new utterance deserves a
+                # fresh turn instead of rejoining the finished one.
+                logger.info(
+                    "%s stage=voice_request_active_turn_already_spoken "
+                    "dispatch_id=%s thread_id=%s turn_id=%s",
+                    DISPATCH_TIMING_LOG,
+                    dispatch_id,
+                    thread_id,
+                    self._active_turn_id,
+                )
+                self._clear_active_turn_state()
 
             if self._active_turn_id:
                 if self._active_turn_has_completed():
@@ -296,12 +323,15 @@ class SuperAgentsLiveKitClient:
             raise
         finally:
             if not preserve_active_turn and turn_id and self._active_turn_id == turn_id:
-                self._active_turn_id = None
-                self._active_turn_started_at = None
-                self._active_turn_dispatch_id = None
-                self._active_turn_prompt_hash = None
-                self._active_turn_wait_task = None
-                self._active_turn_wait_task_turn_id = None
+                self._clear_active_turn_state()
+
+    def _clear_active_turn_state(self) -> None:
+        self._active_turn_id = None
+        self._active_turn_started_at = None
+        self._active_turn_dispatch_id = None
+        self._active_turn_prompt_hash = None
+        self._active_turn_wait_task = None
+        self._active_turn_wait_task_turn_id = None
 
     def has_active_prompt(self, prompt: str) -> bool:
         prompt_debug = _prompt_debug_fields(prompt)
@@ -674,7 +704,83 @@ class SuperAgentsLiveKitClient:
             )
             self._active_turn_wait_task = wait_task
             self._active_turn_wait_task_turn_id = turn_id
-        return await asyncio.shield(wait_task)
+            wait_task.add_done_callback(self._schedule_orphaned_result_check)
+        self._active_turn_wait_waiters += 1
+        try:
+            return await asyncio.shield(wait_task)
+        finally:
+            self._active_turn_wait_waiters -= 1
+
+    def set_orphaned_result_handler(
+        self,
+        handler: Callable[["SuperAgentsLiveKitClient", str, str], None] | None,
+    ) -> None:
+        self._on_orphaned_result = handler
+
+    @property
+    def orphaned_result_handler(
+        self,
+    ) -> Callable[["SuperAgentsLiveKitClient", str, str], None] | None:
+        return self._on_orphaned_result
+
+    def has_pending_voice_answer(self) -> bool:
+        """Whether a backend turn still owes the user a spoken answer.
+
+        True while the shared wait task is polling with no live voice dispatch
+        awaiting it, or when it finished with speech text nobody has claimed.
+        """
+        wait_task = self._active_turn_wait_task
+        turn_id = self._active_turn_id
+        if (
+            not wait_task
+            or not turn_id
+            or self._active_turn_wait_task_turn_id != turn_id
+        ):
+            return False
+        if not wait_task.done():
+            return self._active_turn_wait_waiters == 0
+        if wait_task.cancelled() or wait_task.exception():
+            return False
+        if turn_id in self._claimed_speech_turns:
+            return False
+        return bool(_speech_text_from_progress(wait_task.result()))
+
+    def _schedule_orphaned_result_check(
+        self, wait_task: asyncio.Task[dict[str, Any]]
+    ) -> None:
+        if (
+            wait_task.cancelled()
+            or wait_task.exception()
+            or self._on_orphaned_result is None
+        ):
+            return
+        asyncio.create_task(
+            self._deliver_orphaned_result_after_grace(wait_task),
+            name="openbase-super-agents-orphaned-result-check",
+        )
+
+    async def _deliver_orphaned_result_after_grace(
+        self, wait_task: asyncio.Task[dict[str, Any]]
+    ) -> None:
+        await asyncio.sleep(ORPHANED_RESULT_GRACE_SECONDS)
+        if self._active_turn_wait_task is not wait_task:
+            return
+        if self._active_turn_wait_waiters > 0:
+            return
+        turn_id = self._active_turn_wait_task_turn_id
+        handler = self._on_orphaned_result
+        if not turn_id or handler is None or turn_id in self._claimed_speech_turns:
+            return
+        speech_text = _speech_text_from_progress(wait_task.result())
+        if not speech_text:
+            return
+        logger.info(
+            "%s stage=orphaned_turn_result_detected turn_id=%s speech_chars=%d",
+            DISPATCH_TIMING_LOG,
+            turn_id,
+            len(speech_text),
+        )
+        handler(self, turn_id, speech_text)
 
     async def _poll_turn_until_ready(
         self,

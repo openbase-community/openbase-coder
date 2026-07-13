@@ -125,6 +125,20 @@ class CodexLLMStream(llm.LLMStream):
                 except Exception:
                     voice_client.release_speech_claim(turn_id)
                     raise
+        elif speech_text and turn_id:
+            # The generation's event channel closed before the answer could
+            # be emitted; hand it to the orphaned-result handler so it is
+            # still spoken instead of silently dropped.
+            orphan_handler = getattr(voice_client, "orphaned_result_handler", None)
+            if callable(orphan_handler):
+                logger.info(
+                    "dispatch_timing stage=livekit_llm_channel_closed_redelivery "
+                    "message_id=%s turn_id=%s speech_len=%d",
+                    self._message_id,
+                    turn_id,
+                    len(speech_text),
+                )
+                orphan_handler(voice_client, turn_id, speech_text)
 
     def _emit_delta(self, text: str) -> None:
         self._event_ch.send_nowait(

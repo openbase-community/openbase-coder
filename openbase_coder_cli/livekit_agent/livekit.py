@@ -450,7 +450,9 @@ def _exception_status(exc: BaseException) -> int | None:
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        status = getattr(current, "status", None) or getattr(current, "status_code", None)
+        status = getattr(current, "status", None) or getattr(
+            current, "status_code", None
+        )
         if isinstance(status, int):
             return status
         current = current.__cause__ or current.__context__
@@ -504,6 +506,101 @@ async def _verify_cloud_audio_subscription(room: rtc.Room, session) -> None:
         logger.warning(
             "Skipping Openbase Cloud audio subscription check this session: %s", exc
         )
+
+
+# Delay before re-asserting "thinking" after the session drops to
+# "listening" while a backend turn still owes an answer; long enough for an
+# in-flight cancellation to settle, well under the ~0.9s the iOS app waits
+# before auto-unmuting.
+ANSWER_OWED_STATE_RECHECK_SECONDS = 0.25
+ANSWER_OWED_STATE_MONITOR_INTERVAL_SECONDS = 1.0
+
+
+def _register_answer_owed_state_hold(
+    session: AgentSession, voice_router: LiveKitVoiceRouter
+) -> None:
+    """Keep the agent state at "thinking" while an answer is still owed.
+
+    When the voice-side generation dies (interruption or poll failure) the
+    session drops to "listening" and the iOS app auto-unmutes as if the
+    assistant were done, even though the backend turn is still going to
+    produce an answer. Hold "thinking" until the answer is delivered or the
+    owed turn goes away, then hand the state machine back to the framework.
+    """
+    hold = {"active": False}
+
+    def _active_client_has_pending_answer() -> bool:
+        has_pending = getattr(
+            voice_router.active_client, "has_pending_voice_answer", None
+        )
+        return callable(has_pending) and has_pending()
+
+    async def _monitor_hold() -> None:
+        while hold["active"]:
+            await asyncio.sleep(ANSWER_OWED_STATE_MONITOR_INTERVAL_SECONDS)
+            if not hold["active"]:
+                return
+            if _active_client_has_pending_answer():
+                continue
+            hold["active"] = False
+            if session.agent_state == "thinking" and session.current_speech is None:
+                logger.info(
+                    "dispatch_timing stage=agent_state_hold_released "
+                    "reason=no_pending_answer"
+                )
+                session._update_agent_state("listening")
+
+    async def _reassert_thinking() -> None:
+        await asyncio.sleep(ANSWER_OWED_STATE_RECHECK_SECONDS)
+        if hold["active"] or not _active_client_has_pending_answer():
+            return
+        if session.agent_state != "listening" or session.user_state == "speaking":
+            return
+        logger.info(
+            "dispatch_timing stage=agent_state_held_thinking reason=answer_owed"
+        )
+        hold["active"] = True
+        session._update_agent_state("thinking")
+        asyncio.create_task(_monitor_hold())
+
+    def _on_agent_state_changed(event) -> None:
+        if getattr(event, "new_state", None) == "listening":
+            asyncio.create_task(_reassert_thinking())
+
+    def _on_speech_created(_event) -> None:
+        # A real generation or direct say() is driving the state machine
+        # again; stop holding.
+        hold["active"] = False
+
+    session.on("agent_state_changed", _on_agent_state_changed)
+    session.on("speech_created", _on_speech_created)
+
+
+def _register_orphaned_result_delivery(
+    session: AgentSession, voice_router: LiveKitVoiceRouter
+) -> None:
+    """Speak completed turn answers that no voice dispatch delivered."""
+
+    def _deliver(client, turn_id: str, speech_text: str) -> None:
+        if not voice_router.claim_speech(client, turn_id):
+            logger.info(
+                "dispatch_timing stage=orphaned_result_skipped turn_id=%s "
+                "reason=inactive_client_or_already_spoken",
+                turn_id,
+            )
+            return
+        logger.info(
+            "dispatch_timing stage=orphaned_result_spoken turn_id=%s speech_chars=%d",
+            turn_id,
+            len(speech_text),
+        )
+        try:
+            session.say(speech_text)
+        except Exception:
+            client.release_speech_claim(turn_id)
+            logger.warning("Unable to speak orphaned voice result", exc_info=True)
+
+    voice_router.set_orphaned_result_handler(_deliver)
 
 
 async def _start_voice_session(
@@ -660,6 +757,9 @@ async def livekit_agent(ctx: JobContext):
         session.on(event_name, handler)
 
     announcer_queue.start()
+
+    _register_orphaned_result_delivery(session, voice_router)
+    _register_answer_owed_state_hold(session, voice_router)
 
     def on_data_received(data_packet: rtc.DataPacket) -> None:
         logger.info(
