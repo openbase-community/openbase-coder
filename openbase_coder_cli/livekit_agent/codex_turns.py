@@ -10,6 +10,7 @@ from openbase_coder_cli.livekit_agent.speech_formatter import (
     SpeechFormatOptions,
     format_for_speech,
 )
+from openbase_coder_cli.onboarding_reminder import ONBOARDING_REMINDER
 
 LIVEKIT_DUPLICATE_TURN_GRACE_SECONDS = 1.5
 SUPER_AGENT_IDENTITY_INSTRUCTION_PREFIX = "Super Agent thread name:"
@@ -130,6 +131,10 @@ def _undelivered_suffix(delivered_text: str, current_text: str) -> str:
 
 
 def _normalize_prompt(text: str) -> str:
+    # Appended system notes must not defeat duplicate detection: the same
+    # utterance arrives bare via proactive steering and with the onboarding
+    # reminder via dispatch turns, and both must hash identically.
+    text = text.replace(ONBOARDING_REMINDER, " ")
     text = re.sub(r"[^\w\s]", " ", text.lower())
     return re.sub(r"\s+", " ", text).strip().lower()
 

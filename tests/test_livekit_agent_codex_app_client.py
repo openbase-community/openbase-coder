@@ -566,6 +566,16 @@ def test_prompt_debug_fields_are_normalized_and_bounded():
     assert len(_prompt_debug_fields("x" * 120)["excerpt"]) == 90
 
 
+def test_prompt_debug_fields_ignore_onboarding_reminder():
+    from openbase_coder_cli.onboarding_reminder import ONBOARDING_REMINDER
+
+    bare = _prompt_debug_fields("hey are you there")
+    with_note = _prompt_debug_fields(f"hey are you there\n\n{ONBOARDING_REMINDER}")
+
+    assert bare["hash"] == with_note["hash"]
+    assert with_note["excerpt"] == "hey are you there"
+
+
 def test_steer_turn_uses_expected_turn_id():
     class RecordingClient(CodexAppServerClient):
         def __init__(self):

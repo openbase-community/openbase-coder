@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import time
+from collections.abc import Callable
 
 from livekit.agents import (
     tts as livekit_tts,
@@ -29,6 +30,7 @@ class VoiceSelectingTTS(livekit_tts.TTS):
         active_voice_id,
         active_voice_name=None,
         api_key: str | None = None,
+        api_key_provider: Callable[[], str | None] | None = None,
         provider=None,
         role: str = "direct",
         model: str = "sonic-3",
@@ -55,6 +57,7 @@ class VoiceSelectingTTS(livekit_tts.TTS):
         self._active_voice_id = active_voice_id
         self._active_voice_name = active_voice_name or (lambda: None)
         self._api_key = api_key
+        self._api_key_provider = api_key_provider
         self._role = role
         self._model = model
         self._volume = volume
@@ -161,7 +164,42 @@ class VoiceSelectingTTS(livekit_tts.TTS):
     def resolve_voice_name(self, voice_id: str | None) -> str | None:
         return self._voice_name_for_id(self.resolve_voice_id(voice_id))
 
+    def _refresh_api_key(self) -> None:
+        """Pull a current credential before synthesis begins.
+
+        Openbase Cloud audio authenticates each websocket connection with a
+        short-lived machine token; the token captured at session start goes
+        stale, and every later reconnect would then be rejected with a 403
+        and kill the speech. Refreshing per synthesis keeps new connections
+        authenticated.
+        """
+        if self._api_key_provider is None:
+            return
+        try:
+            refreshed = self._api_key_provider()
+        except Exception:
+            # Keep speaking with the previous token; it may still be valid.
+            logger.warning(
+                "dispatch_timing stage=tts_api_key_refresh_failed role=%s",
+                self._role,
+                exc_info=True,
+            )
+            return
+        if not refreshed or refreshed == self._api_key:
+            return
+        self._api_key = refreshed
+        for tts in self._tts_by_voice_id.values():
+            opts = getattr(tts, "_opts", None)
+            if opts is not None and hasattr(opts, "api_key"):
+                opts.api_key = refreshed
+        logger.info(
+            "dispatch_timing stage=tts_api_key_refreshed role=%s voice_clients=%d",
+            self._role,
+            len(self._tts_by_voice_id),
+        )
+
     def _tts_for_voice(self, voice_id: str | None) -> livekit_tts.TTS:
+        self._refresh_api_key()
         resolved_voice_id = self.resolve_voice_id(voice_id)
         tts = self._tts_by_voice_id.get(resolved_voice_id)
         if tts is None:

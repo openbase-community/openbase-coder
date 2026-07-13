@@ -629,12 +629,18 @@ async def _start_voice_session(
     cartesia_api_version = (
         OPENBASE_CLOUD_AUDIO_CARTESIA_VERSION if openbase_cloud_audio_token else None
     )
+    # Cloud audio tokens are short-lived; hand the TTS a way to refresh them
+    # so websocket reconnects later in the session stay authenticated.
+    audio_api_key_provider = (
+        _openbase_cloud_audio_token if openbase_cloud_audio_token else None
+    )
     direct_tts = VoiceSelectingTTS(
         default_voice_id=dispatcher_voice.voice_id,
         default_voice_name=dispatcher_voice.name,
         active_voice_id=lambda: voice_router.active_target_voice_id,
         active_voice_name=lambda: voice_router.active_target_voice_name,
         api_key=cartesia_api_key,
+        api_key_provider=audio_api_key_provider,
         provider=tts_provider,
         role="direct",
         base_url=cartesia_base_url,
@@ -646,6 +652,7 @@ async def _start_voice_session(
         active_voice_id=lambda: voice_router.active_target_voice_id,
         active_voice_name=lambda: voice_router.active_target_voice_name,
         api_key=cartesia_api_key,
+        api_key_provider=audio_api_key_provider,
         provider=tts_provider,
         role="announcer",
         base_url=cartesia_base_url,
