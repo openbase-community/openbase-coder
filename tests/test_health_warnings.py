@@ -69,9 +69,81 @@ def test_conditional_service_expected_only_when_enabled(monkeypatch) -> None:
 
 def test_collect_skips_sync_checks_when_disabled(monkeypatch) -> None:
     monkeypatch.setattr(hw, "_service_warnings", lambda: [])
+    monkeypatch.setattr(hw, "_installation_warnings", lambda: [])
+    monkeypatch.setattr(hw, "_livekit_skew_warnings", lambda: [])
     monkeypatch.setattr(hw, "_code_sync_expected", lambda: False)
     called = []
     monkeypatch.setattr(hw, "_sync_warnings", lambda: called.append(1) or [])
 
     assert hw.collect_warnings() == []
     assert called == []
+
+
+def test_installation_warning_when_workspace_tracked_on_standalone(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from openbase_coder_cli.services import installation as installation_module
+
+    monkeypatch.setattr(installation_module.InstallationConfig, "exists", lambda: True)
+    monkeypatch.setattr(
+        installation_module.InstallationConfig,
+        "load",
+        lambda: SimpleNamespace(standalone=True),
+    )
+    monkeypatch.setattr(
+        "openbase_coder_cli.mcp.projects.get_recent_projects",
+        lambda: [
+            {"path": "/Users/u/Projects/other"},
+            {"path": "/Users/u/Projects/openbase/code/openbase-coder-workspace"},
+        ],
+    )
+
+    warnings = hw._installation_warnings()
+    assert [w["id"] for w in warnings] == ["installation-not-dev"]
+
+    # Dev installs never warn.
+    monkeypatch.setattr(
+        installation_module.InstallationConfig,
+        "load",
+        lambda: SimpleNamespace(standalone=False),
+    )
+    assert hw._installation_warnings() == []
+
+
+def test_livekit_skew_warns_only_on_dev_installs(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from openbase_coder_cli.services import installation as installation_module
+
+    monkeypatch.setattr(installation_module.InstallationConfig, "exists", lambda: True)
+    monkeypatch.setattr(
+        installation_module.InstallationConfig,
+        "load",
+        lambda: SimpleNamespace(standalone=False),
+    )
+    monkeypatch.setattr(hw, "_resolve_livekit_binary", lambda: "/fake/livekit-server")
+
+    class FakeResult:
+        stdout = "livekit-server version 0.0.1\n"
+        stderr = ""
+
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: FakeResult())
+    warnings = hw._livekit_skew_warnings()
+    assert [w["id"] for w in warnings] == ["livekit-version-skew"]
+    assert "0.0.1" in warnings[0]["message"]
+
+    from openbase_coder_cli.livekit_version import LIVEKIT_SERVER_PINNED_VERSION
+
+    FakeResult.stdout = f"livekit-server version {LIVEKIT_SERVER_PINNED_VERSION}\n"
+    assert hw._livekit_skew_warnings() == []
+
+    # Standalone installs run the bundled pin by construction: no warning.
+    monkeypatch.setattr(
+        installation_module.InstallationConfig,
+        "load",
+        lambda: SimpleNamespace(standalone=True),
+    )
+    FakeResult.stdout = "livekit-server version 0.0.1\n"
+    assert hw._livekit_skew_warnings() == []

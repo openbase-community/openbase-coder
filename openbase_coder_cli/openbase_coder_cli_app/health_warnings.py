@@ -190,8 +190,104 @@ def _sync_warnings() -> list[dict[str, str]]:
     return warnings
 
 
+def _installation_warnings() -> list[dict[str, str]]:
+    """Warn when a dev workspace exists but a packaged install serves it.
+
+    The two sanctioned installs (see the workspace glossary's Installation
+    pathways) are mutually exclusive on one machine in practice: if the
+    Projects list tracks an ``openbase-coder-workspace`` checkout, the
+    developer expects localhost:7999 to serve that code — a standalone
+    (app-installed) runtime silently serves something older instead.
+    """
+    from openbase_coder_cli.mcp.projects import get_recent_projects
+    from openbase_coder_cli.services.installation import InstallationConfig
+
+    try:
+        if not InstallationConfig.exists():
+            return []
+        config = InstallationConfig.load()
+    except Exception:  # noqa: BLE001 - health must never break on bad state
+        return []
+    if not config.standalone:
+        return []
+
+    for project in get_recent_projects():
+        path = project.get("path", "")
+        if path.rstrip("/").split("/")[-1] == "openbase-coder-workspace":
+            return [
+                _warning(
+                    "installation-not-dev",
+                    "warning",
+                    "An openbase-coder-workspace checkout is in your "
+                    "projects, but this machine runs a packaged install — "
+                    "the code on disk is not what localhost:7999 serves.",
+                    "For development, archive ~/.openbase and run the "
+                    "workspace's ./scripts/setup (dev pathway).",
+                )
+            ]
+    return []
+
+
+def _livekit_skew_warnings() -> list[dict[str, str]]:
+    """Warn dev installs whose livekit-server differs from the release pin.
+
+    Dev resolves livekit-server from Homebrew/PATH while releases bundle
+    the pinned version; a divergence means development tests a different
+    voice engine than users run.
+    """
+    import re
+    import subprocess
+
+    from openbase_coder_cli.livekit_version import LIVEKIT_SERVER_PINNED_VERSION
+    from openbase_coder_cli.services.installation import InstallationConfig
+
+    try:
+        if not InstallationConfig.exists() or InstallationConfig.load().standalone:
+            return []  # Standalone installs run the bundled pin by construction.
+    except Exception:  # noqa: BLE001
+        return []
+
+    binary = _resolve_livekit_binary()
+    if binary is None:
+        return []  # Missing binary surfaces through service checks instead.
+    try:
+        result = subprocess.run(
+            [binary, "--version"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    match = re.search(r"(\d+\.\d+\.\d+)", result.stdout + result.stderr)
+    if not match or match.group(1) == LIVEKIT_SERVER_PINNED_VERSION:
+        return []
+    return [
+        _warning(
+            "livekit-version-skew",
+            "warning",
+            f"This dev install runs livekit-server {match.group(1)}, but "
+            f"releases ship {LIVEKIT_SERVER_PINNED_VERSION} — voice testing "
+            "here exercises a different engine than users run.",
+            "Align your local livekit-server with the pin in "
+            "livekit_version.py (or bump the pin deliberately).",
+        )
+    ]
+
+
+def _resolve_livekit_binary() -> str | None:
+    import shutil
+
+    found = shutil.which("livekit-server")
+    if found:
+        return found
+    fallback = "/opt/homebrew/bin/livekit-server"
+    import os
+
+    return fallback if os.access(fallback, os.X_OK) else None
+
+
 def collect_warnings() -> list[dict[str, str]]:
     warnings = _service_warnings()
+    warnings.extend(_installation_warnings())
+    warnings.extend(_livekit_skew_warnings())
     if _code_sync_expected():
         warnings.extend(_sync_warnings())
     return warnings
