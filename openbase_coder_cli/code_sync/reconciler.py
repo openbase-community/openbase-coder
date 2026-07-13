@@ -88,7 +88,22 @@ def discover_git_repos(
     folder_root: Path, max_depth: int = MAX_REPO_DEPTH
 ) -> list[Path]:
     """Directories containing ``.git`` within ``max_depth`` of the root."""
+    return discover_repos_and_worktree_candidates(folder_root, max_depth)[0]
+
+
+def discover_repos_and_worktree_candidates(
+    folder_root: Path, max_depth: int = MAX_REPO_DEPTH
+) -> tuple[list[Path], list[Path]]:
+    """One walk yielding repos and synced-but-unattached worktree dirs.
+
+    A worktree candidate holds a worktree manifest (synced from the peer)
+    but no ``.git`` — its git identity is machine-local and must be
+    materialized here by adoption.
+    """
+    from openbase_coder_cli.code_sync.worktrees import WORKTREE_MANIFEST_NAME
+
     repos: list[Path] = []
+    candidates: list[Path] = []
 
     def _walk(directory: Path, depth: int) -> None:
         try:
@@ -102,6 +117,8 @@ def discover_git_repos(
             # Keep descending: multi workspaces nest subrepos (each with its
             # own .git) inside the workspace repo, and each needs its own
             # branch reconciliation.
+        elif (directory / WORKTREE_MANIFEST_NAME).is_file():
+            candidates.append(directory)
         if depth >= max_depth:
             return
         try:
@@ -117,7 +134,7 @@ def discover_git_repos(
 
     if folder_root.is_dir():
         _walk(folder_root, 0)
-    return repos
+    return repos, candidates
 
 
 def peer_git_url(peer: SyncPeer, folder_id: str, repo_relpath: str) -> str:
@@ -341,12 +358,30 @@ def run_reconcile_once(
             summary["errors"].append(f"auth: {exc}")
             peers = ()
 
+    from openbase_coder_cli.code_sync.worktrees import (
+        adopt_worktree,
+        ensure_worktree_manifest,
+    )
+
     for folder in sync_folders(config_path):
         folder_root = folder.absolute_path(home)
         summary["file_conflicts"].extend(
             scan_file_conflicts(folder, home, conflicts_path)
         )
-        for repo in discover_git_repos(folder_root):
+        repos, worktree_candidates = discover_repos_and_worktree_candidates(folder_root)
+        for candidate in worktree_candidates:
+            rel = str(candidate.relative_to(folder_root))
+            remote = peer_git_url(peers[0], folder.folder_id, rel) if peers else None
+            try:
+                action = adopt_worktree(candidate, home=home, remote_url=remote)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                action = f"adopt_error: {exc}"
+            summary.setdefault("worktrees", []).append({"path": rel, "action": action})
+        for repo in repos:
+            try:
+                ensure_worktree_manifest(repo, home)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
             repo_relpath = str(repo.relative_to(folder_root))
             if repo_relpath == ".":
                 repo_relpath = ""

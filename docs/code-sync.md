@@ -58,6 +58,13 @@ every minute:
 - Uncommitted work needs no reconciliation at all — it syncs as files and
   simply shows as a dirty tree on both sides.
 
+Git **worktrees** under synced folders are first-class: the worktree's
+files sync like any files, and each machine attaches its own local git
+identity automatically (a small synced manifest tells the other machine
+which repository and branch to attach). Run git commands in a worktree on
+either computer; commits reconcile back through the same branch
+fast-forward machinery as any repository.
+
 Coding threads (Codex and Claude Code) also travel between your machines
 over the same channel: each device exports snapshots of recent threads and
 imports the other's automatically. Only threads active in the **last 15
