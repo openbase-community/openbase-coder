@@ -288,12 +288,82 @@ def _resolve_livekit_binary() -> str | None:
     return fallback if os.access(fallback, os.X_OK) else None
 
 
+def _thread_exchange_base():
+    from openbase_coder_cli.paths import OPENBASE_BASE_DIR
+
+    return OPENBASE_BASE_DIR
+
+
+def _thread_exchange_warnings() -> list[dict[str, str]]:
+    """Detect silently-dead cross-device thread sync.
+
+    Exporters happily write snapshots nobody consumes and importers find
+    nothing without ever erroring. When a sync peer is *connected right
+    now*, the exchange folder must contain a device directory from someone
+    other than us (their exporter runs) and one of our own (ours runs).
+    Staleness alone is deliberately not a signal: an idle peer with no new
+    threads exports nothing and would false-positive.
+    """
+    import json as json_module
+
+    from openbase_coder_cli.code_sync import CodeSyncError
+    from openbase_coder_cli.code_sync import syncthing as syncthing_module
+
+    try:
+        client = syncthing_module.SyncthingClient()
+        connected = any(conn.get("connected") for conn in client.connections().values())
+    except CodeSyncError:
+        return []  # Engine trouble already warned about elsewhere.
+    if not connected:
+        return []
+
+    base = _thread_exchange_base()
+    exchange = base / "thread-sync" / "devices"
+    own_id = ""
+    try:
+        own_id = json_module.loads((base / "thread-sync-device.json").read_text()).get(
+            "device_id", ""
+        )
+    except (OSError, ValueError):
+        pass
+
+    try:
+        device_dirs = [p.name for p in exchange.iterdir() if p.is_dir()]
+    except OSError:
+        device_dirs = []
+
+    warnings: list[dict[str, str]] = []
+    if own_id and not any(name != own_id for name in device_dirs):
+        warnings.append(
+            _warning(
+                "thread-sync-no-peer-snapshots",
+                "warning",
+                "A sync peer is connected but the thread exchange has no "
+                "snapshots from any other device — the peer's thread "
+                "device-sync services are probably not running.",
+                "Check 'openbase-coder services status' on the peer.",
+            )
+        )
+    if own_id and own_id not in device_dirs:
+        warnings.append(
+            _warning(
+                "thread-sync-not-exporting",
+                "warning",
+                "A sync peer is connected but this device has never "
+                "exported a thread snapshot.",
+                "Check the codex/claude-thread-device-sync services here.",
+            )
+        )
+    return warnings
+
+
 def collect_warnings() -> list[dict[str, str]]:
     warnings = _service_warnings()
     warnings.extend(_installation_warnings())
     warnings.extend(_livekit_skew_warnings())
     if _code_sync_expected():
         warnings.extend(_sync_warnings())
+        warnings.extend(_thread_exchange_warnings())
     return warnings
 
 

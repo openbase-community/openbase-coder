@@ -147,3 +147,49 @@ def test_livekit_skew_warns_only_on_dev_installs(monkeypatch) -> None:
     )
     FakeResult.stdout = "livekit-server version 0.0.1\n"
     assert hw._livekit_skew_warnings() == []
+
+
+def test_thread_exchange_warnings(monkeypatch, tmp_path) -> None:
+    import json as json_module
+
+    class ConnectedClient:
+        def connections(self):
+            return {"PEER": {"connected": True}}
+
+    monkeypatch.setattr(
+        "openbase_coder_cli.code_sync.syncthing.SyncthingClient", ConnectedClient
+    )
+    monkeypatch.setattr(
+        "openbase_coder_cli.paths.OPENBASE_BASE_DIR", tmp_path, raising=False
+    )
+    monkeypatch.setattr(hw, "_thread_exchange_base", lambda: tmp_path)
+
+    (tmp_path / "thread-sync-device.json").write_text(
+        json_module.dumps({"device_id": "me-uuid"})
+    )
+    devices = tmp_path / "thread-sync" / "devices"
+
+    # Nobody has exported anything: both warnings fire.
+    devices.mkdir(parents=True)
+    ids = [w["id"] for w in hw._thread_exchange_warnings()]
+    assert ids == ["thread-sync-no-peer-snapshots", "thread-sync-not-exporting"]
+
+    # Own exports only: peer side dead.
+    (devices / "me-uuid").mkdir()
+    ids = [w["id"] for w in hw._thread_exchange_warnings()]
+    assert ids == ["thread-sync-no-peer-snapshots"]
+
+    # Both sides exporting: clean.
+    (devices / "them-uuid").mkdir()
+    assert hw._thread_exchange_warnings() == []
+
+    # Peer disconnected: never warn (idle machine off is normal).
+    class DisconnectedClient:
+        def connections(self):
+            return {"PEER": {"connected": False}}
+
+    monkeypatch.setattr(
+        "openbase_coder_cli.code_sync.syncthing.SyncthingClient", DisconnectedClient
+    )
+    (devices / "them-uuid").rmdir()
+    assert hw._thread_exchange_warnings() == []

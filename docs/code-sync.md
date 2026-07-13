@@ -58,6 +58,13 @@ every minute:
 - Uncommitted work needs no reconciliation at all — it syncs as files and
   simply shows as a dirty tree on both sides.
 
+Coding threads (Codex and Claude Code) also travel between your machines
+over the same channel: each device exports snapshots of recent threads and
+imports the other's automatically. Only threads active in the **last 15
+days** are exchanged — after a long gap between machines, older threads
+stay where they were created (they are never deleted, just not carried
+across).
+
 Machines fetch from each other directly over Tailscale (read-only git smart
 HTTP served by the local API with your own credentials); no GitHub round-trip
 is involved.
