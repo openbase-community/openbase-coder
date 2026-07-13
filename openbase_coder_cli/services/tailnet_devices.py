@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -48,7 +47,9 @@ def _tailscale_status_payload() -> tuple[bool, dict[str, Any] | None, str | None
     Returns ``(tailscale_available, status_payload, error)``; ``status_payload``
     is ``None`` whenever ``error`` is set.
     """
-    tailscale_bin = shutil.which("tailscale")
+    from openbase_coder_cli.services.tailscale_serve import _tailscale_bin
+
+    tailscale_bin = _tailscale_bin()
     if not tailscale_bin:
         return False, None, "tailscale was not found on PATH."
 
