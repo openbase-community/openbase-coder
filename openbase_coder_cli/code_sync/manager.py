@@ -240,6 +240,7 @@ def enable_code_sync(
     from openbase_coder_cli.code_sync.install import ensure_syncthing_installed
 
     ensure_syncthing_installed()
+    ensure_product_state_folders(config_path)
     rendered = render_configuration(eligibility, config_path=config_path)
     set_code_sync_enabled(True, config_path)
     SYNC_VERSIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -284,6 +285,30 @@ def apply_settings_change(config_path: Path | None = None) -> dict[str, Any]:
     except CodeSyncError:
         pass  # The restart itself rescans; REST may not be back up yet.
     return {"applied": True, **rendered}
+
+
+def ensure_product_state_folders(config_path: Path | None = None) -> list[str]:
+    """Add the first-class product-state folders when missing.
+
+    Thread sync between devices and the Openbase-managed agent homes'
+    skills (codex AND claude) ride code sync automatically — they are not
+    something the user discovers and adds by hand.
+    """
+    from openbase_coder_cli.sync_config import (
+        PRODUCT_STATE_RELPATHS,
+        add_sync_folder,
+        sync_folders,
+    )
+
+    existing = {folder.relpath for folder in sync_folders(config_path)}
+    added: list[str] = []
+    for relpath in PRODUCT_STATE_RELPATHS:
+        if relpath in existing:
+            continue
+        (Path.home() / relpath).mkdir(parents=True, exist_ok=True)
+        add_sync_folder(relpath, config_path)
+        added.append(relpath)
+    return added
 
 
 def accept_pending_folders(config_path: Path | None = None) -> list[str]:

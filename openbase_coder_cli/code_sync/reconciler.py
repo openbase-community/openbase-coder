@@ -373,16 +373,33 @@ def run_tick_if_enabled() -> dict[str, Any] | None:
         return None
     if not enabled:
         return None
+    from openbase_coder_cli.code_sync import CodeSyncError
     from openbase_coder_cli.code_sync.lease import run_lease_tick
-    from openbase_coder_cli.code_sync.manager import accept_pending_folders
+    from openbase_coder_cli.code_sync.manager import (
+        accept_pending_folders,
+        apply_settings_change,
+        ensure_product_state_folders,
+    )
 
     eligibility = current_eligibility()
     peers = syncable_peers(eligibility)
     _refresh_config_if_peers_changed(eligibility, peers)
+    # First-class product folders (thread sync, agent-home skills) migrate
+    # into the managed engine automatically on existing installs. A
+    # user-managed Syncthing still carrying them makes apply refuse (the
+    # overlap guard); keep ticking and let the health warning surface it.
+    product_folders_error = ""
+    try:
+        if ensure_product_state_folders():
+            apply_settings_change()
+    except CodeSyncError as exc:
+        product_folders_error = str(exc)
     adopted = accept_pending_folders()
     summary = run_reconcile_once(peers=peers)
     if adopted:
         summary["adopted_folders"] = adopted
+    if product_folders_error:
+        summary["errors"].append(f"product folders: {product_folders_error}")
     summary["lease"] = run_lease_tick()
     return summary
 

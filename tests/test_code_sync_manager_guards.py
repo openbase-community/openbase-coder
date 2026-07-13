@@ -133,3 +133,24 @@ def test_accept_pending_folders_noop_when_engine_down(monkeypatch, tmp_path) -> 
 
     monkeypatch.setattr(manager, "SyncthingClient", DownClient)
     assert manager.accept_pending_folders(tmp_path / "sync-config.json") == []
+
+
+def test_ensure_product_state_folders_adds_missing(monkeypatch, tmp_path) -> None:
+    from pathlib import Path as P
+
+    from openbase_coder_cli import sync_config
+
+    monkeypatch.setattr(P, "home", classmethod(lambda cls: tmp_path))
+    config_path = tmp_path / "sync-config.json"
+    sync_config.set_sync_folders([{"relpath": "Projects"}], config_path)
+
+    added = manager.ensure_product_state_folders(config_path)
+
+    assert set(added) == set(sync_config.PRODUCT_STATE_RELPATHS)
+    relpaths = {f.relpath for f in sync_config.sync_folders(config_path)}
+    assert set(sync_config.PRODUCT_STATE_RELPATHS) <= relpaths
+    assert (tmp_path / ".openbase/thread-sync").is_dir()
+    assert (tmp_path / ".openbase/claude_config/skills").is_dir()
+
+    # Idempotent.
+    assert manager.ensure_product_state_folders(config_path) == []

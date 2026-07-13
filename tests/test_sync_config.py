@@ -114,3 +114,17 @@ def test_set_sync_folders_rejects_invalid_entries(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         sync_config.set_sync_folders([{"relpath": "../evil"}], config_path)
     assert sync_config.sync_folders(config_path) == ()
+
+
+def test_product_state_relpaths_allowed_other_openbase_rejected():
+    import pytest
+
+    from openbase_coder_cli import sync_config
+
+    for relpath in sync_config.PRODUCT_STATE_RELPATHS:
+        assert sync_config.validate_relpath(relpath) == relpath
+
+    for bad in (".openbase", ".openbase/auth-things", ".openbase/codex_home",
+                ".openbase/logs", ".openbase/thread-sync/../db"):
+        with pytest.raises(ValueError):
+            sync_config.validate_relpath(bad)
