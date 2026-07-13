@@ -10,6 +10,7 @@ feature enabled.
 
 from __future__ import annotations
 
+import calendar
 import time
 from typing import Callable
 
@@ -159,8 +160,10 @@ def _sync_warnings() -> list[dict[str, str]]:
     last = state.get("last_reconcile_at")
     if last:
         try:
-            last_epoch = time.mktime(time.strptime(last, "%Y-%m-%dT%H:%M:%SZ"))
-            stale = (time.time() - time.timezone) - last_epoch
+            # The timestamp is UTC; calendar.timegm avoids the DST-unaware
+            # time.timezone arithmetic that added a phantom hour.
+            last_epoch = calendar.timegm(time.strptime(last, "%Y-%m-%dT%H:%M:%SZ"))
+            stale = time.time() - last_epoch
         except ValueError:
             stale = None
         if stale is not None and stale > RECONCILE_STALE_SECONDS:
