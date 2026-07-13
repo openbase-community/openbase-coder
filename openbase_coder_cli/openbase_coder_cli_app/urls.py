@@ -8,6 +8,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from openbase_coder_cli.openbase_coder_cli_app.git_http import git_http_backend
+from openbase_coder_cli.openbase_coder_cli_app.health_warnings import health_warnings
 from openbase_coder_cli.openbase_coder_cli_app.sync_settings import (
     sync_conflicts,
     sync_conflicts_resolve,
@@ -86,8 +87,8 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     skills_symlink,
     stt_settings,
     tag_options,
-    thread_activity,
     thread_active_voice,
+    thread_activity,
     thread_detail,
     thread_device_sync_conflict_resolve,
     thread_device_sync_conflicts,
@@ -117,6 +118,7 @@ urlpatterns = [
     path("auth/logout/", auth_logout, name="auth-logout"),
     path("agents-md/", agents_md, name="agents-md"),
     path("health/", health_check, name="health-check"),
+    path("health/warnings/", health_warnings, name="health-warnings"),
     path("brain-readiness/", brain_readiness, name="brain-readiness"),
     path(
         "features/apple-music-playback/",

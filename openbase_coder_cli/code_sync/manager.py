@@ -286,6 +286,57 @@ def apply_settings_change(config_path: Path | None = None) -> dict[str, Any]:
     return {"applied": True, **rendered}
 
 
+def accept_pending_folders(config_path: Path | None = None) -> list[str]:
+    """Adopt folders a paired peer offered, making console adds bidirectional.
+
+    Folder configs are per-device, so a folder added through one machine's
+    console would otherwise sit unshared on the peer. Syncthing records the
+    peer's offer as a pending folder; adopt it when it is trustworthy:
+    the offer's label must validate as a home-relative path AND the offered
+    folder ID must equal the deterministic ID derived from that label —
+    which proves the offer came from a code-sync peer using the same
+    derivation, not an arbitrary share.
+    """
+    from openbase_coder_cli.sync_config import (
+        add_sync_folder,
+        folder_id_for_relpath,
+        sync_folders,
+        validate_relpath,
+    )
+
+    try:
+        pending = SyncthingClient().pending_folders()
+    except CodeSyncError:
+        return []
+    if not pending:
+        return []
+
+    known = {folder.folder_id for folder in sync_folders(config_path)}
+    accepted: list[str] = []
+    for folder_id, offer in pending.items():
+        if folder_id in known:
+            continue  # Configured already; share completes on next render.
+        offered_by = offer.get("offeredBy") if isinstance(offer, dict) else None
+        if not isinstance(offered_by, dict):
+            continue
+        for meta in offered_by.values():
+            label = meta.get("label") if isinstance(meta, dict) else None
+            if not isinstance(label, str) or not label:
+                continue
+            try:
+                relpath = validate_relpath(label)
+            except ValueError:
+                continue
+            if folder_id_for_relpath(relpath) != folder_id:
+                continue
+            add_sync_folder(relpath, config_path)
+            accepted.append(relpath)
+            break
+    if accepted:
+        apply_settings_change(config_path)
+    return accepted
+
+
 def versions_usage_bytes(versions_dir: Path | None = None) -> int:
     root = versions_dir or SYNC_VERSIONS_DIR
     total = 0

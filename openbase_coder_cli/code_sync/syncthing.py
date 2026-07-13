@@ -345,6 +345,17 @@ class SyncthingClient:
         query = f"?folder={folder_id}" if folder_id else ""
         self._request("POST", f"/rest/db/scan{query}")
 
+    def connections(self) -> dict[str, Any]:
+        """Per-device connection state (``connections`` key of the API)."""
+        payload = self._request("GET", "/rest/system/connections") or {}
+        value = payload.get("connections")
+        return value if isinstance(value, dict) else {}
+
+    def pending_folders(self) -> dict[str, Any]:
+        """Folders peers offered that are not in our config yet."""
+        payload = self._request("GET", "/rest/cluster/pending/folders")
+        return payload if isinstance(payload, dict) else {}
+
     def latest_event_time(self, event_type: str) -> str | None:
         """RFC3339 time of the most recent buffered event of a type, if any."""
         events = (

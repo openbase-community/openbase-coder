@@ -85,3 +85,51 @@ def test_syncthing_process_matcher_ignores_scripts(monkeypatch) -> None:
         "--no-browser\n"
     )
     assert manager._user_managed_syncthing_running() is True
+
+
+def test_accept_pending_folders_adopts_valid_offers(monkeypatch, tmp_path) -> None:
+    from openbase_coder_cli import sync_config
+
+    config_path = tmp_path / "sync-config.json"
+    sync_config.set_sync_folders([{"relpath": "Projects"}], config_path)
+    good_id = sync_config.folder_id_for_relpath("Developer")
+
+    pending = {
+        good_id: {"offeredBy": {"PEER": {"label": "Developer"}}},
+        "cs-wrongid": {"offeredBy": {"PEER": {"label": "Business"}}},
+        sync_config.folder_id_for_relpath("../evil"): {
+            "offeredBy": {"PEER": {"label": "../evil"}}
+        },
+        sync_config.folder_id_for_relpath("Projects"): {
+            "offeredBy": {"PEER": {"label": "Projects"}}
+        },
+    }
+
+    class FakeClient:
+        def pending_folders(self):
+            return pending
+
+    monkeypatch.setattr(manager, "SyncthingClient", FakeClient)
+    applied = []
+    monkeypatch.setattr(
+        manager, "apply_settings_change", lambda cp=None: applied.append(cp)
+    )
+
+    accepted = manager.accept_pending_folders(config_path)
+
+    assert accepted == ["Developer"]
+    from openbase_coder_cli.sync_config import sync_folders
+
+    relpaths = [f.relpath for f in sync_folders(config_path)]
+    assert "Developer" in relpaths
+    assert "Business" not in relpaths
+    assert applied == [config_path]
+
+
+def test_accept_pending_folders_noop_when_engine_down(monkeypatch, tmp_path) -> None:
+    class DownClient:
+        def __init__(self):
+            raise CodeSyncError("no api key")
+
+    monkeypatch.setattr(manager, "SyncthingClient", DownClient)
+    assert manager.accept_pending_folders(tmp_path / "sync-config.json") == []

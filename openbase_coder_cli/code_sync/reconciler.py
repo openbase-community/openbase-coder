@@ -374,11 +374,15 @@ def run_tick_if_enabled() -> dict[str, Any] | None:
     if not enabled:
         return None
     from openbase_coder_cli.code_sync.lease import run_lease_tick
+    from openbase_coder_cli.code_sync.manager import accept_pending_folders
 
     eligibility = current_eligibility()
     peers = syncable_peers(eligibility)
     _refresh_config_if_peers_changed(eligibility, peers)
+    adopted = accept_pending_folders()
     summary = run_reconcile_once(peers=peers)
+    if adopted:
+        summary["adopted_folders"] = adopted
     summary["lease"] = run_lease_tick()
     return summary
 
