@@ -4,6 +4,9 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
+from openbase_coder_cli.mcp import thread_exchange
 from openbase_coder_cli.mcp.thread_exchange import (
     export_thread_snapshots,
     get_or_create_device_identity,
@@ -276,6 +279,167 @@ def test_import_snapshot_is_idempotent(tmp_path: Path) -> None:
 
     assert first[0].status == "imported"
     assert second[0].status == "already_imported"
+
+
+def test_import_snapshot_db_failure_rolls_back_new_rollout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_home = tmp_path / "source"
+    target_home = tmp_path / "target"
+    exchange_dir = tmp_path / "exchange"
+    _create_state_db(source_home / "state_5.sqlite")
+    _create_state_db(target_home / "state_5.sqlite")
+    source_rollout = _insert_thread(
+        source_home, "thread-1", title="Thread title", updated_at=20
+    )
+    export_thread_snapshots(
+        codex_home=source_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "source-device.json",
+        ledger_path=tmp_path / "source-ledger.json",
+        stability_delay_seconds=0,
+        max_age_days=None,
+    )
+
+    def fail_db_state(**_kwargs):
+        raise RuntimeError("db write failed")
+
+    monkeypatch.setattr(thread_exchange, "_apply_snapshot_db_state", fail_db_state)
+
+    with pytest.raises(RuntimeError, match="db write failed"):
+        import_thread_snapshots(
+            codex_home=target_home,
+            exchange_dir=exchange_dir,
+            device_identity_path=tmp_path / "target-device.json",
+            ledger_path=tmp_path / "target-ledger.json",
+        )
+
+    target_rollout = target_home / source_rollout.relative_to(source_home)
+    assert not target_rollout.exists()
+    assert not (target_home / ".codex-thread-sync-staging").exists()
+    assert not (target_home / ".codex-thread-sync-backups").exists()
+    with sqlite3.connect(target_home / "state_5.sqlite") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM threads").fetchone() == (0,)
+
+
+def test_import_snapshot_db_failure_restores_backed_up_rollout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_home = tmp_path / "source"
+    target_home = tmp_path / "target"
+    exchange_dir = tmp_path / "exchange"
+    target_ledger = tmp_path / "target-ledger.json"
+    _create_state_db(source_home / "state_5.sqlite")
+    _create_state_db(target_home / "state_5.sqlite")
+    source_rollout = _insert_thread(
+        source_home, "thread-1", title="Thread title", updated_at=20
+    )
+    export_thread_snapshots(
+        codex_home=source_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "source-device.json",
+        ledger_path=tmp_path / "source-ledger.json",
+        stability_delay_seconds=0,
+        max_age_days=None,
+    )
+    first = import_thread_snapshots(
+        codex_home=target_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "target-device.json",
+        ledger_path=target_ledger,
+    )
+    assert first[0].status == "imported"
+    target_rollout = target_home / source_rollout.relative_to(source_home)
+    original_content = target_rollout.read_text(encoding="utf-8")
+
+    # Advance the source thread so a second snapshot supersedes the first.
+    with source_rollout.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "timestamp": "2026-06-16T13:00:00.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "task_complete",
+                        "turn_id": "turn-2",
+                        "last_agent_message": "more work",
+                    },
+                }
+            )
+            + "\n"
+        )
+    export_thread_snapshots(
+        codex_home=source_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "source-device.json",
+        ledger_path=tmp_path / "source-ledger.json",
+        stability_delay_seconds=0,
+        max_age_days=None,
+    )
+
+    def fail_db_state(**_kwargs):
+        raise RuntimeError("db write failed")
+
+    monkeypatch.setattr(thread_exchange, "_apply_snapshot_db_state", fail_db_state)
+
+    with pytest.raises(RuntimeError, match="db write failed"):
+        import_thread_snapshots(
+            codex_home=target_home,
+            exchange_dir=exchange_dir,
+            device_identity_path=tmp_path / "target-device.json",
+            ledger_path=target_ledger,
+        )
+
+    assert target_rollout.read_text(encoding="utf-8") == original_content
+    assert not (target_home / ".codex-thread-sync-staging").exists()
+    assert not (target_home / ".codex-thread-sync-backups").exists()
+    with sqlite3.connect(target_home / "state_5.sqlite") as conn:
+        row = conn.execute(
+            "SELECT title FROM threads WHERE id = ?",
+            ("thread-1",),
+        ).fetchone()
+    assert row == ("Thread title",)
+
+
+def test_export_skips_thread_active_in_super_agents_sqlite_store(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    store_home = tmp_path / "store"
+    store_home.mkdir()
+    _create_state_db(home / "state_5.sqlite")
+    _insert_thread(home, "thread-1", title="Thread title", updated_at=20)
+    with sqlite3.connect(store_home / "state.sqlite3") as conn:
+        conn.execute(
+            """
+            create table sessions (
+                id text primary key,
+                status text not null,
+                active_turn_id text,
+                backend_session_id text
+            )
+            """
+        )
+        conn.execute(
+            "insert into sessions values (?, ?, ?, ?)",
+            ("codex_session", "running", "turn-1", "thread-1"),
+        )
+    monkeypatch.setenv("SUPER_AGENTS_CLAUDE_CODE_HOME", str(store_home))
+
+    results = export_thread_snapshots(
+        codex_home=home,
+        exchange_dir=tmp_path / "exchange",
+        device_identity_path=tmp_path / "device.json",
+        ledger_path=tmp_path / "ledger.json",
+        stability_delay_seconds=0,
+        max_age_days=None,
+    )
+
+    assert [result.status for result in results] == ["skipped"]
+    assert results[0].reason == "skipped_active"
 
 
 def test_import_snapshot_detects_divergent_local_thread(tmp_path: Path) -> None:

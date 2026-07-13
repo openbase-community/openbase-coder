@@ -14,6 +14,29 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+# The super-agents package keeps its single SQLite agent store in the
+# Claude Code app dir (see ``super_agents.agent_store.app_dir``); both
+# backends' Super Agents sessions are recorded there.
+DEFAULT_SUPER_AGENTS_STORE_HOME = (
+    Path.home() / ".local" / "share" / "super-agents-claude-code"
+)
+SUPER_AGENTS_STORE_HOME_ENV = "SUPER_AGENTS_CLAUDE_CODE_HOME"
+
+
+def super_agents_state_db_path() -> Path:
+    configured = os.environ.get(SUPER_AGENTS_STORE_HOME_ENV)
+    home = (
+        Path(configured).expanduser() if configured else DEFAULT_SUPER_AGENTS_STORE_HOME
+    )
+    return home / "state.sqlite3"
+
+
+def remove_empty_dir(path: Path) -> None:
+    try:
+        path.rmdir()
+    except OSError:
+        return
+
 
 @dataclass(frozen=True)
 class DeviceIdentity:
@@ -341,6 +364,46 @@ def device_snapshot_dirs(exchange_dir: Path) -> list[Path]:
         path
         for path in root.glob("*/snapshots/*/*")
         if path.is_dir() and (path / "metadata.json").exists()
+    )
+
+
+def collect_snapshot_records(
+    exchange_dir: Path,
+    *,
+    entity_id: str,
+    entity_id_key: str,
+    read_metadata: Callable[[Path], dict[str, Any]],
+    metadata_error: type[Exception],
+    source_device_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """List exchange snapshots for one entity as {path, metadata} records."""
+    records: list[dict[str, Any]] = []
+    for snapshot_dir in device_snapshot_dirs(exchange_dir):
+        try:
+            metadata = read_metadata(snapshot_dir / "metadata.json")
+        except metadata_error:
+            continue
+        if metadata[entity_id_key] != entity_id:
+            continue
+        if source_device_id and metadata["source_device_id"] != source_device_id:
+            continue
+        records.append({"path": snapshot_dir, "metadata": metadata})
+    return records
+
+
+def find_snapshot_record(
+    records: list[dict[str, Any]],
+    fingerprint_id: str | None,
+) -> dict[str, Any] | None:
+    if not fingerprint_id:
+        return None
+    return next(
+        (
+            record
+            for record in records
+            if record["metadata"].get("fingerprint") == fingerprint_id
+        ),
+        None,
     )
 
 

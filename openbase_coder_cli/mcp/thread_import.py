@@ -8,7 +8,8 @@ import logging
 import shutil
 import sqlite3
 import subprocess
-from contextlib import contextmanager
+import uuid
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from .thread_sync_common import (
     read_scoped_ledger,
     record_sync_conflict,
     record_synced_pair,
+    super_agents_state_db_path,
     sync_cutoff_ms,
     write_scoped_ledger,
 )
@@ -907,17 +909,19 @@ def _write_sync_ledger(path: Path, ledger: dict[str, Any]) -> None:
 
 def _active_super_agent_thread_ids(
     state_path: Path = DEFAULT_SUPER_AGENTS_STATE_PATH,
+    *,
+    db_path: Path | None = None,
 ) -> set[str]:
+    active = _active_super_agent_thread_ids_from_db(db_path)
     if not state_path.exists():
-        return set()
+        return active
     try:
         raw = json.loads(state_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return set()
+        return active
     sessions = raw.get("sessions") if isinstance(raw, dict) else None
     if not isinstance(sessions, dict):
-        return set()
-    active: set[str] = set()
+        return active
     for key, value in sessions.items():
         if not isinstance(value, dict):
             continue
@@ -929,6 +933,42 @@ def _active_super_agent_thread_ids(
         if thread_id and status in {"running", "waiting"} and active_turn:
             active.add(thread_id)
     return active
+
+
+def _active_super_agent_thread_ids_from_db(db_path: Path | None = None) -> set[str]:
+    """Read active Super Agents thread ids from the SQLite agent store."""
+    resolved_db = db_path or super_agents_state_db_path()
+    if not resolved_db.exists():
+        return set()
+    with closing(sqlite3.connect(resolved_db)) as conn:
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                """
+                select id, backend_session_id from sessions
+                where status = 'running' or active_turn_id is not null
+                """
+            ).fetchall()
+        except sqlite3.Error:
+            rows = []
+    active: set[str] = set()
+    for row in rows:
+        thread_id = _string(row["backend_session_id"]) or _thread_id_from_store_id(
+            _string(row["id"])
+        )
+        if thread_id:
+            active.add(thread_id)
+    return active
+
+
+def _thread_id_from_store_id(store_id: str | None) -> str | None:
+    """Recover a Codex thread UUID from a prefixed agent-store session id."""
+    if not store_id or not store_id.startswith("codex_"):
+        return None
+    try:
+        return str(uuid.UUID(hex=store_id.removeprefix("codex_")))
+    except ValueError:
+        return None
 
 
 def _log_sync_result(result: CodexThreadSyncResult) -> None:
