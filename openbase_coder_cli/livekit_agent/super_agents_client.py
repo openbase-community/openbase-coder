@@ -38,6 +38,13 @@ DISPATCH_TIMING_LOG = "dispatch_timing"
 DEFAULT_CODEX_MODEL = "gpt-5.5"
 DEFAULT_DISPATCHER_LABEL = "dispatcher"
 TURN_POLL_INTERVAL_SECONDS = 0.5
+# A busy app-server can miss individual progress polls (observed: thread/read
+# timing out after 30s while the backend churned on tool output). Keep polling
+# through transient failures instead of killing the voice generation that is
+# waiting to speak the answer; only give up after this many consecutive
+# failures.
+TURN_POLL_MAX_CONSECUTIVE_FAILURES = 10
+TURN_POLL_FAILURE_BACKOFF_MAX_SECONDS = 5.0
 
 
 def _model_name_for_role(
@@ -114,6 +121,8 @@ class SuperAgentsLiveKitClient:
         self._active_turn_started_at: float | None = None
         self._active_turn_dispatch_id: str | None = None
         self._active_turn_prompt_hash: str | None = None
+        self._active_turn_wait_task: asyncio.Task[dict[str, Any]] | None = None
+        self._active_turn_wait_task_turn_id: str | None = None
         self._claimed_speech_turns: set[str] = set()
         self._state_lock = asyncio.Lock()
         self._turn_start_lock = asyncio.Lock()
@@ -164,7 +173,18 @@ class SuperAgentsLiveKitClient:
             )
 
             if self._active_turn_id:
-                if self._active_turn_prompt_hash == prompt_debug["hash"]:
+                if self._active_turn_has_completed():
+                    turn_id = self._active_turn_id
+                    logger.info(
+                        "%s stage=voice_request_joined_completed_active_turn "
+                        "dispatch_id=%s thread_id=%s turn_id=%s prompt_hash=%s",
+                        DISPATCH_TIMING_LOG,
+                        dispatch_id,
+                        thread_id,
+                        turn_id,
+                        prompt_debug["hash"],
+                    )
+                elif self._active_turn_prompt_hash == prompt_debug["hash"]:
                     turn_id = self._active_turn_id
                     logger.info(
                         "%s stage=voice_request_joined_active_turn dispatch_id=%s "
@@ -258,12 +278,30 @@ class SuperAgentsLiveKitClient:
                 int((time.monotonic() - dispatch_started) * 1000),
             )
             raise
+        except Exception as exc:
+            # The backend turn is likely still running (for example the
+            # progress polling gave up during an app-server stall); keep it
+            # active so the user's next utterance can rejoin it and the
+            # finished answer still gets spoken.
+            preserve_active_turn = True
+            logger.error(
+                "%s stage=voice_turn_wait_failed dispatch_id=%s turn_id=%s "
+                "elapsed_ms=%d error=%s",
+                DISPATCH_TIMING_LOG,
+                dispatch_id,
+                turn_id,
+                int((time.monotonic() - dispatch_started) * 1000),
+                exc,
+            )
+            raise
         finally:
             if not preserve_active_turn and turn_id and self._active_turn_id == turn_id:
                 self._active_turn_id = None
                 self._active_turn_started_at = None
                 self._active_turn_dispatch_id = None
                 self._active_turn_prompt_hash = None
+                self._active_turn_wait_task = None
+                self._active_turn_wait_task_turn_id = None
 
     def has_active_prompt(self, prompt: str) -> bool:
         prompt_debug = _prompt_debug_fields(prompt)
@@ -281,6 +319,16 @@ class SuperAgentsLiveKitClient:
         async with self._turn_start_lock:
             thread_id = await self._ensure_thread()
             if self._active_turn_id:
+                if self._active_turn_has_completed():
+                    logger.info(
+                        "%s stage=proactive_steer_completed_active_turn "
+                        "thread_id=%s turn_id=%s prompt_hash=%s",
+                        DISPATCH_TIMING_LOG,
+                        thread_id,
+                        self._active_turn_id,
+                        prompt_debug["hash"],
+                    )
+                    return self._active_turn_id
                 if self._active_turn_prompt_hash == prompt_debug["hash"]:
                     logger.info(
                         "%s stage=proactive_steer_joined_active_turn thread_id=%s "
@@ -348,7 +396,9 @@ class SuperAgentsLiveKitClient:
             turn_input["developerInstructions"] = effective_developer_instructions
 
         previous_turn_id = None
-        if not (self._backend_is_codex() and hasattr(self._backend_client, "start_turn")):
+        if not (
+            self._backend_is_codex() and hasattr(self._backend_client, "start_turn")
+        ):
             previous_turn_id = await self._latest_real_turn_id(thread_id)
 
         if self._backend_is_codex() and hasattr(self._backend_client, "start_turn"):
@@ -466,9 +516,7 @@ class SuperAgentsLiveKitClient:
             )
             return None
         return str(
-            progress.get("status")
-            or progress.get("summary", {}).get("status")
-            or ""
+            progress.get("status") or progress.get("summary", {}).get("status") or ""
         ).lower()
 
     async def _latest_real_turn_id(self, thread_id: str) -> str | None:
@@ -614,18 +662,69 @@ class SuperAgentsLiveKitClient:
         return turn_id
 
     async def _wait_for_turn(self, thread_id: str, turn_id: str) -> dict[str, Any]:
-        while True:
-            progress = await self._backend_client.progress_by_label(
-                self._query(
-                    thread_id=thread_id,
-                    turn_id=turn_id,
-                    include_items=True,
-                    final_only=True,
-                    max_items=5,
-                    max_output_chars=4000,
-                    include_turn=True,
-                )
+        wait_task = self._active_turn_wait_task
+        if (
+            wait_task is None
+            or self._active_turn_wait_task_turn_id != turn_id
+            or (wait_task.done() and (wait_task.cancelled() or wait_task.exception()))
+        ):
+            wait_task = asyncio.create_task(
+                self._poll_turn_until_ready(thread_id, turn_id),
+                name=f"openbase-super-agents-turn-wait-{turn_id}",
             )
+            self._active_turn_wait_task = wait_task
+            self._active_turn_wait_task_turn_id = turn_id
+        return await asyncio.shield(wait_task)
+
+    async def _poll_turn_until_ready(
+        self,
+        thread_id: str,
+        turn_id: str,
+    ) -> dict[str, Any]:
+        consecutive_failures = 0
+        while True:
+            try:
+                progress = await self._backend_client.progress_by_label(
+                    self._query(
+                        thread_id=thread_id,
+                        turn_id=turn_id,
+                        include_items=True,
+                        final_only=True,
+                        max_items=5,
+                        max_output_chars=4000,
+                        include_turn=True,
+                    )
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                consecutive_failures += 1
+                if consecutive_failures >= TURN_POLL_MAX_CONSECUTIVE_FAILURES:
+                    logger.error(
+                        "%s stage=turn_wait_poll_gave_up turn_id=%s "
+                        "consecutive_failures=%d error=%s",
+                        DISPATCH_TIMING_LOG,
+                        turn_id,
+                        consecutive_failures,
+                        exc,
+                    )
+                    raise
+                backoff = min(
+                    TURN_POLL_INTERVAL_SECONDS * (2**consecutive_failures),
+                    TURN_POLL_FAILURE_BACKOFF_MAX_SECONDS,
+                )
+                logger.warning(
+                    "%s stage=turn_wait_poll_error turn_id=%s "
+                    "consecutive_failures=%d retry_in_s=%.1f error=%s",
+                    DISPATCH_TIMING_LOG,
+                    turn_id,
+                    consecutive_failures,
+                    backoff,
+                    exc,
+                )
+                await asyncio.sleep(backoff)
+                continue
+            consecutive_failures = 0
             status = str(
                 progress.get("status")
                 or progress.get("summary", {}).get("status")
@@ -642,6 +741,17 @@ class SuperAgentsLiveKitClient:
             }:
                 return progress
             await asyncio.sleep(TURN_POLL_INTERVAL_SECONDS)
+
+    def _active_turn_has_completed(self) -> bool:
+        wait_task = self._active_turn_wait_task
+        if (
+            not wait_task
+            or self._active_turn_wait_task_turn_id != self._active_turn_id
+            or not wait_task.done()
+            or wait_task.cancelled()
+        ):
+            return False
+        return wait_task.exception() is None
 
     async def _ensure_thread(self) -> str:
         async with self._state_lock:

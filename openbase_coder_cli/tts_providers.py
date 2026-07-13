@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import uuid
 from dataclasses import asdict, dataclass
@@ -30,6 +31,25 @@ DEFAULT_KOKORO_VOICE_ID = "af_heart"
 DEFAULT_KOKORO_ANNOUNCER_VOICE_ID = "af_bella"
 KOKORO_REPO_ID = "hexgrad/Kokoro-82M"
 KOKORO_MODEL_FILES = ("config.json", "kokoro-v1_0.pth")
+# Cartesia closes idle websockets server-side well before the plugin pool's
+# 300s lifetime (observed dead after ~40-90s idle), so a reused pooled socket
+# frequently fails its first write and costs an error plus a retry on the
+# first reply after a pause. Treat pooled sockets idle longer than this as
+# expired so the pool redials instead.
+CARTESIA_WS_POOL_MAX_IDLE_SECONDS = 30.0
+
+logger = logging.getLogger(__name__)
+
+
+def _limit_cartesia_ws_pool_idle(tts_instance: livekit_tts.TTS) -> None:
+    pool = getattr(tts_instance, "_pool", None)
+    if pool is None or not hasattr(pool, "_max_session_duration"):
+        logger.warning(
+            "Unable to limit Cartesia websocket pool idle lifetime; "
+            "plugin internals changed"
+        )
+        return
+    pool._max_session_duration = CARTESIA_WS_POOL_MAX_IDLE_SECONDS
 
 
 @dataclass(frozen=True)
@@ -187,13 +207,15 @@ class CartesiaTTSProvider(BaseTTSProvider):
             cartesia_kwargs["base_url"] = base_url
         if api_version:
             cartesia_kwargs["api_version"] = api_version
-        return cartesia.TTS(
+        tts_instance = cartesia.TTS(
             model=model,
             voice=voice_id,
             api_key=api_key,
             volume=volume,
             **cartesia_kwargs,
         )
+        _limit_cartesia_ws_pool_idle(tts_instance)
+        return tts_instance
 
 
 class OpenbaseCloudTTSProvider(CartesiaTTSProvider):
