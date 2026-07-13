@@ -44,6 +44,20 @@ def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
+def _git_env(
+    args: list[str], cwd: Path, env: dict[str, str] | None
+) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=GIT_TIMEOUT_SECONDS,
+        env=env,
+    )
+
+
 def worktree_main_repo(repo: Path) -> Path | None:
     """The main repository directory when ``repo`` is a linked worktree."""
     result = _git(["rev-parse", "--git-dir", "--git-common-dir"], repo)
@@ -160,7 +174,11 @@ def adopt_worktree(
     if not branch_exists:
         if not remote_url:
             return "branch_missing_no_peer"
-        fetch = _git(["fetch", "--quiet", remote_url, branch], main_repo)
+        fetch = _git_env(
+            ["fetch", "--quiet", remote_url, branch],
+            main_repo,
+            _auth_env(auth_header),
+        )
         if fetch.returncode != 0:
             return "branch_fetch_failed"
         fetched = _git(
@@ -170,9 +188,6 @@ def adopt_worktree(
             return "branch_fetch_failed"
         if _git(["branch", branch, fetched], main_repo).returncode != 0:
             return "branch_create_failed"
-    # Note: _auth_env is applied by the caller's fetch path in reconciler;
-    # here plain fetch suffices for local/peer smart-HTTP with header via env.
-    del auth_header, _auth_env
 
     # A branch can only be checked out in one worktree of a repo.
     in_use = _git(["worktree", "list", "--porcelain"], main_repo).stdout

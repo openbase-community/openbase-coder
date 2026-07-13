@@ -373,7 +373,9 @@ def run_reconcile_once(
             rel = str(candidate.relative_to(folder_root))
             remote = peer_git_url(peers[0], folder.folder_id, rel) if peers else None
             try:
-                action = adopt_worktree(candidate, home=home, remote_url=remote)
+                action = adopt_worktree(
+                    candidate, home=home, remote_url=remote, auth_header=auth_header
+                )
             except (OSError, subprocess.TimeoutExpired) as exc:
                 action = f"adopt_error: {exc}"
             summary.setdefault("worktrees", []).append({"path": rel, "action": action})
