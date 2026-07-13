@@ -29,6 +29,7 @@ from openbase_coder_cli.runtime import (
     current_runtime_package,
     packaged_instructions_dir,
     packaged_skills_dir,
+    stable_package_path,
 )
 
 CODEX_HOME_DEFAULT_SOURCE_DIR = "instructions"
@@ -178,7 +179,10 @@ def _symlink_skills_to_root(
     for source_path in skill_sources:
         target_path = target_root / source_path.name
         if target_path.is_symlink():
-            if target_path.resolve() == source_path.resolve():
+            # Compare the literal link target, not the resolved directory: a
+            # link pinned to a versioned release dir resolves identically to
+            # the stable current/ alias today but dangles after rotation.
+            if target_path.readlink() == source_path:
                 click.echo(f"{label} skill already linked at {target_path}")
                 continue
             target_path.unlink()
@@ -317,10 +321,11 @@ def _super_agents_mcp_command(workspace_dir: Path) -> tuple[Path, list[str]]:
     if runtime_package is not None:
         bundled_command = runtime_package.python_path.parent / SUPER_AGENTS_MCP_COMMAND
         if bundled_command.is_file():
-            return bundled_command, []
+            # Persisted into MCP configs: must survive release rotation.
+            return stable_package_path(bundled_command), []
 
     if command := which(SUPER_AGENTS_MCP_COMMAND):
-        return Path(command), []
+        return stable_package_path(Path(command)), []
 
     if has_workspace and (uv_bin := which("uv")):
         run_dir = workspace_dir / "cli"
@@ -356,7 +361,8 @@ def _default_skills_dir(workspace_dir: str) -> Path:
             return workspace_source
     packaged = packaged_skills_dir()
     if packaged is not None:
-        return packaged
+        # Symlink targets are created from this root: must survive rotation.
+        return stable_package_path(packaged)
     # Missing skills are non-fatal; the caller reports and continues.
     return Path(workspace_dir or str(OPENBASE_BASE_DIR)) / CODEX_HOME_SKILLS_SOURCE_DIR
 

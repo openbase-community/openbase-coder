@@ -6,6 +6,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from openbase_coder_cli.paths import STANDALONE_CURRENT_DIR
+
 PACKAGE_METADATA_FILENAME = "openbase-coder-package.json"
 
 
@@ -87,6 +89,27 @@ def packaged_skills_dir() -> Path | None:
 
 def is_standalone_runtime() -> bool:
     return current_runtime_package() is not None
+
+
+def stable_package_path(path: Path) -> Path:
+    """Return the version-independent alias for a standalone package path.
+
+    Release directories rotate on every self-update and the old version is
+    deleted, so persisted references — MCP command paths, skill symlinks —
+    must route through the stable ``packages/standalone/current`` symlink or
+    they dangle after the next release (and break when synced to a machine on
+    a different release). Paths outside the release that ``current`` points
+    to are returned unchanged.
+    """
+    try:
+        current_target = STANDALONE_CURRENT_DIR.resolve(strict=True)
+    except OSError:
+        return path
+    try:
+        relative = path.resolve().relative_to(current_target)
+    except (OSError, ValueError):
+        return path
+    return STANDALONE_CURRENT_DIR / relative
 
 
 def _candidate_roots_from_executable() -> list[Path]:
