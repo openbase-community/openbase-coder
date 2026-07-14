@@ -88,3 +88,42 @@ def test_launchctl_bootstrap_reenables_disabled_label(tmp_path, monkeypatch):
     assert calls.index(("enable", "gui/501/com.openbase.coder.sample")) < calls.index(
         ("bootstrap", "gui/501", str(plist))
     )
+
+
+def test_launchctl_bootstrap_kickstarts_once_after_successful_bootstrap(
+    tmp_path, monkeypatch
+):
+    service = ServiceDefinition(
+        name="sample",
+        description="Sample",
+        command_template="exec true",
+        workdir_template="{workspace}",
+    )
+    plist = tmp_path / "sample.plist"
+    calls = []
+    bootstrap_returncodes = iter([5, 5, 0])
+
+    def fake_launchctl(*args, check=True):
+        calls.append(args)
+        code = next(bootstrap_returncodes) if args[0] == "bootstrap" else 0
+        return subprocess.CompletedProcess(["launchctl", *args], code, "", "")
+
+    monkeypatch.setattr(launchd, "_is_macos", lambda: True)
+    monkeypatch.setattr(launchd, "_uid", lambda: 501)
+    monkeypatch.setattr(launchd, "_plist_path", lambda _svc: plist)
+    monkeypatch.setattr(launchd, "_prepare_service_start", lambda _svc: None)
+    monkeypatch.setattr(launchd.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(launchd, "_launchctl", fake_launchctl)
+
+    launchd.launchctl_bootstrap(service)
+
+    target = "gui/501/com.openbase.coder.sample"
+    bootstrap_indexes = [i for i, c in enumerate(calls) if c[0] == "bootstrap"]
+    kickstart_calls = [c for c in calls if c[0] == "kickstart"]
+
+    # Exactly one kickstart, for the same service target, without -k.
+    assert kickstart_calls == [("kickstart", target)]
+    # It immediately follows the successful (final) bootstrap, so the two
+    # failed attempts before it ran without a kickstart.
+    assert len(bootstrap_indexes) == 3
+    assert calls.index(("kickstart", target)) == bootstrap_indexes[-1] + 1

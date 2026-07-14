@@ -437,9 +437,11 @@ def launchctl_bootstrap(svc: ServiceDefinition) -> None:
         time.sleep(0.5 * (attempt + 1))
         result = _launchctl("bootstrap", domain, str(plist), check=False)
         if result.returncode == 0:
-            # RunAtLoad is not honored when re-bootstrapping a label that was
-            # just booted out, leaving the job loaded but never spawned.
-            # Kickstart (without -k) to guarantee a start either way.
+            # An intermittent macOS state has been observed where bootstrap
+            # succeeds but the job stays loaded without a PID, despite
+            # RunAtLoad and KeepAlive (mechanism unconfirmed). Kickstart
+            # without -k is a no-op for a running job and safely ensures the
+            # newly registered job is asked to run.
             _launchctl("kickstart", f"{domain}/{label}", check=False)
             return
     raise click.ClickException(f"Failed to bootstrap {label}: {result.stderr.strip()}")
