@@ -14,7 +14,7 @@ from openbase_coder_cli.services.restart import (
 @click.option(
     "--service",
     type=click.Choice(restart_target_names()),
-    help="Restart exactly one Openbase-managed service.",
+    help="Restart one Openbase-managed service and required dependents.",
 )
 @click.option(
     "--delay",
@@ -38,7 +38,8 @@ def restart(service: str | None, delay: float, recreate_dispatcher: bool) -> Non
     plan = schedule_restart(request)
 
     if service:
-        click.echo(f"Scheduled restart for {service} in {plan.delay_seconds:g}s.")
+        service_list = ", ".join(plan.services)
+        click.echo(f"Scheduled restart for {service_list} in {plan.delay_seconds:g}s.")
     else:
         click.echo(
             f"Scheduled restart for all Openbase-managed services in {plan.delay_seconds:g}s."

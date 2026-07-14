@@ -60,9 +60,7 @@ def build_restart_plan(request: RestartRequest) -> RestartPlan:
             f"Unknown restart target '{unknown[0]}'. Valid: {valid}"
         )
 
-    services: list[str] = []
-    for target in requested_targets:
-        _append_unique(services, target)
+    services = _expand_restart_targets(requested_targets)
 
     if request.recreate_dispatcher:
         _append_unique(services, "livekit-agent")
@@ -116,7 +114,7 @@ def execute_restart_plan(plan: RestartPlan) -> None:
         prepare_livekit_dispatcher_recreation()
 
     services = [find_service(name) for name in plan.services]
-    for service in services:
+    for service in reversed(services):
         if launchctl_status(service)["installed"]:
             launchctl_bootout(service)
 
@@ -167,3 +165,34 @@ def _scheduled_restart_command(plan: RestartPlan) -> str:
 def _append_unique(items: list[str], item: str) -> None:
     if item not in items:
         items.append(item)
+
+
+def _expand_restart_targets(requested_targets: list[str]) -> list[str]:
+    services: list[str] = []
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    definitions = {service.name: service for service in SERVICES}
+
+    def visit(name: str) -> None:
+        if name in visited:
+            return
+        if name in visiting:
+            raise click.ClickException(
+                f"Restart dependency cycle detected at '{name}'."
+            )
+        visiting.add(name)
+        _append_unique(services, name)
+        for dependent_name in definitions[name].restart_dependents:
+            if dependent_name not in definitions:
+                raise click.ClickException(
+                    f"Service '{name}' declares unknown restart dependent "
+                    f"'{dependent_name}'."
+                )
+            visit(dependent_name)
+        visiting.remove(name)
+        visited.add(name)
+
+    for target in requested_targets:
+        visit(target)
+
+    return services

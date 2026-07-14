@@ -98,6 +98,34 @@ def test_restart_single_service_schedules_only_that_service(monkeypatch):
     assert warnings == []
 
 
+def test_restart_livekit_server_includes_agent_dependent(monkeypatch):
+    popen_calls = []
+    warnings = []
+
+    class FakePopen:
+        def __init__(self, *args, **kwargs):
+            popen_calls.append((args, kwargs))
+
+    monkeypatch.setattr(InstallationConfig, "exists", classmethod(lambda cls: True))
+    monkeypatch.setattr(restart_module.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(
+        restart_module,
+        "warn_before_voice_interruption",
+        lambda **kwargs: warnings.append(kwargs),
+    )
+
+    result = CliRunner().invoke(
+        restart, ["--service", "livekit-server", "--delay", "0"]
+    )
+
+    assert result.exit_code == 0
+    assert "Scheduled restart for livekit-server, livekit-agent" in result.output
+    command = popen_calls[0][0][0][2]
+    assert "livekit-server" in command
+    assert "livekit-agent" in command
+    assert warnings == [{"reason": "restart", "emit_cli_warning": True}]
+
+
 def test_restart_optional_device_sync_can_be_targeted_explicitly(monkeypatch):
     popen_calls = []
 
@@ -121,6 +149,12 @@ def test_restart_codex_app_server_only_targets_codex_service():
     plan = build_restart_plan(RestartRequest(services=("codex-app-server",)))
 
     assert plan.services == ("codex-app-server",)
+
+
+def test_restart_plan_expands_livekit_server_dependent():
+    plan = build_restart_plan(RestartRequest(services=("livekit-server",)))
+
+    assert plan.services == ("livekit-server", "livekit-agent")
 
 
 def test_restart_super_agents_mcp_is_not_a_valid_target():
@@ -161,9 +195,13 @@ def test_execute_recreate_dispatcher_warms_thread_after_services_start(monkeypat
     monkeypatch.setattr(
         restart_module,
         "require_installation",
-        lambda: InstallationConfig(workspace_path="/tmp/workspace", env_file="/tmp/.env"),
+        lambda: InstallationConfig(
+            workspace_path="/tmp/workspace", env_file="/tmp/.env"
+        ),
     )
-    monkeypatch.setattr(restart_module, "launchctl_status", lambda _svc: {"installed": True})
+    monkeypatch.setattr(
+        restart_module, "launchctl_status", lambda _svc: {"installed": True}
+    )
     monkeypatch.setattr(
         restart_module,
         "launchctl_bootout",
@@ -199,3 +237,45 @@ def test_execute_recreate_dispatcher_warms_thread_after_services_start(monkeypat
     )
 
     assert calls == ["prepare", "stop:livekit-agent", "start:livekit-agent", "warm"]
+
+
+def test_execute_restart_plan_stops_dependents_first(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        restart_module,
+        "require_installation",
+        lambda: InstallationConfig(
+            workspace_path="/tmp/workspace", env_file="/tmp/.env"
+        ),
+    )
+    monkeypatch.setattr(
+        restart_module, "launchctl_status", lambda _svc: {"installed": True}
+    )
+    monkeypatch.setattr(
+        restart_module,
+        "launchctl_bootout",
+        lambda svc: calls.append(f"stop:{svc.name}"),
+    )
+    monkeypatch.setattr(
+        restart_module,
+        "install_service",
+        lambda _config, svc: calls.append(f"start:{svc.name}"),
+    )
+    monkeypatch.setattr(restart_module.time, "sleep", lambda _seconds: None)
+
+    execute_restart_plan(
+        RestartPlan(
+            services=("livekit-server", "livekit-agent"),
+            recreate_dispatcher=False,
+            interrupts_voice=False,
+            delay_seconds=0,
+        )
+    )
+
+    assert calls == [
+        "stop:livekit-agent",
+        "stop:livekit-server",
+        "start:livekit-server",
+        "start:livekit-agent",
+    ]
