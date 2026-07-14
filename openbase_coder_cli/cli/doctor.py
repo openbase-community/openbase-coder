@@ -38,6 +38,7 @@ from openbase_coder_cli.runtime import stable_runtime_package
 from openbase_coder_cli.services.definitions import SERVICES
 from openbase_coder_cli.services.installation import InstallationConfig
 from openbase_coder_cli.services.launchd import launchctl_status
+from openbase_coder_cli.services.selection import configured_coding_backend
 from openbase_coder_cli.services.tailscale_serve import tailscale_serve_health
 from openbase_coder_cli.stt_providers import (
     LOCAL_MLX_WHISPER_STT_PROVIDER_ID,
@@ -628,7 +629,11 @@ def doctor() -> None:
     # --- Service health ---
     click.echo()
     click.echo(click.style("Service Health", bold=True))
+    coding_backend = configured_coding_backend()
     for svc in SERVICES:
+        if not svc.supports_backend(coding_backend):
+            ok(f"{svc.name}: not used ({coding_backend} backend)")
+            continue
         info = launchctl_status(svc)
         required = getattr(svc, "install_by_default", True)
         if not info["installed"]:

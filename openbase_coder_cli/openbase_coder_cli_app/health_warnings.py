@@ -55,9 +55,15 @@ def _warning(
 def _service_warnings() -> list[dict[str, str]]:
     from openbase_coder_cli.services.definitions import SERVICES
     from openbase_coder_cli.services.launchd import launchctl_status
+    from openbase_coder_cli.services.selection import configured_coding_backend
 
     warnings: list[dict[str, str]] = []
+    coding_backend = configured_coding_backend()
     for service in SERVICES:
+        if not service.supports_backend(coding_backend):
+            # Backend-scoped services (e.g. the Codex App Server on the
+            # claude_code backend) are intentionally not installed.
+            continue
         conditional = _CONDITIONAL_SERVICES.get(service.name)
         expected = conditional() if conditional else service.install_by_default
         try:
