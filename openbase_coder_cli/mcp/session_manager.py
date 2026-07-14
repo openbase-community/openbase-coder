@@ -667,6 +667,7 @@ class CodexAppServerSessionManager:
                         "useStateDbOnly": True,
                         "limit": limit,
                         "cursor": cursor,
+                        "modelProviders": [],
                     },
                 )
             return await self._client.list_threads(
@@ -677,9 +678,13 @@ class CodexAppServerSessionManager:
         client = _OpenbaseSuperAgentsClient(self, self._ws_url)
         try:
             await client.ensure_connected()
+            # The empty modelProviders list disables the app server's
+            # active-provider filter: switching coding backends must not
+            # hide threads created under the other provider.
             params: dict[str, Any] = {
                 "useStateDbOnly": True,
                 "limit": limit,
+                "modelProviders": [],
             }
             if cursor:
                 params["cursor"] = cursor
@@ -992,6 +997,7 @@ class CodexAppServerSessionManager:
                     "useStateDbOnly": True,
                     "limit": 100,
                     "cursor": cursor,
+                    "modelProviders": [],
                 },
             )
             raw_threads.extend(extract_threads(result))

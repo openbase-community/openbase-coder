@@ -633,7 +633,12 @@ def test_list_threads_paginates_super_agents_results(tmp_path: Path) -> None:
         "request",
         {
             "method": "thread/list",
-            "params": {"useStateDbOnly": True, "limit": 100, "cursor": "cursor-2"},
+            "params": {
+                "useStateDbOnly": True,
+                "limit": 100,
+                "cursor": "cursor-2",
+                "modelProviders": [],
+            },
         },
     )
 
@@ -698,7 +703,12 @@ def test_list_thread_page_ranks_creation_ordered_pages_by_recency(
         "request",
         {
             "method": "thread/list",
-            "params": {"useStateDbOnly": True, "limit": 100, "cursor": "cursor-2"},
+            "params": {
+                "useStateDbOnly": True,
+                "limit": 100,
+                "cursor": "cursor-2",
+                "modelProviders": [],
+            },
         },
     ) in client.calls
 
