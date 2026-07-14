@@ -989,10 +989,11 @@ async def test_session_final_transcript_proactively_steers_when_logging_disabled
     class FakeClient:
         def __init__(self):
             self.steered_prompts = []
+            self.steer_result = "turn-1"
 
         async def steer_active_turn(self, prompt):
             self.steered_prompts.append(prompt)
-            return "turn-1"
+            return self.steer_result
 
         def has_active_prompt(self, prompt):
             return False
@@ -1019,6 +1020,16 @@ async def test_session_final_transcript_proactively_steers_when_logging_disabled
         await asyncio.sleep(0.01)
     assert client.steered_prompts == ["stop now"]
     assert router.should_skip_proactively_steered_prompt("stop now") is True
+
+    client.steer_result = None
+    session.handlers["user_input_transcribed"](
+        SimpleNamespace(is_final=True, transcript="start something new")
+    )
+    for _ in range(20):
+        if len(client.steered_prompts) == 2:
+            break
+        await asyncio.sleep(0.01)
+    assert router.should_skip_proactively_steered_prompt("start something new") is False
 
 
 def test_proactive_steer_dedup_matches_formatted_twin_transcripts():

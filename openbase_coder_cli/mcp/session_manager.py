@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Callable, Literal, Protocol
 
 from super_agents.app_models import LabelQueryInput
 from super_agents.app_permissions import permission_response_for_request
@@ -31,6 +31,13 @@ from super_agents.backend_clients import (
     client_from_environment,
 )
 
+from openbase_coder_cli.codex_session_defaults import codex_permission_defaults
+from openbase_coder_cli.dispatcher_config import (
+    DISPATCHER_MODEL_ROLE,
+    SUPER_AGENTS_MODEL_ROLE,
+    dispatcher_model,
+    super_agents_model,
+)
 from openbase_coder_cli.livekit_voice_history import record_voice_assignment
 from openbase_coder_cli.livekit_voice_route import (
     get_livekit_voice_route_state,
@@ -300,12 +307,14 @@ class CodexAppServerSessionManager:
         self,
         ws_url: str | None = None,
         client: _SuperAgentsClient | None = None,
+        model_for_role: Callable[[str], str | None] | None = None,
     ) -> None:
         self._ws_url = ws_url or os.environ.get(
             "CODEX_APP_SERVER_URL", "ws://127.0.0.1:4500"
         )
         self._uses_external_client = client is not None
         self._client: _SuperAgentsClient = client or self._default_client()
+        self._model_for_role = model_for_role or _configured_model_for_role
         self._turn_to_session: dict[str, str] = {}
         self._delivered_text: dict[str, str] = {}
         self._turn_current_item: dict[str, str] = {}
@@ -321,6 +330,19 @@ class CodexAppServerSessionManager:
 
     def _uses_backend_session_api(self) -> bool:
         return not callable(getattr(self._client, "read_thread", None))
+
+    def _codex_permission_defaults(self) -> dict[str, str]:
+        if self._uses_backend_session_api():
+            return {}
+        return codex_permission_defaults()
+
+    def _model_for_thread(self, thread: SessionInfo) -> str | None:
+        role = (
+            DISPATCHER_MODEL_ROLE
+            if thread.name and thread.name.casefold() == "dispatcher"
+            else SUPER_AGENTS_MODEL_ROLE
+        )
+        return self._model_for_role(role)
 
     async def create_thread(
         self,
@@ -348,12 +370,17 @@ class CodexAppServerSessionManager:
 
         prompt = _with_dispatcher_onboarding_reminder(thread_id, prompt)
 
+        turn_input = {
+            "prompt": prompt,
+            "cwd": thread.directory,
+            **self._codex_permission_defaults(),
+        }
+        if model := self._model_for_thread(thread):
+            turn_input["model"] = model
+
         result = await self._client.queue_turn_by_label(
             LabelQueryInput(thread_id=thread_id, cwd=thread.directory),
-            {
-                "prompt": prompt,
-                "cwd": thread.directory,
-            },
+            turn_input,
         )
         if not result.get("queued"):
             turn_id = extract_turn_id(result)
@@ -551,8 +578,7 @@ class CodexAppServerSessionManager:
         params: dict[str, Any] = {
             "threadId": thread_id,
             "cwd": directory,
-            "approvalPolicy": "never",
-            "sandbox": "danger-full-access",
+            **self._codex_permission_defaults(),
             "config": await login_shell_config_override(),
         }
         if effective_developer_instructions is not None:
@@ -723,7 +749,10 @@ class CodexAppServerSessionManager:
             thread_input = {
                 "name": name,
                 "cwd": expanded_dir,
+                **self._codex_permission_defaults(),
             }
+            if model := self._model_for_role(SUPER_AGENTS_MODEL_ROLE):
+                thread_input["model"] = model
             developer_instructions = load_super_agent_developer_instructions()
             if developer_instructions is not None:
                 thread_input["developerInstructions"] = developer_instructions
@@ -742,7 +771,9 @@ class CodexAppServerSessionManager:
         if existing:
             return _session_from_thread(existing[0], include_turns=False)
 
-        thread_input = {"cwd": expanded_dir}
+        thread_input = {"cwd": expanded_dir, **self._codex_permission_defaults()}
+        if model := self._model_for_role(SUPER_AGENTS_MODEL_ROLE):
+            thread_input["model"] = model
         developer_instructions = load_super_agent_developer_instructions()
         if developer_instructions is not None:
             thread_input["developerInstructions"] = developer_instructions
@@ -792,10 +823,19 @@ class CodexAppServerSessionManager:
 
         message = _with_dispatcher_onboarding_reminder(session_id, message)
 
+        model = self._model_for_thread(thread)
+        role_turn_input = {
+            "prompt": message,
+            "cwd": thread.directory,
+            **self._codex_permission_defaults(),
+        }
+        if model:
+            role_turn_input["model"] = model
+
         if self._uses_backend_session_api():
             started = await self._client.start_turn_by_label(
                 LabelQueryInput(thread_id=session_id, cwd=thread.directory),
-                {"prompt": message, "cwd": thread.directory},
+                role_turn_input,
             )
             turn_id = extract_turn_id(started)
             if not turn_id:
@@ -806,8 +846,7 @@ class CodexAppServerSessionManager:
 
         turn_input = {
             "threadId": session_id,
-            "cwd": thread.directory,
-            "prompt": message,
+            **role_turn_input,
         }
         try:
             started = await self._client.start_turn(turn_input)
@@ -1319,6 +1358,14 @@ def get_session_manager() -> CodexAppServerSessionManager:
     if _session_manager is None:
         _session_manager = CodexAppServerSessionManager()
     return _session_manager
+
+
+def _configured_model_for_role(role: str) -> str | None:
+    if role == DISPATCHER_MODEL_ROLE:
+        return dispatcher_model()
+    if role == SUPER_AGENTS_MODEL_ROLE:
+        return super_agents_model()
+    raise ValueError(f"Unsupported model role: {role}")
 
 
 def _with_dispatcher_onboarding_reminder(thread_id: str, prompt: str) -> str:

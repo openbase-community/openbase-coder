@@ -383,7 +383,9 @@ class FakeBackendSessionClient:
 
 
 def _manager(client: Any) -> CodexAppServerSessionManager:
-    return CodexAppServerSessionManager(client=client)
+    return CodexAppServerSessionManager(
+        client=client, model_for_role=lambda _role: None
+    )
 
 
 def test_list_threads_reads_threads_from_super_agents(tmp_path: Path) -> None:
@@ -1106,7 +1108,13 @@ def test_create_session_includes_super_agent_instructions_for_backend_sessions(
         }
     )
 
-    thread = asyncio.run(_manager(client).create_session(str(project_dir)))
+    manager = CodexAppServerSessionManager(
+        client=client,
+        model_for_role=lambda role: (
+            "gpt-super-agent" if role == "super_agents" else "gpt-dispatcher"
+        ),
+    )
+    thread = asyncio.run(manager.create_session(str(project_dir)))
 
     assert thread.session_id == "s_backend"
     assert client.calls == [
@@ -1116,6 +1124,7 @@ def test_create_session_includes_super_agent_instructions_for_backend_sessions(
             {
                 "name": "project",
                 "cwd": str(project_dir.resolve()),
+                "model": "gpt-super-agent",
                 "developerInstructions": "super backend instructions",
             },
         ),
@@ -1183,14 +1192,24 @@ def test_send_message_starts_claude_code_backend_turn(tmp_path: Path) -> None:
         }
     )
 
-    turn_id = asyncio.run(_manager(client).send_message("s_dispatcher", "Continue"))
+    manager = CodexAppServerSessionManager(
+        client=client,
+        model_for_role=lambda role: (
+            "gpt-dispatcher" if role == "dispatcher" else "gpt-super-agent"
+        ),
+    )
+    turn_id = asyncio.run(manager.send_message("s_dispatcher", "Continue"))
 
     assert turn_id == "t_2"
     assert client.calls[-1] == (
         "start_turn_by_label",
         {
             "thread_id": "s_dispatcher",
-            "turn_input": {"prompt": "Continue", "cwd": str(project_dir)},
+            "turn_input": {
+                "prompt": "Continue",
+                "cwd": str(project_dir),
+                "model": "gpt-dispatcher",
+            },
         },
     )
 
@@ -1476,7 +1495,14 @@ def test_create_thread_starts_new_thread_when_none_exist(
     thread = asyncio.run(_manager(client).create_thread(str(project_dir)))
 
     assert thread.session_id == "thr-new"
-    assert client.calls[1] == ("start_thread", {"cwd": str(project_dir.resolve())})
+    assert client.calls[1] == (
+        "start_thread",
+        {
+            "cwd": str(project_dir.resolve()),
+            "approvalPolicy": "never",
+            "sandbox": "danger-full-access",
+        },
+    )
 
 
 def test_create_thread_includes_super_agent_instructions(
@@ -1502,6 +1528,8 @@ def test_create_thread_includes_super_agent_instructions(
         "start_thread",
         {
             "cwd": str(project_dir.resolve()),
+            "approvalPolicy": "never",
+            "sandbox": "danger-full-access",
             "developerInstructions": "super agent instructions",
         },
     )
@@ -1546,7 +1574,13 @@ def test_start_turn_starts_via_super_agents_and_broadcasts(
     assert turn_id == "turn-1"
     assert client.calls[-1] == (
         "start_turn",
-        {"threadId": "thr-1", "cwd": str(project_dir), "prompt": "Inspect repo"},
+        {
+            "threadId": "thr-1",
+            "cwd": str(project_dir),
+            "prompt": "Inspect repo",
+            "approvalPolicy": "never",
+            "sandbox": "danger-full-access",
+        },
     )
     assert events[0][0] == "thr-1"
     assert events[0][1]["type"] == "turn_started"
@@ -1591,7 +1625,13 @@ def test_queue_turn_uses_super_agents_queue_without_exposing_active_turn(
     # queue_turn re-reads state to broadcast the refreshed thread snapshot.
     client.responses["read_thread"].append(client.responses["read_thread"][0])
 
-    result = asyncio.run(_manager(client).queue_turn("thr-1", "Follow up"))
+    manager = CodexAppServerSessionManager(
+        client=client,
+        model_for_role=lambda role: (
+            "gpt-dispatcher" if role == "dispatcher" else "gpt-super-agent"
+        ),
+    )
+    result = asyncio.run(manager.queue_turn("thr-1", "Follow up"))
 
     assert result["queued"] is True
     assert (
@@ -1599,7 +1639,13 @@ def test_queue_turn_uses_super_agents_queue_without_exposing_active_turn(
         {
             "thread_id": "thr-1",
             "cwd": str(project_dir),
-            "turn_input": {"prompt": "Follow up", "cwd": str(project_dir)},
+            "turn_input": {
+                "prompt": "Follow up",
+                "cwd": str(project_dir),
+                "approvalPolicy": "never",
+                "sandbox": "danger-full-access",
+                "model": "gpt-super-agent",
+            },
         },
     ) in client.calls
 

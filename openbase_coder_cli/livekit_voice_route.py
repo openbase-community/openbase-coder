@@ -12,6 +12,7 @@ from pathlib import Path
 import livekit.api as livekit_api
 
 from openbase_coder_cli.cli.utils import get_data_dir
+from openbase_coder_cli.codex_session_defaults import codex_permission_defaults
 from openbase_coder_cli.dispatcher_config import (
     dispatcher_voice,
     selected_tts_provider_id,
@@ -402,14 +403,15 @@ async def warm_livekit_dispatcher_thread(
 
     deadline = time.monotonic() + max(timeout_seconds, 0.0)
     while True:
+        permissions = codex_permission_defaults()
         client = SuperAgentsLiveKitClient(
             cwd=os.path.expanduser(
                 os.getenv("LIVEKIT_CODEX_THREAD_CWD", str(Path.home()))
             ),
             state_path=os.getenv("LIVEKIT_CODEX_THREAD_STATE_PATH") or None,
             developer_instructions=_dispatcher_developer_instructions(),
-            approval_policy=os.getenv("LIVEKIT_CODEX_APPROVAL_POLICY", "never"),
-            sandbox=os.getenv("LIVEKIT_CODEX_SANDBOX", "danger-full-access"),
+            approval_policy=permissions["approvalPolicy"],
+            sandbox=permissions["sandbox"],
         )
         try:
             return await client.prepare()

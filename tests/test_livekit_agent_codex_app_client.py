@@ -192,6 +192,7 @@ def test_run_turn_emits_dispatch_timing_logs(tmp_path: Path, caplog):
         async def _send_request(self, method, params):
             assert method == "turn/start"
             assert params["serviceTier"] == "standard"
+            assert params["model"] == "gpt-5.5"
             return {"turn": {"id": "turn-1"}}
 
     async def check():
@@ -356,6 +357,7 @@ def test_target_thread_uses_super_agents_reasoning_instead_of_dispatcher(
     request = asyncio.run(check())
 
     assert request["effort"] == "high"
+    assert request["model"] == "gpt-super-agent"
     assert request["collaborationMode"]["settings"]["model"] == "gpt-super-agent"
 
 
@@ -400,6 +402,7 @@ def test_livekit_turn_instructions_are_sent_per_turn_only(tmp_path: Path):
     params = asyncio.run(check())
 
     assert "developerInstructions" not in params
+    assert params["model"] == "gpt-5.5"
     assert params["collaborationMode"]["settings"]["model"] == "gpt-5.5"
     assert params["collaborationMode"]["settings"]["developer_instructions"] == (
         "dispatcher instructions\n\nvoice instructions"
@@ -680,6 +683,7 @@ def test_thread_params_use_configured_approval_and_sandbox():
 
     assert client._thread_params() == {
         "cwd": "/tmp",
+        "model": "gpt-5.5",
         "approvalPolicy": "on-request",
         "sandbox": "read-only",
     }
@@ -690,6 +694,7 @@ def test_thread_params_default_to_existing_voice_coder_behavior():
 
     assert client._thread_params() == {
         "cwd": "/tmp",
+        "model": "gpt-5.5",
         "approvalPolicy": "never",
         "sandbox": "danger-full-access",
     }
@@ -830,6 +835,7 @@ def test_ensure_thread_adopts_canonical_dispatcher_from_disk(tmp_path: Path):
             "thread/resume",
             {
                 "cwd": "/tmp",
+                "model": "gpt-5.5",
                 "approvalPolicy": "never",
                 "sandbox": "danger-full-access",
                 "threadId": "canonical-dispatcher",
@@ -985,6 +991,7 @@ def test_initial_thread_id_is_resumed_with_developer_instructions():
     assert client._thread_id == "target-1"
     assert client._thread_params(thread_id="target-1") == {
         "cwd": "/tmp/project",
+        "model": "gpt-5.5",
         "approvalPolicy": "never",
         "sandbox": "danger-full-access",
         "developerInstructions": "direct LiveKit instructions",

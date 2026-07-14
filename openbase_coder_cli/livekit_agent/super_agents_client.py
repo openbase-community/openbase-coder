@@ -10,6 +10,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from openbase_coder_cli.codex_session_defaults import (
+    DEFAULT_CODEX_APPROVAL_POLICY,
+    DEFAULT_CODEX_SANDBOX,
+)
 from openbase_coder_cli.dispatcher_config import (
     dispatcher_model,
     dispatcher_reasoning_effort,
@@ -80,8 +84,8 @@ class SuperAgentsLiveKitClient:
         cwd: str,
         state_path: str | None = None,
         developer_instructions: str | None = None,
-        approval_policy: str = "never",
-        sandbox: str = "danger-full-access",
+        approval_policy: str = DEFAULT_CODEX_APPROVAL_POLICY,
+        sandbox: str = DEFAULT_CODEX_SANDBOX,
         model_name: str | None = None,
         service_tier: str = "standard",
         dispatcher_config_path: str | Path | None = None,
@@ -187,13 +191,13 @@ class SuperAgentsLiveKitClient:
                 int((time.monotonic() - dispatch_started) * 1000),
             )
 
-            if (
-                self._active_turn_id
-                and self._active_turn_has_completed()
-                and self._active_turn_id in self._claimed_speech_turns
-            ):
-                if self._is_duplicate_of_spoken_turn(
-                    self._active_turn_id, prompt_debug["hash"]
+            if self._active_turn_id and self._active_turn_has_completed():
+                completed_turn_id = self._active_turn_id
+                if (
+                    completed_turn_id in self._claimed_speech_turns
+                    and self._is_duplicate_of_spoken_turn(
+                        completed_turn_id, prompt_debug["hash"]
+                    )
                 ):
                     # The just-spoken answer already covered this content
                     # (an STT twin or a restated correction); a fresh turn
@@ -204,28 +208,20 @@ class SuperAgentsLiveKitClient:
                         DISPATCH_TIMING_LOG,
                         dispatch_id,
                         thread_id,
-                        self._active_turn_id,
+                        completed_turn_id,
                         prompt_debug["hash"],
                     )
                     return {
-                        "id": self._active_turn_id,
+                        "id": completed_turn_id,
                         "status": "completed",
                         "_livekit_speech_text": "",
-                        "_livekit_turn_id": self._active_turn_id,
+                        "_livekit_turn_id": completed_turn_id,
                         "progress": {},
                     }
-                # The completed answer was already spoken (for example via
-                # orphaned-result delivery); this new utterance deserves a
-                # fresh turn instead of rejoining the finished one.
-                logger.info(
-                    "%s stage=voice_request_active_turn_already_spoken "
-                    "dispatch_id=%s thread_id=%s turn_id=%s",
-                    DISPATCH_TIMING_LOG,
-                    dispatch_id,
-                    thread_id,
-                    self._active_turn_id,
-                )
-                self._clear_active_turn_state()
+                if prompt_debug["hash"] not in self._turn_prompt_hashes.get(
+                    completed_turn_id, set()
+                ):
+                    self._handoff_completed_active_turn()
 
             if self._active_turn_id:
                 if self._active_turn_has_completed():
@@ -363,6 +359,30 @@ class SuperAgentsLiveKitClient:
         self._active_turn_wait_task = None
         self._active_turn_wait_task_turn_id = None
 
+    def _handoff_completed_active_turn(self) -> None:
+        turn_id = self._active_turn_id
+        wait_task = self._active_turn_wait_task
+        handler = self._on_orphaned_result
+        if (
+            turn_id
+            and wait_task
+            and wait_task.done()
+            and not wait_task.cancelled()
+            and wait_task.exception() is None
+            and turn_id not in self._claimed_speech_turns
+            and handler is not None
+        ):
+            speech_text = _speech_text_from_progress(wait_task.result())
+            if speech_text:
+                logger.info(
+                    "%s stage=completed_turn_handoff turn_id=%s speech_chars=%d",
+                    DISPATCH_TIMING_LOG,
+                    turn_id,
+                    len(speech_text),
+                )
+                handler(self, turn_id, speech_text)
+        self._clear_active_turn_state()
+
     def has_active_prompt(self, prompt: str) -> bool:
         prompt_debug = _prompt_debug_fields(prompt)
         return (
@@ -380,9 +400,21 @@ class SuperAgentsLiveKitClient:
             thread_id = await self._ensure_thread()
             if self._active_turn_id:
                 if self._active_turn_has_completed():
+                    if prompt_debug["hash"] not in self._turn_prompt_hashes.get(
+                        self._active_turn_id, set()
+                    ):
+                        logger.info(
+                            "%s stage=proactive_steer_completed_active_turn "
+                            "thread_id=%s turn_id=%s prompt_hash=%s accepted=false",
+                            DISPATCH_TIMING_LOG,
+                            thread_id,
+                            self._active_turn_id,
+                            prompt_debug["hash"],
+                        )
+                        return None
                     logger.info(
                         "%s stage=proactive_steer_completed_active_turn "
-                        "thread_id=%s turn_id=%s prompt_hash=%s",
+                        "thread_id=%s turn_id=%s prompt_hash=%s accepted=duplicate",
                         DISPATCH_TIMING_LOG,
                         thread_id,
                         self._active_turn_id,
@@ -433,27 +465,11 @@ class SuperAgentsLiveKitClient:
         developer_instructions: str | None,
         dispatch_id: str,
     ) -> str:
-        reasoning_effort = self._configured_reasoning_effort()
-        turn_input: dict[str, Any] = {
-            "prompt": prompt,
-            "cwd": self._cwd,
-            "label": self._super_agent_name,
-            "agentName": self._super_agent_agent_name,
-            "approvalPolicy": self._approval_policy,
-            "sandbox": self._sandbox,
-            "serviceTier": self._service_tier,
-            "_mcpCallId": dispatch_id,
-        }
-        if self._backend_is_codex():
-            turn_input["model"] = self._model_name
-        elif self._model_name:
-            turn_input["model"] = self._model_name
-        if reasoning_effort:
-            turn_input["reasoningEffort"] = reasoning_effort
-        if effective_developer_instructions := self._turn_developer_instructions(
-            developer_instructions
-        ):
-            turn_input["developerInstructions"] = effective_developer_instructions
+        turn_input = self._turn_input(
+            prompt,
+            developer_instructions=developer_instructions,
+            dispatch_id=dispatch_id,
+        )
 
         previous_turn_id = None
         if not (
@@ -510,6 +526,64 @@ class SuperAgentsLiveKitClient:
             turn_id,
         )
         return turn_id
+
+    def _turn_input(
+        self,
+        prompt: str,
+        *,
+        developer_instructions: str | None,
+        dispatch_id: str,
+    ) -> dict[str, Any]:
+        reasoning_effort = self._configured_reasoning_effort()
+        turn_input: dict[str, Any] = {
+            "prompt": prompt,
+            "cwd": self._cwd,
+            "label": self._super_agent_name,
+            "agentName": self._super_agent_agent_name,
+            "approvalPolicy": self._approval_policy,
+            "sandbox": self._sandbox,
+            "serviceTier": self._service_tier,
+            "_mcpCallId": dispatch_id,
+        }
+        if self._backend_is_codex():
+            turn_input["model"] = self._model_name
+        elif self._model_name:
+            turn_input["model"] = self._model_name
+        if reasoning_effort:
+            turn_input["reasoningEffort"] = reasoning_effort
+        if effective_developer_instructions := self._turn_developer_instructions(
+            developer_instructions
+        ):
+            turn_input["developerInstructions"] = effective_developer_instructions
+        return turn_input
+
+    async def _queue_rejected_steer(
+        self,
+        thread_id: str,
+        prompt: str,
+        *,
+        blocked_by_turn_id: str,
+    ) -> str:
+        dispatch_id = f"voice-{uuid.uuid4().hex[:12]}"
+        result = await self._backend_client.queue_turn_by_label(
+            self._query(thread_id=thread_id),
+            self._turn_input(
+                prompt,
+                developer_instructions=None,
+                dispatch_id=dispatch_id,
+            ),
+        )
+        if not _response_is_queued(result):
+            turn_id = _extract_turn_id(result)
+            if not turn_id:
+                raise RuntimeError("Super Agents did not accept the follow-up turn.")
+            return turn_id
+        return await self._wait_for_queued_turn_to_start(
+            thread_id,
+            queued_id=_extract_queued_id(result),
+            blocked_by_turn_id=blocked_by_turn_id,
+            dispatch_id=dispatch_id,
+        )
 
     async def _resolve_active_turn_id(self, thread_id: str) -> str | None:
         resolve_label = getattr(self._backend_client, "resolve_label", None)
@@ -680,14 +754,18 @@ class SuperAgentsLiveKitClient:
                 )
             elif _is_turn_cannot_accept_steering_error(exc):
                 logger.warning(
-                    "Super Agents turn %s could not accept steering; leaving active turn running "
+                    "Super Agents turn %s could not accept steering; queueing follow-up "
                     "prompt_hash=%s",
                     self._active_turn_id,
                     prompt_debug["hash"],
                 )
                 if not start_when_inactive:
                     return None
-                return self._active_turn_id
+                return await self._queue_rejected_steer(
+                    thread_id,
+                    prompt,
+                    blocked_by_turn_id=self._active_turn_id,
+                )
             elif _is_no_active_turn_error(exc):
                 logger.info(
                     "Super Agents turn %s was already inactive during steering prompt_hash=%s",
