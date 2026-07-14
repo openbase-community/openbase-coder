@@ -69,6 +69,7 @@ local-audio = [
     "huggingface-hub>=0.36.0",
     "kokoro>=0.9.4",
     "mlx-whisper>=0.4.3",
+    "numba>=0.61.0",
 ]
 
 [build-system]

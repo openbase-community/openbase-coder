@@ -52,8 +52,9 @@ LOCAL_AUDIO_REQUIREMENTS = (
     "huggingface-hub>=0.36.0",
     "kokoro>=0.9.4",
     "mlx-whisper>=0.4.3",
+    "numba>=0.61.0",
 )
-LOCAL_AUDIO_PYTHON_MAX = (3, 13)
+LOCAL_AUDIO_PYTHON_MAX = (3, 14)
 
 
 def _ensure_codex_home_dispatcher_config(audio_provider: str | None = None) -> None:
@@ -146,9 +147,9 @@ def _ensure_local_audio_dependencies(runtime_package) -> None:
     version = _python_version(python_path)
     if version >= LOCAL_AUDIO_PYTHON_MAX:
         raise click.ClickException(
-            "Local audio currently requires a Python 3.12 Openbase Coder runtime "
-            "because Kokoro declares Python <3.13. Reinstall Openbase Coder with "
-            "a Python 3.12 standalone package, or use --audio-provider openbase-cloud."
+            "Local audio requires a supported Python 3.12 or 3.13 Openbase Coder "
+            "runtime. Reinstall Openbase Coder with a supported standalone package, "
+            "or use --audio-provider openbase-cloud."
         )
     if _local_audio_dependencies_available(python_path):
         return
@@ -200,7 +201,3 @@ def _python_version(python_path: Path) -> tuple[int, int]:
     )
     major, minor = result.stdout.strip().split(".", 1)
     return int(major), int(minor)
-
-
-
-

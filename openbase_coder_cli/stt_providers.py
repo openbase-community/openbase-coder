@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import uuid
 from dataclasses import asdict, dataclass
 from typing import Literal
@@ -78,6 +79,13 @@ def stt_provider_options_payload() -> list[dict[str, str | bool | None]]:
 
 
 def local_mlx_whisper_readiness() -> STTDownloadStatus:
+    if importlib.util.find_spec("mlx_whisper") is None:
+        return STTDownloadStatus(
+            provider=LOCAL_MLX_WHISPER_STT_PROVIDER_ID,
+            ready=False,
+            model=LOCAL_MLX_WHISPER_MODEL_ID,
+            detail="MLX Whisper runtime dependencies are not installed.",
+        )
     try:
         from huggingface_hub import snapshot_download
     except ImportError:

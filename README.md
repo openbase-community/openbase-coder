@@ -1,10 +1,10 @@
-<a href="https://discord.gg/nYzsn3Vh6y"><img src="https://openbase.cloud/logo-and-text.svg" alt="Openbase Coder"></a>
+<p align="center">
+  <a href="https://discord.gg/nYzsn3Vh6y"><img src="Images/github.svg" alt="Openbase Coder" width="900"></a>
+</p>
 
 <p align="center">
   <a href="https://docs.openbase.cloud"><img src="https://img.shields.io/badge/read%20the-docs-blue" alt="Documentation"></a>
   <a href="https://discord.gg/nYzsn3Vh6y"><img src="https://img.shields.io/badge/discord-join%20chat-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-brightgreen.svg" alt="AGPL-3.0-only License"></a>
-  <a href="https://github.com/openbase-community/openbase-coder/actions/workflows/docs-pages.yml"><img src="https://github.com/openbase-community/openbase-coder/actions/workflows/docs-pages.yml/badge.svg" alt="Docs build"></a>
   <a href="https://openbase.cloud/downloads"><img src="https://img.shields.io/badge/download-macOS-black?logo=apple&logoColor=white" alt="Download for macOS"></a>
 </p>
 <br>
@@ -16,7 +16,7 @@ surface.
 
 This repository is the main open-source entry point for Openbase Coder. It
 contains the local `openbase-coder` runtime, the public product docs, the
-standalone installer, and the service layer used by the Mac app, iOS app, web
+developer setup path, and the service layer used by the Mac app, iOS app, web
 console, and Openbase Cloud.
 
 ### ✏️ What You Can Do
@@ -74,21 +74,6 @@ Most users should install the Mac app first:
    signs you in, and helps pair your iPhone over Tailscale.
 3. Install the iOS beta from the Downloads page if you want the phone control
    surface for voice calls, approvals, reports, and diffs.
-
-Terminal users can install the standalone CLI directly:
-
-```bash
-curl -fsSL https://github.com/openbase-community/openbase-coder/releases/latest/download/install.sh | sh
-openbase-coder setup
-openbase-coder login
-```
-
-After setup, check the local runtime with:
-
-```bash
-openbase-coder doctor
-openbase-coder services status
-```
 
 ### 🛠️ Developer Setup
 

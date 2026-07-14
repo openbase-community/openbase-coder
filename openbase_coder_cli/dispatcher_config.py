@@ -374,12 +374,12 @@ def set_tts_provider_and_dispatcher_voice(
 ) -> dict[str, str]:
     normalized_provider_id = normalize_tts_provider_id(provider_id)
     provider = get_tts_provider(normalized_provider_id)
-    if normalized_provider_id == KOKORO_PROVIDER_ID and not provider.readiness().ready:
-        raise ValueError("Download Kokoro local voices before selecting Kokoro.")
     normalized = voice_id.strip()
     voice = provider.voice_for_id(normalized)
     if voice is None:
         raise ValueError("Dispatcher voice must be selected from the provider catalog.")
+    if normalized_provider_id == KOKORO_PROVIDER_ID and not provider.readiness().ready:
+        raise ValueError("Download Kokoro local voices before selecting Kokoro.")
 
     config_path = path or CODEX_DISPATCHER_CONFIG_PATH
     _write_dispatcher_config(

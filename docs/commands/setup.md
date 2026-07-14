@@ -83,9 +83,8 @@ Anthropic's official native installer. Backend-specific services (such as
 gated-out services.
 
 With `--audio-provider local`, setup installs the optional Kokoro/MLX local
-audio dependencies and downloads the required models. Standalone packages
-should be built with Python 3.12 for this path because Kokoro currently
-declares Python `<3.13`.
+audio dependencies and downloads the required models. Local audio supports the
+Python 3.12 standalone runtime and Python 3.13 development workspaces.
 
 ## Options
 

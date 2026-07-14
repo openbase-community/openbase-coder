@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import threading
 import uuid
 from dataclasses import asdict, dataclass
@@ -30,6 +31,7 @@ DEFAULT_KOKORO_VOICE_ID = "af_heart"
 DEFAULT_KOKORO_ANNOUNCER_VOICE_ID = "af_bella"
 KOKORO_REPO_ID = "hexgrad/Kokoro-82M"
 KOKORO_MODEL_FILES = ("config.json", "kokoro-v1_0.pth")
+KOKORO_SPACY_MODEL = "en_core_web_sm"
 
 
 @dataclass(frozen=True)
@@ -230,6 +232,14 @@ class KokoroTTSProvider(BaseTTSProvider):
     def readiness(self) -> TTSDownloadStatus:
         files = _kokoro_required_files()
         cached = 0
+        if importlib.util.find_spec("kokoro") is None:
+            return TTSDownloadStatus(
+                provider=self.provider_id,
+                ready=False,
+                required_files=len(files) + 1,
+                cached_files=0,
+                detail="Kokoro runtime dependencies are not installed.",
+            )
         try:
             from huggingface_hub import hf_hub_download
         except ImportError:
@@ -252,14 +262,21 @@ class KokoroTTSProvider(BaseTTSProvider):
                 continue
             cached += 1
 
+        language_model_ready = _kokoro_spacy_model_ready()
+        required_files = len(files) + 1
+        cached_files = cached + int(language_model_ready)
         return TTSDownloadStatus(
             provider=self.provider_id,
-            ready=cached == len(files),
-            required_files=len(files),
-            cached_files=cached,
+            ready=cached_files == required_files,
+            required_files=required_files,
+            cached_files=cached_files,
             detail=None
-            if cached == len(files)
-            else "Kokoro model or voice files are missing.",
+            if cached_files == required_files
+            else (
+                "Kokoro language model is missing."
+                if cached == len(files)
+                else "Kokoro model or voice files are missing."
+            ),
         )
 
     def download_all_voices(self) -> TTSDownloadStatus:
@@ -280,12 +297,12 @@ class KokoroTTSProvider(BaseTTSProvider):
             hf_hub_download(repo_id=KOKORO_REPO_ID, filename=filename)
             cached += 1
 
-        return TTSDownloadStatus(
-            provider=self.provider_id,
-            ready=True,
-            required_files=len(files),
-            cached_files=cached,
-        )
+        if not _kokoro_spacy_model_ready():
+            from spacy.cli import download as download_spacy_model
+
+            download_spacy_model(KOKORO_SPACY_MODEL)
+
+        return self.readiness()
 
     def create_livekit_tts(self, *, voice_id: str, **kwargs) -> livekit_tts.TTS:
         return livekit_tts.StreamAdapter(
@@ -426,6 +443,14 @@ def _kokoro_required_files() -> tuple[str, ...]:
     return tuple(KOKORO_MODEL_FILES) + tuple(
         f"voices/{voice.id}.pt" for voice in KOKORO_SUPPORTED_VOICE_CATALOG
     )
+
+
+def _kokoro_spacy_model_ready() -> bool:
+    try:
+        import spacy
+    except ImportError:
+        return False
+    return spacy.util.is_package(KOKORO_SPACY_MODEL)
 
 
 def _audio_array(audio) -> np.ndarray:
