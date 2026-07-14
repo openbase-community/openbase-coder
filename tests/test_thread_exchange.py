@@ -16,14 +16,6 @@ from openbase_coder_cli.mcp.thread_exchange import (
     thread_snapshot_status,
     thread_sync_conflicts_payload,
 )
-from openbase_coder_cli.services import app_server_refresh
-
-
-@pytest.fixture(autouse=True)
-def _redirect_refresh_marker(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        app_server_refresh, "REFRESH_MARKER_PATH", tmp_path / "refresh-marker"
-    )
 
 
 def _create_state_db(path: Path) -> None:
