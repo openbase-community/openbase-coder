@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import threading
 import uuid
 from dataclasses import asdict, dataclass
@@ -231,6 +232,14 @@ class KokoroTTSProvider(BaseTTSProvider):
     def readiness(self) -> TTSDownloadStatus:
         files = _kokoro_required_files()
         cached = 0
+        if importlib.util.find_spec("kokoro") is None:
+            return TTSDownloadStatus(
+                provider=self.provider_id,
+                ready=False,
+                required_files=len(files) + 1,
+                cached_files=0,
+                detail="Kokoro runtime dependencies are not installed.",
+            )
         try:
             from huggingface_hub import hf_hub_download
         except ImportError:

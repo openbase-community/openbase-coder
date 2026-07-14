@@ -29,7 +29,6 @@ def _patch_setup(monkeypatch, name, value):
             monkeypatch.setattr(module, name, value)
 
 
-
 def _patch_openbase_agent_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path]:
     codex_home = tmp_path / "codex_home"
     claude_config = tmp_path / "claude_config"
@@ -125,9 +124,7 @@ def test_resolve_dev_workspace_dir_uses_recorded_installation(
     assert setup_cli.resolve_dev_workspace_dir(None) == str(workspace)
 
 
-def test_resolve_dev_workspace_dir_uses_editable_install(
-    tmp_path, monkeypatch
-) -> None:
+def test_resolve_dev_workspace_dir_uses_editable_install(tmp_path, monkeypatch) -> None:
     workspace = _make_workspace_checkout(tmp_path / "editable")
     from openbase_coder_cli.cli.setup import workspace as workspace_phase
 
@@ -1177,12 +1174,8 @@ def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
     (workspace / "multi.json").write_text("{}", encoding="utf-8")
     _patch_setup(monkeypatch, "ensure_backend_binary", lambda _backend: None)
     _patch_setup(monkeypatch, "_ensure_normal_codex_mcp", lambda _workspace_dir: None)
-    _patch_setup(
-        monkeypatch, "_ensure_normal_claude_mcp", lambda _workspace_dir: None
-    )
-    _patch_setup(
-        monkeypatch, "_ensure_claude_auth_bridge", lambda **_kwargs: None
-    )
+    _patch_setup(monkeypatch, "_ensure_normal_claude_mcp", lambda _workspace_dir: None)
+    _patch_setup(monkeypatch, "_ensure_claude_auth_bridge", lambda **_kwargs: None)
     _patch_setup(
         monkeypatch,
         "_ensure_thread_sync_exchange_dir",
@@ -1210,7 +1203,11 @@ def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         setup_cli, "_symlink_codex_home_skills", lambda _workspace_dir: None
     )
-    _patch_setup(monkeypatch, "_init_cli_workspace", lambda _workspace_dir: None)
+    _patch_setup(
+        monkeypatch,
+        "_init_cli_workspace",
+        lambda _workspace_dir, **_kwargs: None,
+    )
     monkeypatch.setattr(
         setup_cli, "_ensure_codex_home_config", lambda *_args, **_kwargs: None
     )
@@ -1298,18 +1295,73 @@ def test_ensure_local_audio_dependencies_installs_into_runtime_python(
     ]
 
 
-def test_ensure_local_audio_dependencies_rejects_python_313(
+def test_init_cli_workspace_retains_local_audio_extra(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    cli_dir = workspace / "cli"
+    cli_dir.mkdir(parents=True)
+    commands = []
+
+    _patch_setup(monkeypatch, "which", lambda name: "/usr/local/bin/uv")
+    _patch_setup(
+        monkeypatch,
+        "_download_livekit_model_files",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def fake_run(command, **kwargs):
+        commands.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    _patch_setup(monkeypatch, "subprocess", SimpleNamespace(run=fake_run))
+
+    setup_cli._init_cli_workspace(str(workspace), include_local_audio=True)
+
+    assert commands == [
+        (
+            ["/usr/local/bin/uv", "sync", "--extra", "local-audio"],
+            {"cwd": str(cli_dir), "check": True},
+        )
+    ]
+
+
+def test_ensure_local_audio_dependencies_allows_python_313(
+    tmp_path, monkeypatch
+) -> None:
+    python_path = tmp_path / "python"
+    runtime_package = type("RuntimePackage", (), {"python_path": python_path})()
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[1:] == [
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ]:
+            return subprocess.CompletedProcess(command, 0, stdout="3.13\n")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    setup_cli._ensure_local_audio_dependencies(runtime_package)
+
+    assert commands[-1][1:] == [
+        "-c",
+        "import huggingface_hub, kokoro, mlx_whisper",
+    ]
+
+
+def test_ensure_local_audio_dependencies_rejects_python_314(
     tmp_path, monkeypatch
 ) -> None:
     python_path = tmp_path / "python"
     runtime_package = type("RuntimePackage", (), {"python_path": python_path})()
 
     def fake_run(command, **kwargs):
-        return subprocess.CompletedProcess(command, 0, stdout="3.13\n")
+        return subprocess.CompletedProcess(command, 0, stdout="3.14\n")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    with pytest.raises(Exception, match="requires a Python 3.12"):
+    with pytest.raises(Exception, match="Python 3.12 or 3.13"):
         setup_cli._ensure_local_audio_dependencies(runtime_package)
 
 
