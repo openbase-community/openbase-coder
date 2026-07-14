@@ -113,6 +113,9 @@ def test_codex_thread_sync_service_is_auto_installed_service():
 
     assert service.workdir_template == "{data_dir}"
     assert service.install_by_default is True
+    assert service.supports_backend("codex") is True
+    assert service.supports_backend("openbase_cloud") is True
+    assert service.supports_backend("claude_code") is False
     assert 'CODEX_THREAD_SYNC_INTERVAL="${CODEX_THREAD_SYNC_INTERVAL:-60}"' in command
     assert (
         'CODEX_THREAD_SYNC_MAX_AGE_DAYS="${CODEX_THREAD_SYNC_MAX_AGE_DAYS:-15}"'
@@ -162,6 +165,9 @@ def test_claude_thread_sync_service_is_auto_installed_service():
 
     assert service.workdir_template == "{data_dir}"
     assert service.install_by_default is True
+    assert service.supports_backend("codex") is False
+    assert service.supports_backend("openbase_cloud") is False
+    assert service.supports_backend("claude_code") is True
     assert 'CLAUDE_THREAD_SYNC_INTERVAL="${CLAUDE_THREAD_SYNC_INTERVAL:-60}"' in command
     assert (
         'CLAUDE_THREAD_SYNC_MAX_AGE_DAYS="${CLAUDE_THREAD_SYNC_MAX_AGE_DAYS:-15}"'

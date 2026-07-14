@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from openbase_coder_cli.backend_config import CODEX_BACKEND, OPENBASE_CLOUD_BACKEND
+from openbase_coder_cli.backend_config import (
+    CLAUDE_CODE_BACKEND,
+    CODEX_BACKEND,
+    OPENBASE_CLOUD_BACKEND,
+)
 
 
 @dataclass
@@ -138,6 +142,7 @@ SERVICES: list[ServiceDefinition] = [
             'exec {openbase_coder} codex-sync run --interval "$CODEX_THREAD_SYNC_INTERVAL" --max-age-days "$CODEX_THREAD_SYNC_MAX_AGE_DAYS"'
         ),
         workdir_template="{data_dir}",
+        backends=(CODEX_BACKEND, OPENBASE_CLOUD_BACKEND),
     ),
     ServiceDefinition(
         name="claude-thread-sync",
@@ -148,6 +153,7 @@ SERVICES: list[ServiceDefinition] = [
             'exec {openbase_coder} claude-sync run --interval "$CLAUDE_THREAD_SYNC_INTERVAL" --max-age-days "$CLAUDE_THREAD_SYNC_MAX_AGE_DAYS"'
         ),
         workdir_template="{data_dir}",
+        backends=(CLAUDE_CODE_BACKEND,),
     ),
     ServiceDefinition(
         name="claude-thread-device-sync",
