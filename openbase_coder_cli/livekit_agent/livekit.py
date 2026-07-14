@@ -178,6 +178,9 @@ from openbase_coder_cli.livekit_agent.spoken_commands import (  # noqa: F401
 from openbase_coder_cli.livekit_agent.super_agents_client import (
     SuperAgentsLiveKitClient,
 )
+from openbase_coder_cli.livekit_agent.transcript_dedup import (
+    FinalTranscriptDedupSTT,
+)
 from openbase_coder_cli.livekit_agent.tts_selection import (  # noqa: F401
     SpeechFormattingSynthesizeStream,
     VoiceSelectingCartesiaTTS,
@@ -316,29 +319,29 @@ def _build_stt(vad_model=None):
     if stt_provider == DEEPGRAM_STT_PROVIDER_ID:
         logger.info("Using Deepgram STT")
         stt = deepgram.STT(api_key=DEEPGRAM_API_KEY)
-        stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
-        return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
-    if stt_provider == ASSEMBLYAI_STT_PROVIDER_ID:
+    elif stt_provider == ASSEMBLYAI_STT_PROVIDER_ID:
         logger.info("Using AssemblyAI STT")
-        stt = assemblyai.STT(api_key=ASSEMBLY_AI_API_KEY)
-        stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
-        return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
-    if stt_provider == OPENBASE_CLOUD_STT_PROVIDER_ID:
+        # Explicit format_turns so the plugin emits exactly one (formatted)
+        # final transcript per turn instead of an unformatted/formatted pair,
+        # each of which would spawn its own LLM generation.
+        stt = assemblyai.STT(api_key=ASSEMBLY_AI_API_KEY, format_turns=True)
+    elif stt_provider == OPENBASE_CLOUD_STT_PROVIDER_ID:
         logger.info("Using Openbase Cloud STT")
         stt = assemblyai.STT(
             api_key=_openbase_cloud_audio_token(),
             base_url=_openbase_cloud_audio_ws_base_url("assemblyai"),
+            format_turns=True,
         )
-        stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
-        return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
-    if stt_provider == LOCAL_MLX_WHISPER_STT_PROVIDER_ID:
+    elif stt_provider == LOCAL_MLX_WHISPER_STT_PROVIDER_ID:
         logger.info("Using local MLX Whisper STT")
         vad = vad_model or silero.VAD.load()
         stt = livekit_stt.StreamAdapter(stt=MLXWhisperSTT(), vad=vad)
-        stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
-        return LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
+    else:
+        raise ValueError(f"Unsupported STT provider={stt_provider!r}")
 
-    raise ValueError(f"Unsupported STT provider={stt_provider!r}")
+    stt = BrainScoreSTT(stt) if _brain_score_enabled() else stt
+    stt = LoggingSTT(stt) if LIVEKIT_VERBOSE_LOGGING else stt
+    return FinalTranscriptDedupSTT(stt)
 
 
 def _openbase_cloud_audio_token() -> str:

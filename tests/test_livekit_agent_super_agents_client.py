@@ -668,6 +668,62 @@ async def test_super_agents_livekit_client_delivers_orphaned_result(
 
 
 @pytest.mark.asyncio
+async def test_orphan_spoken_turn_suppresses_duplicate_prompt_fresh_turn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The Fable incident: a correction is steered into a running turn, the
+    # waiter dies, orphan delivery speaks the finished answer — and then a
+    # twin/repeat of the correction arrives as a fresh prompt. It must not
+    # start another backend turn that answers with the same gist again.
+    monkeypatch.setattr(
+        super_agents_client_module, "ORPHANED_RESULT_GRACE_SECONDS", 0.01
+    )
+    backend = FakeLongRunningSuperAgentsBackend()
+    state_path = tmp_path / "livekit-voice-route.json"
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(state_path),
+        backend_client=backend,
+    )
+    orphaned: list[str] = []
+
+    def handler(_client, turn_id: str, _speech: str) -> None:
+        if client.claim_speech(turn_id):
+            orphaned.append(turn_id)
+
+    client.set_orphaned_result_handler(handler)
+
+    first = asyncio.create_task(client.run_turn("what was fable working on"))
+    await backend.progress_called.wait()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    steered_turn = await client.steer_active_turn("im not like what did fable do")
+    assert steered_turn == "turn-1"
+
+    backend.release_progress.set()
+    await asyncio.sleep(0.1)
+    assert orphaned == ["turn-1"]
+
+    # A formatted STT twin (or the user restating) of the steered correction.
+    result = await client.run_turn("I'm not, like, what did Fable do?")
+    assert result["_livekit_speech_text"] == ""
+    assert result["_livekit_turn_id"] == "turn-1"
+    assert len(backend.started_turns) == 1
+
+    # A twin of the original prompt is likewise already answered.
+    result = await client.run_turn("What was Fable working on?")
+    assert result["_livekit_speech_text"] == ""
+    assert len(backend.started_turns) == 1
+
+    # Genuinely new content still gets a fresh backend turn.
+    result = await client.run_turn("start a new agent for the report")
+    assert len(backend.started_turns) == 2
+
+
+@pytest.mark.asyncio
 async def test_super_agents_livekit_client_orphan_skipped_when_result_consumed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -1021,6 +1021,29 @@ async def test_session_final_transcript_proactively_steers_when_logging_disabled
     assert router.should_skip_proactively_steered_prompt("stop now") is True
 
 
+def test_proactive_steer_dedup_matches_formatted_twin_transcripts():
+    class FakeClient:
+        def has_active_prompt(self, prompt):
+            return False
+
+    router = LiveKitVoiceRouter(FakeClient())
+
+    # STT can deliver one utterance as an unformatted final followed by a
+    # formatted one; the steered version must dedupe both variants.
+    router.mark_proactive_steer("im not like what did fable do")
+    assert (
+        router.should_skip_proactively_steered_prompt(
+            "I'm not, like, what did Fable do?"
+        )
+        is True
+    )
+
+    router.mark_proactive_steer("what is 22")
+    assert (
+        router.should_skip_proactively_steered_prompt("what is two plus two") is False
+    )
+
+
 @pytest.mark.asyncio
 async def test_voice_router_transfers_to_prepared_target(monkeypatch, tmp_path):
     dispatcher = PreparedClient()

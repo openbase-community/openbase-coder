@@ -50,6 +50,10 @@ TURN_POLL_FAILURE_BACKOFF_MAX_SECONDS = 5.0
 # as orphaned (no voice dispatch consumed it) and handing it to the orphaned
 # result handler to be spoken directly.
 ORPHANED_RESULT_GRACE_SECONDS = 1.5
+# A repeat of content a just-spoken turn already covered (an STT twin of a
+# steered correction, or the user restating it) must not spawn a fresh
+# backend turn that answers with the same gist again.
+SPOKEN_TURN_DUPLICATE_SUPPRESSION_SECONDS = 10.0
 
 
 def _model_name_for_role(
@@ -133,6 +137,8 @@ class SuperAgentsLiveKitClient:
             Callable[[SuperAgentsLiveKitClient, str, str], None] | None
         ) = None
         self._claimed_speech_turns: set[str] = set()
+        self._turn_prompt_hashes: dict[str, set[str]] = {}
+        self._turn_spoken_at: dict[str, float] = {}
         self._state_lock = asyncio.Lock()
         self._turn_start_lock = asyncio.Lock()
 
@@ -186,6 +192,28 @@ class SuperAgentsLiveKitClient:
                 and self._active_turn_has_completed()
                 and self._active_turn_id in self._claimed_speech_turns
             ):
+                if self._is_duplicate_of_spoken_turn(
+                    self._active_turn_id, prompt_debug["hash"]
+                ):
+                    # The just-spoken answer already covered this content
+                    # (an STT twin or a restated correction); a fresh turn
+                    # would speak the same gist twice.
+                    logger.info(
+                        "%s stage=voice_request_suppressed_duplicate_of_spoken_turn "
+                        "dispatch_id=%s thread_id=%s turn_id=%s prompt_hash=%s",
+                        DISPATCH_TIMING_LOG,
+                        dispatch_id,
+                        thread_id,
+                        self._active_turn_id,
+                        prompt_debug["hash"],
+                    )
+                    return {
+                        "id": self._active_turn_id,
+                        "status": "completed",
+                        "_livekit_speech_text": "",
+                        "_livekit_turn_id": self._active_turn_id,
+                        "progress": {},
+                    }
                 # The completed answer was already spoken (for example via
                 # orphaned-result delivery); this new utterance deserves a
                 # fresh turn instead of rejoining the finished one.
@@ -247,6 +275,7 @@ class SuperAgentsLiveKitClient:
                         self._active_turn_started_at = time.monotonic()
                         self._active_turn_dispatch_id = dispatch_id
                         self._active_turn_prompt_hash = prompt_debug["hash"]
+                        self._record_turn_prompt(turn_id, prompt_debug["hash"])
                         preserve_active_turn = True
                         logger.info(
                             "%s stage=turn_start_cancelled_after_backend_start "
@@ -262,6 +291,7 @@ class SuperAgentsLiveKitClient:
             self._active_turn_started_at = time.monotonic()
             self._active_turn_dispatch_id = dispatch_id
             self._active_turn_prompt_hash = prompt_debug["hash"]
+            self._record_turn_prompt(turn_id, prompt_debug["hash"])
 
         logger.info(
             "%s stage=turn_wait_start dispatch_id=%s thread_id=%s turn_id=%s "
@@ -677,12 +707,14 @@ class SuperAgentsLiveKitClient:
                 self._active_turn_id = turn_id
                 self._active_turn_started_at = time.monotonic()
                 self._active_turn_prompt_hash = prompt_debug["hash"]
+                self._record_turn_prompt(turn_id, prompt_debug["hash"])
                 return turn_id
             else:
                 raise
         turn_id = _extract_turn_id(result) or self._active_turn_id
         self._active_turn_id = turn_id
         self._active_turn_prompt_hash = prompt_debug["hash"]
+        self._record_turn_prompt(turn_id, prompt_debug["hash"])
         logger.info(
             "Submitted Super Agents turn steering turn_id=%s prompt_hash=%s prompt_len=%s",
             turn_id,
@@ -1093,7 +1125,35 @@ class SuperAgentsLiveKitClient:
         if turn_id in self._claimed_speech_turns:
             return False
         self._claimed_speech_turns.add(turn_id)
+        self._turn_spoken_at[turn_id] = time.monotonic()
+        self._prune_turn_prompt_records()
         return True
+
+    def _record_turn_prompt(self, turn_id: str | None, prompt_hash: str) -> None:
+        if not turn_id or not prompt_hash:
+            return
+        self._turn_prompt_hashes.setdefault(turn_id, set()).add(prompt_hash)
+        self._prune_turn_prompt_records()
+
+    def _prune_turn_prompt_records(self) -> None:
+        cutoff = time.monotonic() - 4 * SPOKEN_TURN_DUPLICATE_SUPPRESSION_SECONDS
+        for turn_id, spoken_at in list(self._turn_spoken_at.items()):
+            if spoken_at < cutoff and turn_id != self._active_turn_id:
+                self._turn_spoken_at.pop(turn_id, None)
+                self._turn_prompt_hashes.pop(turn_id, None)
+        while len(self._turn_prompt_hashes) > 16:
+            oldest = next(iter(self._turn_prompt_hashes))
+            if oldest == self._active_turn_id:
+                break
+            self._turn_prompt_hashes.pop(oldest, None)
+
+    def _is_duplicate_of_spoken_turn(self, turn_id: str, prompt_hash: str) -> bool:
+        spoken_at = self._turn_spoken_at.get(turn_id)
+        if spoken_at is None:
+            return False
+        if time.monotonic() - spoken_at > SPOKEN_TURN_DUPLICATE_SUPPRESSION_SECONDS:
+            return False
+        return prompt_hash in self._turn_prompt_hashes.get(turn_id, set())
 
     def release_speech_claim(self, turn_id: str) -> None:
         self._claimed_speech_turns.discard(turn_id)

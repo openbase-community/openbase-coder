@@ -12,7 +12,6 @@ from openbase_coder_cli.livekit_agent.config import (
     LIVEKIT_DISPATCHER_CONFIG_PATH,
     PROACTIVE_STEER_PROMPT_CACHE_SECONDS,
 )
-from openbase_coder_cli.livekit_agent.logging_utils import _event_text_hash
 from openbase_coder_cli.livekit_agent.packets import (
     AnnouncerMessage,
     VoiceRouteCommand,
@@ -21,6 +20,7 @@ from openbase_coder_cli.livekit_agent.speech_queue import AnnouncerSpeechQueue
 from openbase_coder_cli.livekit_agent.super_agents_client import (
     SuperAgentsLiveKitClient,
 )
+from openbase_coder_cli.livekit_agent.text_normalization import normalized_text_hash
 from openbase_coder_cli.livekit_agent.voices import stable_super_agent_voice
 
 logger = logging.getLogger(__name__)
@@ -116,8 +116,10 @@ class LiveKitVoiceRouter:
         return self._active_client is client and client.claim_speech(turn_id)
 
     def mark_proactive_steer(self, prompt: str) -> None:
+        # Normalized hashing so a steered transcript also matches its
+        # formatted/unformatted STT twin, not just the exact same text.
         self._prune_proactive_steer_prompt_hashes()
-        self._proactive_steer_prompt_hashes[_event_text_hash(prompt.strip())] = (
+        self._proactive_steer_prompt_hashes[normalized_text_hash(prompt)] = (
             time.monotonic()
         )
 
@@ -129,7 +131,9 @@ class LiveKitVoiceRouter:
         if callable(has_active_prompt) and has_active_prompt(prompt):
             return False
         self._prune_proactive_steer_prompt_hashes()
-        prompt_hash = _event_text_hash(prompt)
+        prompt_hash = normalized_text_hash(prompt)
+        if not prompt_hash:
+            return False
         return self._proactive_steer_prompt_hashes.pop(prompt_hash, None) is not None
 
     def _prune_proactive_steer_prompt_hashes(self) -> None:
