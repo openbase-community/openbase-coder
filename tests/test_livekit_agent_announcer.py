@@ -487,6 +487,19 @@ def test_exit_to_dispatch_command_rejects_embedded_variants():
     assert not _is_exit_to_dispatch_command("please dispatch me")
 
 
+@pytest.mark.parametrize(
+    "spoken",
+    [
+        "Why do you keep saying back to dispatch every time I talk?",
+        "Point my recent question to dispatch and make sure it gets answered.",
+        "I want you to dispatch a new agent to review the PR.",
+        "Can you send my question to dispatch for me please?",
+    ],
+)
+def test_exit_to_dispatch_command_rejects_sentences_mentioning_dispatch(spoken):
+    assert not _is_exit_to_dispatch_command(spoken)
+
+
 def test_direct_livekit_instruction_loader_priority(tmp_path):
     explicit = tmp_path / "explicit.md"
     default = tmp_path / "default.md"

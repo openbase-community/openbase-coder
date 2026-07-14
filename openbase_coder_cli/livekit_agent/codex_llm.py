@@ -81,7 +81,12 @@ class CodexLLMStream(llm.LLMStream):
             self._voice_router.active_target_voice_id or "",
         )
 
-        if _is_exit_to_dispatch_command(prompt):
+        # When the dispatcher is already active, "exit to dispatch" is a no-op;
+        # treat the utterance as a normal prompt instead of swallowing it.
+        if (
+            _is_exit_to_dispatch_command(prompt)
+            and not self._voice_router.is_dispatcher_active
+        ):
             self._voice_router.exit_to_dispatch()
             self._emit_delta("Back to dispatch.")
             return
