@@ -21,6 +21,10 @@ from openbase_coder_cli.mcp.thread_import import (
     CodexThreadSyncResult,
     sync_codex_threads_once,
 )
+from openbase_coder_cli.services.app_server_refresh import (
+    request_codex_app_server_refresh,
+    run_pending_codex_app_server_refresh,
+)
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -131,6 +135,18 @@ def run(
                 kwargs["ledger_path"] = ledger
             results = sync_codex_threads_once(**kwargs)
             summary = _sync_result_summary(results)
+            if any(
+                result.status == "transferred"
+                and result.direction == "normal_to_openbase"
+                for result in results
+            ):
+                request_codex_app_server_refresh("codex_thread_sync_transfer")
+            refresh_outcome = run_pending_codex_app_server_refresh()
+            if refresh_outcome != "not_pending":
+                logger.info(
+                    "codex_thread_sync app_server_refresh outcome=%s",
+                    refresh_outcome,
+                )
             logger.info(
                 "codex_thread_sync sweep_complete total=%s transferred=%s "
                 "conflicts=%s errors=%s skipped=%s already_synced=%s "
@@ -291,6 +307,14 @@ def devices_run(
             )
             export_summary = _snapshot_result_summary(result["exports"])
             import_summary = _snapshot_result_summary(result["imports"])
+            if import_summary["imported"]:
+                request_codex_app_server_refresh("codex_thread_device_sync_import")
+            refresh_outcome = run_pending_codex_app_server_refresh()
+            if refresh_outcome != "not_pending":
+                logger.info(
+                    "codex_thread_device_sync app_server_refresh outcome=%s",
+                    refresh_outcome,
+                )
             logger.info(
                 "codex_thread_device_sync sweep_complete exported=%s imported=%s "
                 "conflicts=%s export_total=%s import_total=%s export_reasons=%s import_reasons=%s",

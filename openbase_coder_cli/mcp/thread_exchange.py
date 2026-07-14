@@ -20,6 +20,9 @@ from openbase_coder_cli.paths import (
     NORMAL_CODEX_HOME_DIR,
     OPENBASE_BASE_DIR,
 )
+from openbase_coder_cli.services.app_server_refresh import (
+    request_codex_app_server_refresh,
+)
 
 from .thread_import import (
     DEFAULT_SYNC_MAX_AGE_DAYS,
@@ -633,6 +636,8 @@ def resolve_thread_snapshot_conflict(
         "fingerprint": resolved_fingerprint,
     }
     _write_exchange_ledger(ledger_path, ledger)
+    if action == "accept_remote_latest":
+        request_codex_app_server_refresh("codex_thread_conflict_resolution")
     return {
         "thread_id": thread_id,
         "action": action,
