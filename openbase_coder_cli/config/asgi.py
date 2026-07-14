@@ -18,6 +18,9 @@ django_asgi_app = get_asgi_application()
 
 from channels.routing import ProtocolTypeRouter, URLRouter  # noqa: E402
 
+from openbase_coder_cli.config.self_heal import (  # noqa: E402
+    wrap_asgi_application,
+)
 from openbase_coder_cli.openbase_coder_cli_app.middleware import (  # noqa: E402
     TokenAuthMiddleware,
 )
@@ -25,11 +28,13 @@ from openbase_coder_cli.openbase_coder_cli_app.routing import (  # noqa: E402
     websocket_urlpatterns,
 )
 
-_inner = ProtocolTypeRouter(
-    {
-        "http": django_asgi_app,
-        "websocket": TokenAuthMiddleware(URLRouter(websocket_urlpatterns)),
-    }
+_inner = wrap_asgi_application(
+    ProtocolTypeRouter(
+        {
+            "http": django_asgi_app,
+            "websocket": TokenAuthMiddleware(URLRouter(websocket_urlpatterns)),
+        }
+    )
 )
 
 
