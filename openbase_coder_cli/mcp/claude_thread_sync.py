@@ -31,6 +31,7 @@ from .thread_sync_common import (
     SnapshotImportSource,
     collect_snapshot_records,
     device_snapshot_dirs,
+    file_content_relation,
     find_snapshot_record,
     get_or_create_device_identity,
     ledger_sync_decision,
@@ -430,6 +431,22 @@ def _device_import_source(
             )
         return None
 
+    def compare_content(
+        snapshot_dir: Path, metadata: dict[str, Any], local: LocalSnapshotState
+    ) -> str | None:
+        snapshot = local.context
+        if snapshot is None:
+            return None
+        fingerprint = snapshot.fingerprint
+        if fingerprint.get("root_sha256") == metadata.get("root_sha256") and (
+            fingerprint.get("root_size") == metadata.get("root_size")
+        ):
+            # Companion-file churn shifts the tree hash while the transcript
+            # itself is unchanged; matching transcripts count as converged.
+            return "identical"
+        remote_root = snapshot_dir / "files" / Path(str(metadata["root_relative_path"]))
+        return file_content_relation(snapshot.root_path, remote_root)
+
     return SnapshotImportSource(
         scope_key="sessions",
         entity_id_key="session_id",
@@ -440,6 +457,7 @@ def _device_import_source(
         import_blocked_reason=import_blocked_reason,
         perform_import=perform_import,
         conflict_includes_snapshot_path=True,
+        compare_content=compare_content,
     )
 
 

@@ -48,6 +48,7 @@ from .thread_sync_common import (
     SnapshotImportSource,
     collect_snapshot_records,
     device_snapshot_dirs,
+    file_content_relation,
     find_snapshot_record,
     read_device_ledger,
     read_scoped_ledger,
@@ -324,6 +325,16 @@ def _exchange_import_source(
         )
         return None
 
+    def compare_content(
+        snapshot_dir: Path, metadata: dict[str, Any], local: LocalSnapshotState
+    ) -> str | None:
+        if not local.exists or not isinstance(local.context, dict):
+            return None
+        rollout = _source_rollout_path(local.context, codex_home, metadata["thread_id"])
+        if rollout is None:
+            return None
+        return file_content_relation(rollout, snapshot_dir / "rollout.jsonl")
+
     return SnapshotImportSource(
         scope_key="threads",
         entity_id_key="thread_id",
@@ -333,6 +344,7 @@ def _exchange_import_source(
         load_local=load_local,
         import_blocked_reason=import_blocked_reason,
         perform_import=perform_import,
+        compare_content=compare_content,
     )
 
 

@@ -969,3 +969,172 @@ def test_claude_thread_sync_conflicts_payload_includes_home_and_device_conflicts
         "home",
         "device",
     }
+
+
+def test_import_treats_companion_churn_with_matching_transcript_as_same_content(
+    tmp_path: Path,
+) -> None:
+    source_home = tmp_path / "source"
+    target_home = tmp_path / "target"
+    exchange_dir = tmp_path / "exchange"
+    target_ledger = tmp_path / "target-ledger.json"
+    session_id = "51f8f6f3-1651-49c8-b9f8-1f2937efab61"
+    source_root = _write_session(source_home, "/tmp/project", session_id)
+    _write_session(target_home, "/tmp/project", session_id)
+    companion_dir = source_root.parent / session_id
+    companion_dir.mkdir(parents=True, exist_ok=True)
+    (companion_dir / "tool-state.json").write_text("{}\n", encoding="utf-8")
+
+    export_claude_thread_snapshots(
+        openbase_home=source_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "source-device.json",
+        ledger_path=tmp_path / "source-ledger.json",
+        super_agents_db_path=tmp_path / "source-state.sqlite3",
+        stability_delay_seconds=0,
+        max_age_days=None,
+    )
+    results = import_claude_thread_snapshots(
+        openbase_home=target_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "target-device.json",
+        ledger_path=target_ledger,
+        super_agents_db_path=tmp_path / "target-state.sqlite3",
+    )
+
+    assert [(result.status, result.reason) for result in results] == [
+        ("already_imported", "same_content_bytes")
+    ]
+    status = claude_thread_snapshot_status(
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "target-device.json",
+        ledger_path=target_ledger,
+    )
+    assert status["conflict_count"] == 0
+
+
+def test_import_fast_forwards_snapshot_that_extends_local_transcript(
+    tmp_path: Path,
+) -> None:
+    source_home = tmp_path / "source"
+    target_home = tmp_path / "target"
+    exchange_dir = tmp_path / "exchange"
+    target_ledger = tmp_path / "target-ledger.json"
+    session_id = "9f1f2f9f-8802-4c33-9d4e-53b1f39be186"
+    source_root = _write_session(
+        source_home,
+        "/tmp/project",
+        session_id,
+        extra_events=[
+            {
+                "type": "user",
+                "sessionId": session_id,
+                "cwd": "/tmp/project",
+                "timestamp": "2026-06-20T12:00:02.000Z",
+                "message": {"role": "user", "content": "Keep going"},
+            }
+        ],
+    )
+    target_root = _write_session(target_home, "/tmp/project", session_id)
+    assert source_root.read_text(encoding="utf-8").startswith(
+        target_root.read_text(encoding="utf-8")
+    )
+
+    export_claude_thread_snapshots(
+        openbase_home=source_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "source-device.json",
+        ledger_path=tmp_path / "source-ledger.json",
+        super_agents_db_path=tmp_path / "source-state.sqlite3",
+        stability_delay_seconds=0,
+        max_age_days=None,
+    )
+    results = import_claude_thread_snapshots(
+        openbase_home=target_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "target-device.json",
+        ledger_path=target_ledger,
+        super_agents_db_path=tmp_path / "target-state.sqlite3",
+    )
+
+    assert [(result.status, result.reason) for result in results] == [
+        ("imported", "snapshot_imported")
+    ]
+    assert target_root.read_text(encoding="utf-8") == source_root.read_text(
+        encoding="utf-8"
+    )
+    status = claude_thread_snapshot_status(
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "target-device.json",
+        ledger_path=target_ledger,
+    )
+    assert status["conflict_count"] == 0
+
+
+def test_import_auto_clears_claude_conflict_after_content_converges(
+    tmp_path: Path,
+) -> None:
+    source_home = tmp_path / "source"
+    target_home = tmp_path / "target"
+    exchange_dir = tmp_path / "exchange"
+    target_ledger = tmp_path / "target-ledger.json"
+    session_id = "77a3af6d-5f27-4f38-9f5f-3a3f8f0b8a1c"
+    source_root = _write_session(
+        source_home, "/tmp/project", session_id, assistant_text="Remote"
+    )
+    target_root = _write_session(
+        target_home, "/tmp/project", session_id, assistant_text="Local"
+    )
+    export_claude_thread_snapshots(
+        openbase_home=source_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "source-device.json",
+        ledger_path=tmp_path / "source-ledger.json",
+        super_agents_db_path=tmp_path / "source-state.sqlite3",
+        stability_delay_seconds=0,
+        max_age_days=None,
+    )
+    first = import_claude_thread_snapshots(
+        openbase_home=target_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "target-device.json",
+        ledger_path=target_ledger,
+        super_agents_db_path=tmp_path / "target-state.sqlite3",
+    )
+    assert first[0].status == "conflict"
+
+    source_root.write_text(target_root.read_text(encoding="utf-8"), encoding="utf-8")
+    export_claude_thread_snapshots(
+        openbase_home=source_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "source-device.json",
+        ledger_path=tmp_path / "source-ledger.json",
+        super_agents_db_path=tmp_path / "source-state.sqlite3",
+        stability_delay_seconds=0,
+        max_age_days=None,
+    )
+    second = import_claude_thread_snapshots(
+        openbase_home=target_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "target-device.json",
+        ledger_path=target_ledger,
+        super_agents_db_path=tmp_path / "target-state.sqlite3",
+    )
+
+    outcomes = {(result.status, result.reason) for result in second}
+    assert ("already_imported", "same_content") in outcomes
+    status = claude_thread_snapshot_status(
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "target-device.json",
+        ledger_path=target_ledger,
+    )
+    assert status["conflict_count"] == 0
+
+    third = import_claude_thread_snapshots(
+        openbase_home=target_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "target-device.json",
+        ledger_path=target_ledger,
+        super_agents_db_path=tmp_path / "target-state.sqlite3",
+    )
+    assert all(result.status != "conflict" for result in third)
