@@ -437,6 +437,10 @@ def launchctl_bootstrap(svc: ServiceDefinition) -> None:
         time.sleep(0.5 * (attempt + 1))
         result = _launchctl("bootstrap", domain, str(plist), check=False)
         if result.returncode == 0:
+            # RunAtLoad is not honored when re-bootstrapping a label that was
+            # just booted out, leaving the job loaded but never spawned.
+            # Kickstart (without -k) to guarantee a start either way.
+            _launchctl("kickstart", f"{domain}/{label}", check=False)
             return
     raise click.ClickException(f"Failed to bootstrap {label}: {result.stderr.strip()}")
 
