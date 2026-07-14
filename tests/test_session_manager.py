@@ -638,62 +638,102 @@ def test_list_threads_paginates_super_agents_results(tmp_path: Path) -> None:
     )
 
 
-def test_list_thread_page_reads_single_super_agents_page(tmp_path: Path) -> None:
+def test_list_thread_page_ranks_creation_ordered_pages_by_recency(
+    tmp_path: Path,
+) -> None:
+    """thread/list pages arrive in creation order; ranking is by update time."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     client = FakeSuperAgentsClient(
         {
             "list_threads": [
                 {
-                    "data": [_thread("thr-1", str(project_dir), name="Project thread")],
+                    "data": [
+                        _thread(
+                            "thr-new-idle",
+                            str(project_dir),
+                            created_at=1_778_200_000,
+                            updated_at=1_778_200_100,
+                            name="Created recently",
+                        )
+                    ],
                     "nextCursor": "cursor-2",
                 }
-            ]
+            ],
+            "request:thread/list": [
+                {
+                    "data": [
+                        _thread(
+                            "thr-old-active",
+                            str(project_dir),
+                            created_at=1_778_100_000,
+                            updated_at=1_778_300_000,
+                            name="Created long ago, touched today",
+                        )
+                    ],
+                    "nextCursor": None,
+                }
+            ],
         }
     )
 
     page = asyncio.run(_manager(client).list_thread_page(limit=25))
 
-    assert [thread.session_id for thread in page.threads] == ["thr-1"]
-    assert page.next_cursor == "cursor-2"
+    assert [thread.session_id for thread in page.threads] == [
+        "thr-old-active",
+        "thr-new-idle",
+    ]
+    assert page.next_cursor is None
     assert client.calls[0] == (
         "list_threads",
         {
             "use_state_db_only": True,
             "search_term": None,
             "cwd": None,
-            "limit": 25,
+            "limit": 100,
             "cursor": None,
         },
     )
+    assert (
+        "request",
+        {
+            "method": "thread/list",
+            "params": {"useStateDbOnly": True, "limit": 100, "cursor": "cursor-2"},
+        },
+    ) in client.calls
 
 
-def test_list_thread_page_uses_cursor_request(tmp_path: Path) -> None:
+def test_list_thread_page_resumes_from_offset_cursor(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     client = FakeSuperAgentsClient(
         {
-            "request:thread/list": [
+            "list_threads": [
                 {
-                    "data": [_thread("thr-2", str(project_dir), name="Project thread")],
+                    "data": [
+                        _thread(
+                            "thr-1",
+                            str(project_dir),
+                            updated_at=1_778_200_000,
+                            name="First",
+                        ),
+                        _thread(
+                            "thr-2",
+                            str(project_dir),
+                            updated_at=1_778_100_000,
+                            name="Second",
+                        ),
+                    ],
                     "nextCursor": None,
                 }
             ]
         }
     )
 
-    page = asyncio.run(_manager(client).list_thread_page(limit=25, cursor="cursor-2"))
+    page = asyncio.run(_manager(client).list_thread_page(limit=1, cursor="1"))
 
     assert [thread.session_id for thread in page.threads] == ["thr-2"]
     assert page.next_cursor is None
-    assert client.calls[0] == ("ensure_connected", {})
-    assert client.calls[1] == (
-        "request",
-        {
-            "method": "thread/list",
-            "params": {"useStateDbOnly": True, "limit": 25, "cursor": "cursor-2"},
-        },
-    )
 
 
 def test_list_thread_page_reads_claude_code_backend_sessions(tmp_path: Path) -> None:

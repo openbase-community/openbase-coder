@@ -572,6 +572,13 @@ class CodexAppServerSessionManager:
         """List stored Codex threads through Super Agents."""
         return await self.list_sessions()
 
+    # The Codex app-server returns thread/list pages in thread-creation
+    # order, so recency ranking has to fetch the whole recent window and
+    # re-sort by update time; sorting single pages would leave an
+    # old-but-recently-active thread buried at its creation position.
+    RECENCY_WINDOW_THREADS = 500
+    RECENCY_FETCH_PAGE_SIZE = 100
+
     async def list_thread_page(
         self,
         *,
@@ -582,15 +589,36 @@ class CodexAppServerSessionManager:
         if self._uses_backend_session_api():
             return await self._backend_thread_page(limit=limit, cursor=cursor)
 
-        result = await self._list_thread_page_result(limit=limit, cursor=cursor)
-        raw_threads = extract_threads(result)
+        sessions = await self._recency_ranked_threads()
+        try:
+            start = int(cursor or 0)
+        except ValueError:
+            start = 0
+        end = start + limit
+        return ThreadListPage(
+            threads=sessions[start:end],
+            next_cursor=str(end) if end < len(sessions) else None,
+        )
+
+    async def _recency_ranked_threads(self) -> list[SessionInfo]:
+        raw_threads: list[dict[str, Any]] = []
+        fetch_cursor: str | None = None
+        while len(raw_threads) < self.RECENCY_WINDOW_THREADS:
+            result = await self._list_thread_page_result(
+                limit=self.RECENCY_FETCH_PAGE_SIZE,
+                cursor=fetch_cursor,
+            )
+            page_threads = extract_threads(result)
+            if not page_threads:
+                break
+            raw_threads.extend(page_threads)
+            fetch_cursor = _next_cursor(result)
+            if not fetch_cursor:
+                break
         sessions = [
             _session_from_thread(thread, include_turns=False) for thread in raw_threads
         ]
-        return ThreadListPage(
-            threads=sorted(sessions, key=_session_sort_key, reverse=True),
-            next_cursor=_next_cursor(result),
-        )
+        return sorted(sessions, key=_session_sort_key, reverse=True)
 
     async def _backend_thread_page(
         self,
