@@ -280,11 +280,14 @@ def _install_cli_shim(workspace_dir: str) -> None:
     shim_path = user_bin / "openbase-coder"
 
     if _is_uv_tool_script(shim_path):
+        # A uv-tool venv is a second interpreter with its own dependency set;
+        # services run the workspace venv, so the PATH CLI must too.
         click.echo(
-            f"openbase-coder at {shim_path} is managed by `uv tool install`; "
-            "leaving it unchanged."
+            f"Replacing the uv-tool-managed openbase-coder at {shim_path} so "
+            "the PATH CLI and services share one environment. Run "
+            "'uv tool uninstall openbase-coder' to remove the orphaned tool "
+            "venv."
         )
-        return
 
     runtime_package = current_runtime_package()
     if runtime_package is not None:

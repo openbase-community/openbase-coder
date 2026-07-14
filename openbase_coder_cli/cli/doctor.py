@@ -34,6 +34,7 @@ from openbase_coder_cli.paths import (
     OPENBASE_CLAUDE_JSON_PATH,
     STANDALONE_RELEASES_DIR,
 )
+from openbase_coder_cli.runtime import stable_runtime_package
 from openbase_coder_cli.services.definitions import SERVICES
 from openbase_coder_cli.services.installation import InstallationConfig
 from openbase_coder_cli.services.launchd import launchctl_status
@@ -186,11 +187,21 @@ def _check_installation_config(ok, warn, fail) -> None:
 
     if config.standalone:
         ok("standalone runtime mode enabled")
-        _check_path(config.package_path, "standalone package", ok, fail, directory=True)
-        _check_path(config.python_path, "bundled Python", ok, fail)
-        _check_path(config.livekit_server_path, "bundled LiveKit server", ok, fail)
+        package = stable_runtime_package()
+        if package is None:
+            fail(
+                "standalone install, but this CLI is not running from a "
+                "runtime package — reinstall or run the packaged "
+                "openbase-coder"
+            )
+            return
+        _check_path(str(package.root), "standalone package", ok, fail, directory=True)
+        _check_path(str(package.python_path), "bundled Python", ok, fail)
         _check_path(
-            config.console_build_dir,
+            str(package.livekit_server_path), "bundled LiveKit server", ok, fail
+        )
+        _check_path(
+            str(package.console_build_dir),
             "bundled console build",
             ok,
             fail,
@@ -208,8 +219,65 @@ def _check_installation_config(ok, warn, fail) -> None:
 
     if config.workspace_path:
         ok("development workspace runtime mode enabled")
+        workspace = Path(config.workspace_path)
+        _check_workspace_asset_roots(workspace, ok, warn)
+        _check_console_build_freshness(workspace, ok, warn)
     else:
         warn("non-standalone install has no workspace_path configured")
+
+
+def _check_workspace_asset_roots(workspace: Path, ok, warn) -> None:
+    missing = [
+        name
+        for name in ("instructions", "skills", "console")
+        if not (workspace / name).is_dir()
+    ]
+    if missing:
+        warn(
+            f"workspace is missing asset roots ({', '.join(missing)}) — "
+            "instruction/skill symlinks and console serving depend on them; "
+            "restore the checkout or re-run setup with --workspace-dir"
+        )
+    else:
+        ok("workspace asset roots present (instructions, skills, console)")
+
+
+def _check_console_build_freshness(workspace: Path, ok, warn) -> None:
+    """Dev serves console/dist directly; a stale build silently misrepresents
+    current frontend code, so surface staleness as a diagnosis."""
+    dist = workspace / "console" / "dist"
+    if not (dist / "index.html").is_file():
+        warn("console/dist has no build — run 'pnpm run build' in console/")
+        return
+    built = _newest_mtime(dist)
+    sources = [workspace / "console" / "src", workspace / "coder-react" / "src"]
+    newest_source = max(
+        (_newest_mtime(source) for source in sources if source.is_dir()),
+        default=0.0,
+    )
+    if newest_source > built:
+        warn(
+            "console/dist is older than the console sources — run "
+            "'pnpm run build' in console/ (the server serves dist directly)"
+        )
+    else:
+        ok("console build is up to date with console sources")
+
+
+def _newest_mtime(root: Path) -> float:
+    import os
+
+    newest = 0.0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            name for name in dirnames if name not in {"node_modules", ".git"}
+        ]
+        for filename in filenames:
+            try:
+                newest = max(newest, (Path(dirpath) / filename).stat().st_mtime)
+            except OSError:
+                continue
+    return newest
 
 
 def _check_path(

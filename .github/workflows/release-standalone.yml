@@ -150,9 +150,13 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Install standalone Python
+        # cli/.python-version is the single source for the bundled Python;
+        # the workspace root symlinks its own pin to it so dev venvs run the
+        # exact version releases ship.
         run: |
-          uv python install --managed-python 3.12
-          uv python find --managed-python 3.12
+          pyver="$(cat cli/.python-version)"
+          uv python install --managed-python "$pyver"
+          uv python find --managed-python "$pyver"
 
       # corepack must run before setup-node: setup-node v5 auto-detects the
       # packageManager field and probes pnpm for cache setup.
@@ -199,7 +203,7 @@ jobs:
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.release.outputs.version }}
         run: |
           package_dir="$RUNNER_TEMP/openbase-coder-package-${{ steps.release.outputs.target }}"
-          python_bin="$(uv python find --managed-python 3.12)"
+          python_bin="$(uv python find --managed-python "$(cat cli/.python-version)")"
           "$python_bin" cli/scripts/build_standalone_package.py \
             --version "${{ steps.release.outputs.version }}" \
             --target "${{ steps.release.outputs.target }}" \
@@ -229,12 +233,13 @@ jobs:
         if: ${{ env.APPLE_DEVELOPER_ID_APPLICATION_CERT_BASE64 != '' }}
         run: |
           identity="${APPLE_CODESIGN_IDENTITY:-Developer ID Application}"
-          python_bin="$(uv python find --managed-python 3.12)"
+          pyver="$(cat cli/.python-version)"
+          python_bin="$(uv python find --managed-python "$pyver")"
           "$python_bin" cli/scripts/sign_standalone_package.py \
             --package-dir "$PACKAGE_DIR" \
             --identity "$identity"
           codesign --verify --deep --strict "$PACKAGE_DIR/bin/livekit-server"
-          codesign --verify --deep --strict "$PACKAGE_DIR/python/bin/python3.12"
+          codesign --verify --deep --strict "$PACKAGE_DIR/python/bin/python$pyver"
 
       - name: Archive release assets
         run: |
@@ -244,6 +249,18 @@ jobs:
           cp cli/scripts/install.sh dist/install.sh
           (cd dist && shasum -a 256 "$asset" install.sh > openbase-coder-package_SHA256SUMS)
           echo "ARCHIVE_PATH=dist/${asset}" >> "$GITHUB_ENV"
+
+      # Run install.sh against the just-built tarball so a broken installer
+      # (or a broken installed shim) blocks the release before publishing.
+      - name: Verify install.sh against the built tarball
+        run: |
+          install_home="$(mktemp -d)"
+          install_bin="$(mktemp -d)"
+          OPENBASE_CODER_INSTALL_TARBALL="$PWD/$ARCHIVE_PATH" \
+            OPENBASE_CODER_HOME="$install_home" \
+            OPENBASE_CODER_INSTALL_BIN_DIR="$install_bin" \
+            sh cli/scripts/install.sh
+          "$install_bin/openbase-coder" --version
 
       - name: Build update manifest
         env:

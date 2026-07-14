@@ -152,10 +152,6 @@ def test_doctor_allows_optional_stopped_services(monkeypatch, tmp_path):
         lambda: SimpleNamespace(
             standalone=False,
             workspace_path=str(tmp_path),
-            package_path="",
-            python_path="",
-            livekit_server_path="",
-            console_build_dir="",
         ),
     )
     monkeypatch.setattr(
@@ -201,6 +197,11 @@ def test_doctor_allows_optional_stopped_services(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(doctor_cli, "selected_tts_provider_id", lambda: "cartesia")
     monkeypatch.setattr(doctor_cli, "selected_stt_provider_id", lambda: "assemblyai")
+    monkeypatch.setattr(
+        doctor_cli,
+        "_check_code_sync",
+        lambda ok, _warn, _fail: ok("code sync: healthy"),
+    )
     codex_home = tmp_path / "codex_home"
     codex_home.mkdir()
     (tmp_path / ".codex").mkdir()
@@ -230,10 +231,6 @@ def test_doctor_reports_missing_tailscale_as_setup_action(monkeypatch, tmp_path)
         lambda: SimpleNamespace(
             standalone=False,
             workspace_path=str(tmp_path),
-            package_path="",
-            python_path="",
-            livekit_server_path="",
-            console_build_dir="",
         ),
     )
     monkeypatch.setattr(doctor_cli, "SERVICES", [])
@@ -266,6 +263,11 @@ def test_doctor_reports_missing_tailscale_as_setup_action(monkeypatch, tmp_path)
     )
     monkeypatch.setattr(doctor_cli, "selected_tts_provider_id", lambda: "cartesia")
     monkeypatch.setattr(doctor_cli, "selected_stt_provider_id", lambda: "assemblyai")
+    monkeypatch.setattr(
+        doctor_cli,
+        "_check_code_sync",
+        lambda ok, _warn, _fail: ok("code sync: healthy"),
+    )
     codex_home = tmp_path / "codex_home"
     codex_home.mkdir()
     (tmp_path / ".codex").mkdir()

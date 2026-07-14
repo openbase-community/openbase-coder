@@ -11,6 +11,7 @@ from openbase_coder_cli.openbase_coder_cli_app.git_http import git_http_backend
 from openbase_coder_cli.openbase_coder_cli_app.health_warnings import health_warnings
 from openbase_coder_cli.openbase_coder_cli_app.sync_settings import (
     sync_conflicts,
+    sync_conflicts_ignore_containing_folder,
     sync_conflicts_resolve,
     sync_settings,
     sync_status,
@@ -375,6 +376,11 @@ urlpatterns = [
         "sync/conflicts/resolve/",
         sync_conflicts_resolve,
         name="sync-conflicts-resolve",
+    ),
+    path(
+        "sync/conflicts/ignore-containing-folder/",
+        sync_conflicts_ignore_containing_folder,
+        name="sync-conflicts-ignore-containing-folder",
     ),
     path(
         "sync/versions/purge/",

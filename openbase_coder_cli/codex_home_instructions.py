@@ -16,7 +16,10 @@ from openbase_coder_cli.paths import (
     NORMAL_CODEX_AGENTS_MD_PATH,
     OPENBASE_CLAUDE_MD_PATH,
 )
-from openbase_coder_cli.runtime import packaged_instructions_dir
+from openbase_coder_cli.runtime import (
+    is_standalone_runtime,
+    packaged_instructions_dir,
+)
 from openbase_coder_cli.services.installation import InstallationConfig
 
 CODEX_HOME_DEFAULT_SOURCE_DIR = "instructions"
@@ -61,10 +64,7 @@ def refresh_openbase_instruction_files_from_installation(
             codex_home_dir=CODEX_HOME_DIR,
             report=report,
         )
-        changed = (
-            ensure_openbase_claude_md_symlink(report=report)
-            or changed
-        )
+        changed = ensure_openbase_claude_md_symlink(report=report) or changed
         for resource_name, target_path in OPENBASE_DEFAULT_INSTRUCTION_FILES:
             changed = (
                 ensure_rendered_instruction_file(
@@ -188,11 +188,15 @@ def _generated_agents_md(
     include_normal_codex_agents: bool,
 ) -> str:
     sections: list[str] = []
-    normal_agents = _normal_codex_agents_section(source_path) if include_normal_codex_agents else ""
+    normal_agents = (
+        _normal_codex_agents_section(source_path) if include_normal_codex_agents else ""
+    )
     if normal_agents:
         sections.append(normal_agents)
     sections.append(_managed_agents_md_section(source_text, source_path))
-    return "\n\n".join(section.rstrip() for section in sections if section.strip()) + "\n"
+    return (
+        "\n\n".join(section.rstrip() for section in sections if section.strip()) + "\n"
+    )
 
 
 def _normal_codex_agents_section(openbase_source_path: Path) -> str:
@@ -234,6 +238,14 @@ def ensure_rendered_instruction_file(
         _report(report, f"{document_label} source not found at {source_path}")
         return False
 
+    standalone = is_standalone_runtime()
+    if standalone:
+        # Standalone installs have no editable instruction source: the
+        # packaged templates are the only authority, so rendered files are
+        # always regenerated (local edits never stick) and kept read-only so
+        # they don't invite editing.
+        force = True
+
     source_text = source_path.read_text(encoding="utf-8")
     rendered = _rendered_instruction_file(source_text, source_path)
     existing = ""
@@ -254,7 +266,8 @@ def ensure_rendered_instruction_file(
             return False
         if not force and (
             existing != rendered
-            and existing != _rendered_instruction_file(source_text, source_path, render=False)
+            and existing
+            != _rendered_instruction_file(source_text, source_path, render=False)
             and not text_matches_instruction_template(
                 _without_generated_instruction_header(existing),
                 source_text,
@@ -267,13 +280,26 @@ def ensure_rendered_instruction_file(
             return False
 
     if existing == rendered and target_path.exists():
+        if standalone:
+            _mark_read_only(target_path)
         _report(report, f"{document_label} already configured at {target_path}")
         return False
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
+    if target_path.is_file() and not os.access(target_path, os.W_OK):
+        target_path.chmod(0o644)
     target_path.write_text(rendered, encoding="utf-8")
+    if standalone:
+        _mark_read_only(target_path)
     _report(report, f"Updated {document_label} at {target_path}")
     return True
+
+
+def _mark_read_only(target_path: Path) -> None:
+    try:
+        target_path.chmod(0o444)
+    except OSError:
+        pass
 
 
 def _rendered_instruction_file(

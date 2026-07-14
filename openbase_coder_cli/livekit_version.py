@@ -1,10 +1,11 @@
-"""The livekit-server version Openbase Coder releases ship.
+"""The livekit-server version Openbase Coder ships and dev installs run.
 
 Single source of truth for the pinned LiveKit engine: the release workflow
 refuses to package any other version (bump this constant deliberately when
-upgrading), and dev installs — which resolve livekit-server from
-Homebrew/PATH instead of a bundle — warn when their local version diverges,
-so engine differences can't sail through development testing unnoticed.
+upgrading), and dev setup downloads the same pin into ``~/.openbase/bin``
+(see ``livekit_install.py``). Dev installs that end up on a different local
+binary (PATH/Homebrew fallback) warn when their version diverges, so engine
+differences can't sail through development testing unnoticed.
 """
 
 from __future__ import annotations

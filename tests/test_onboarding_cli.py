@@ -209,8 +209,6 @@ def test_setup_result_uses_computed_cli_state(monkeypatch, capfd) -> None:
 
 def test_setup_phases_do_not_report_to_cloud(monkeypatch, tmp_path) -> None:
     class FakeInstallationConfig:
-        console_build_dir = ""
-
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
@@ -291,8 +289,6 @@ def _run_claude_code_setup_phases(monkeypatch, tmp_path, *, json_progress: bool)
     """Run _run_setup_phases with a claude_code backend, capturing auth calls."""
 
     class FakeInstallationConfig:
-        console_build_dir = ""
-
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 

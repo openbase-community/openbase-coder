@@ -67,6 +67,14 @@ install it:
     pip uninstall openbase-coder
     ```
 
+Setup also writes an `openbase-coder` shim that the tools above do not own
+(it wraps either the standalone package launcher or a development
+workspace's virtualenv). Remove it explicitly:
+
+```bash
+rm -f "$HOME"/.local/bin/openbase-coder
+```
+
 ## Remove Or Archive Local State
 
 Only remove or archive `~/.openbase` after the service jobs above are stopped

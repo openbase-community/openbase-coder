@@ -273,21 +273,28 @@ def _livekit_skew_warnings() -> list[dict[str, str]]:
             f"This dev install runs livekit-server {match.group(1)}, but "
             f"releases ship {LIVEKIT_SERVER_PINNED_VERSION} — voice testing "
             "here exercises a different engine than users run.",
-            "Align your local livekit-server with the pin in "
-            "livekit_version.py (or bump the pin deliberately).",
+            "Run 'openbase-coder setup' to download the pinned engine into "
+            "~/.openbase/bin, or bump the pin in livekit_version.py "
+            "deliberately.",
         )
     ]
 
 
 def _resolve_livekit_binary() -> str | None:
+    import os
     import shutil
 
+    from openbase_coder_cli.paths import OPENBASE_BIN_DIR
+
+    # Mirror the service resolver's preference order: the pinned download in
+    # ~/.openbase/bin wins, then PATH, then Homebrew.
+    pinned = OPENBASE_BIN_DIR / "livekit-server"
+    if os.access(pinned, os.X_OK):
+        return str(pinned)
     found = shutil.which("livekit-server")
     if found:
         return found
     fallback = "/opt/homebrew/bin/livekit-server"
-    import os
-
     return fallback if os.access(fallback, os.X_OK) else None
 
 

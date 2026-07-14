@@ -234,3 +234,37 @@ def test_cli_launch_refreshes_openbase_agents_md(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert calls == ["refresh"]
+
+
+def test_ensure_rendered_instruction_file_standalone_overwrites_user_edits(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        codex_home_instructions, "is_standalone_runtime", lambda: True
+    )
+    source = tmp_path / "instructions" / "DISPATCHER_INSTRUCTIONS.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("- Packaged rule\n", encoding="utf-8")
+    target = tmp_path / "rendered" / "DISPATCHER_INSTRUCTIONS.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("- A local edit that must not stick\n", encoding="utf-8")
+
+    changed = codex_home_instructions.ensure_rendered_instruction_file(
+        source, target, document_label="dispatcher instructions"
+    )
+
+    assert changed
+    content = target.read_text(encoding="utf-8")
+    assert "Packaged rule" in content
+    assert "must not stick" not in content
+    # Read-only so the file does not invite editing; re-render still works.
+    assert (target.stat().st_mode & 0o222) == 0
+    changed_again = codex_home_instructions.ensure_rendered_instruction_file(
+        source, target, document_label="dispatcher instructions"
+    )
+    assert not changed_again
+    source.write_text("- Packaged rule v2\n", encoding="utf-8")
+    assert codex_home_instructions.ensure_rendered_instruction_file(
+        source, target, document_label="dispatcher instructions"
+    )
+    assert "Packaged rule v2" in target.read_text(encoding="utf-8")

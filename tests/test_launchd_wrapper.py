@@ -1,5 +1,6 @@
 import subprocess
 
+from openbase_coder_cli.runtime import RuntimePackage
 from openbase_coder_cli.services import launchd
 from openbase_coder_cli.services.definitions import ServiceDefinition
 from openbase_coder_cli.services.installation import InstallationConfig
@@ -41,15 +42,14 @@ def test_resolve_binaries_prefers_standalone_paths(tmp_path, monkeypatch):
         path.chmod(0o755)
 
     monkeypatch.setattr(launchd.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(launchd, "current_runtime_package", lambda: None)
+    monkeypatch.setattr(
+        launchd, "stable_runtime_package", lambda: RuntimePackage(root=package_dir)
+    )
     monkeypatch.setattr(launchd, "OPENBASE_BASE_DIR", tmp_path / "openbase")
 
     config = InstallationConfig(
         workspace_path="",
         env_file=str(tmp_path / ".env"),
-        package_path=str(package_dir),
-        python_path=str(python),
-        livekit_server_path=str(livekit),
         standalone=True,
     )
 
@@ -58,7 +58,7 @@ def test_resolve_binaries_prefers_standalone_paths(tmp_path, monkeypatch):
     assert binaries["openbase_coder"] == str(openbase_coder)
     assert binaries["livekit"] == str(livekit)
     assert binaries["python"] == str(python)
-    assert binaries["runtime_workdir"] == str(tmp_path / "openbase")
+    assert binaries["runtime_workdir"] == str(package_dir)
 
 
 def test_launchctl_bootstrap_reenables_disabled_label(tmp_path, monkeypatch):

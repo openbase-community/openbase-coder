@@ -140,6 +140,7 @@ from openbase_coder_cli.dispatcher_config import (
     TTS_PROVIDER_KEY,  # noqa: F401
     set_dispatcher_service_tier,
 )
+from openbase_coder_cli.livekit_install import ensure_pinned_livekit_server
 from openbase_coder_cli.paths import (
     CODEX_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,  # noqa: F401
     CODEX_DISPATCHER_CONFIG_PATH,  # noqa: F401
@@ -425,6 +426,31 @@ def _require_backend_choice(
     )
 
 
+def _refuse_to_clobber_dev_install() -> None:
+    """Mirror of scripts/setup's guard, in the standalone direction.
+
+    A standalone setup over a development-workspace install would rewrite
+    installation.json and regenerate every service against the package,
+    silently converting the developer's install out from under the workspace.
+    """
+    if not InstallationConfig.exists():
+        return
+    try:
+        existing = InstallationConfig.load()
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return
+    if existing.standalone:
+        return
+    where = (
+        f" (workspace at {existing.workspace_path})" if existing.workspace_path else ""
+    )
+    raise click.ClickException(
+        "A development workspace install of Openbase Coder already exists on "
+        f"this machine{where}. Refusing to convert it to a standalone "
+        "install. Uninstall it first: https://docs.openbase.cloud/uninstall/"
+    )
+
+
 def _run_setup_phases(
     progress: _SetupProgress,
     *,
@@ -446,6 +472,8 @@ def _run_setup_phases(
     _ensure_bundled_sounds()
     runtime_package = current_runtime_package()
     use_dev_workspace = runtime_package is None
+    if runtime_package is not None:
+        _refuse_to_clobber_dev_install()
 
     # --- Locate runtime assets ---
     if runtime_package is not None:
@@ -461,22 +489,6 @@ def _run_setup_phases(
     config = InstallationConfig(
         workspace_path=workspace_dir if use_dev_workspace else "",
         env_file=env_file,
-        package_path=str(runtime_package.root) if runtime_package else "",
-        console_build_dir=(
-            str(runtime_package.console_build_dir)
-            if runtime_package and runtime_package.console_build_dir.is_dir()
-            else ""
-        ),
-        python_path=(
-            str(runtime_package.python_path)
-            if runtime_package and runtime_package.python_path.is_file()
-            else ""
-        ),
-        livekit_server_path=(
-            str(runtime_package.livekit_server_path)
-            if runtime_package and runtime_package.livekit_server_path.is_file()
-            else ""
-        ),
         standalone=runtime_package is not None,
     )
     config.save()
@@ -499,6 +511,10 @@ def _run_setup_phases(
     # --- Configure the selected coding backend (no codex/claude preference) ---
     progress.step("agent_config", "start")
     ensure_backend_binary(selected_coding_backend)
+    if use_dev_workspace:
+        # Standalone packages bundle the pinned engine; dev installs download
+        # the same pin so both pathways exercise one livekit-server.
+        ensure_pinned_livekit_server()
     if selected_coding_backend in (CODEX_BACKEND, OPENBASE_CLOUD_BACKEND):
         _symlink_codex_auth()
     _ensure_normal_claude_md_symlink()
@@ -556,8 +572,10 @@ def _run_setup_phases(
     # --- Build console ---
     if use_dev_workspace:
         _build_console(workspace_dir)
-    elif config.console_build_dir:
-        click.echo(f"Using bundled console build at {config.console_build_dir}")
+    elif runtime_package.console_build_dir.is_dir():
+        click.echo(
+            f"Using bundled console build at {runtime_package.console_build_dir}"
+        )
     else:
         click.echo(
             "No bundled console build found; server will require a console build."
@@ -583,6 +601,18 @@ def _run_setup_phases(
     try:
         configure_tailscale_serve()
     except Exception as exc:
+        if not skip_services:
+            # Tailscale is a hard prerequisite: without it the phone cannot
+            # reach this machine, so a "successful" setup would be broken.
+            # progress.abort() reports this step as errored on the way out.
+            raise click.ClickException(
+                f"Tailscale Serve could not be configured: {exc}\n"
+                "Tailscale is required — install it, sign in, and connect "
+                "(https://tailscale.com/download), then re-run "
+                "'openbase-coder setup'."
+            ) from exc
+        # --skip-services installs (e.g. image bakes) configure Tailscale on
+        # first boot instead; leave the manual commands as a breadcrumb.
         click.echo(click.style(f"  WARN  {exc}", fg="yellow"))
         click.echo(
             "  Run these manually after Tailscale is installed and connected:\n"
