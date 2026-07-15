@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from asgiref.sync import async_to_sync
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_THREAD_PAGE_SIZE = 25
 MAX_THREAD_PAGE_SIZE = 100
+RUN_ACTIVITY_FRESHNESS = timedelta(minutes=5)
 
 
 def _parse_positive_int(
@@ -219,13 +221,19 @@ def _favorite_thread_list_response(
 
 @api_view(["GET"])
 def thread_activity(request):
-    """Report whether any agent runs are active, for the cloud idle heartbeat."""
+    """Report recently progressing runs for the cloud idle heartbeat.
+
+    A status alone is not activity: waiting runs and running turns with no
+    recent updates must eventually let a cloud workspace idle-stop.
+    """
     manager = get_session_manager()
     threads = get_cached_thread_list(manager)
+    activity_cutoff = datetime.now(UTC) - RUN_ACTIVITY_FRESHNESS
     active_run_count = sum(
         1
         for thread in threads
-        if thread.status in (ThreadStatus.running, ThreadStatus.waiting)
+        if thread.status == ThreadStatus.running
+        and _aware_datetime(thread.updated_at) >= activity_cutoff
     )
     return Response(
         {
@@ -233,6 +241,12 @@ def thread_activity(request):
             "thread_count": len(threads),
         }
     )
+
+
+def _aware_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 @api_view(["GET", "POST"])

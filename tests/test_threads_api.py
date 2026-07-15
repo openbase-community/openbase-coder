@@ -255,7 +255,9 @@ def test_thread_active_voice_returns_404_without_active_thread(monkeypatch) -> N
     thread_views.invalidate_thread_list_cache()
     manager = FakeThreadManager([_thread(1)])
     monkeypatch.setattr(thread_views, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(thread_views, "get_livekit_active_voice_thread_id", lambda: None)
+    monkeypatch.setattr(
+        thread_views, "get_livekit_active_voice_thread_id", lambda: None
+    )
 
     factory = APIRequestFactory()
     request = factory.get("/api/threads/active-voice/")
@@ -424,16 +426,22 @@ def _activity_response(monkeypatch, threads: list[ThreadInfo]):
     return thread_views.thread_activity(request)
 
 
-def test_thread_activity_counts_running_and_waiting_runs(monkeypatch) -> None:
+def test_thread_activity_counts_only_recently_progressing_runs(monkeypatch) -> None:
+    now = datetime.now(timezone.utc)
     threads = [_thread(index) for index in range(4)]
     threads[0].raw_status = ThreadStatus.running
+    threads[0].updated_at = now - timedelta(minutes=1)
     threads[1].raw_status = ThreadStatus.waiting
-    threads[2].raw_status = ThreadStatus.completed
+    threads[1].updated_at = now
+    threads[2].raw_status = ThreadStatus.running
+    threads[2].updated_at = (
+        now - thread_views.RUN_ACTIVITY_FRESHNESS - timedelta(seconds=1)
+    )
 
     response = _activity_response(monkeypatch, threads)
 
     assert response.status_code == 200
-    assert response.data["active_run_count"] == 2
+    assert response.data["active_run_count"] == 1
     assert response.data["thread_count"] == 4
 
 
