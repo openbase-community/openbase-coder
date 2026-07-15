@@ -53,7 +53,7 @@ dependencies = [
     "aiohttp>=3.13.3",
     "multi-workspace>=3.2.3",
     "open-approvals>=0.1.0",
-    "super-agents[claude]>=0.1.7",
+    "super-agents[claude]>=0.1.8",
     "websockets>=16.0",
     "numpy>=2.3.0",
 ]

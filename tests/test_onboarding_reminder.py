@@ -23,6 +23,9 @@ def test_reminder_appended_when_marker_missing(tmp_path: Path, monkeypatch) -> N
     result = append_onboarding_reminder("Start my day")
     assert result.startswith("Start my day")
     assert ONBOARDING_REMINDER in result
+    assert "To remove this note from future messages" in result
+    assert "read and follow the openbase-onboarding skill now" in result
+    assert "even if the user skips" in result
 
 
 def test_no_reminder_when_marker_exists(tmp_path: Path, monkeypatch) -> None:

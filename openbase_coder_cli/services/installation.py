@@ -11,13 +11,18 @@ INSTALLATION_SCHEMA_VERSION = 1
 
 @dataclass
 class InstallationConfig:
+    """Install-mode record; never a cache of package paths.
+
+    Standalone package paths (python, livekit-server, console build, package
+    root) are deliberately not persisted here: the single source of truth is
+    the ``packages/standalone/current`` symlink, resolved at use time via
+    ``openbase_coder_cli.runtime``. Legacy files may still contain those keys;
+    ``load()`` ignores unknown keys, so they are dead on read.
+    """
+
     schema_version: int = INSTALLATION_SCHEMA_VERSION
     workspace_path: str = ""
     env_file: str = ""
-    package_path: str = ""
-    console_build_dir: str = ""
-    python_path: str = ""
-    livekit_server_path: str = ""
     standalone: bool = False
 
     def save(self) -> None:

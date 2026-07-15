@@ -13,6 +13,7 @@ boot rather than reimplementing setup.
 
 from __future__ import annotations
 
+import getpass
 import json
 import platform
 import subprocess
@@ -65,7 +66,18 @@ def _store_auth(bundle: dict, web_backend_url: str) -> None:
 def _join_tailnet(authkey: str, hostname: str) -> None:
     if not authkey:
         return
-    command = ["sudo", "tailscale", "up", "--authkey", authkey]
+    # --ssh: workspaces must accept Tailscale SSH from the owner's devices.
+    # --operator: the session user manages Tailscale Serve without sudo, which
+    # the later setup step requires.
+    command = [
+        "sudo",
+        "tailscale",
+        "up",
+        "--authkey",
+        authkey,
+        "--ssh",
+        f"--operator={getpass.getuser()}",
+    ]
     if hostname:
         command += ["--hostname", hostname]
     subprocess.run(command, check=True)

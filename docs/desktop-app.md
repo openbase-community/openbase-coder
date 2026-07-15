@@ -203,7 +203,9 @@ The Settings page groups configuration into sections:
 
 - **Openbase Services** — start/stop/restart the managed services.
 - **Coding Backend** — switch between Codex, Claude Code, and Openbase
-  Cloud (same as `openbase-coder backend use ...`).
+  Cloud (same setting as `openbase-coder backend use ...`). The app warns
+  before changing it, then restarts Openbase services and recreates the
+  dispatcher automatically.
 - **Backend Model**, **Service Tier**, **Reasoning** — model and reasoning
   defaults for agents (same as `openbase-coder defaults ...`).
 - **LiveKit Companion Screen Sharing** (desktop app only) — see below.

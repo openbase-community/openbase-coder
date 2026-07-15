@@ -48,3 +48,37 @@ def test_installation_config_load_ignores_unknown_keys(monkeypatch, tmp_path: Pa
     assert config.workspace_path == ""
     assert config.env_file == "/tmp/.env"
     assert config.standalone is True
+
+
+def test_stable_package_path_routes_through_current_symlink(monkeypatch, tmp_path):
+    release = tmp_path / "releases" / "1.0.0"
+    (release / "python" / "bin").mkdir(parents=True)
+    current = tmp_path / "current"
+    current.symlink_to(release)
+    monkeypatch.setattr(runtime, "STANDALONE_CURRENT_DIR", current)
+
+    pinned = release / "python" / "bin" / "super-agents-mcp"
+
+    assert (
+        runtime.stable_package_path(pinned)
+        == current / "python" / "bin" / "super-agents-mcp"
+    )
+
+
+def test_stable_package_path_leaves_other_releases_unchanged(monkeypatch, tmp_path):
+    release = tmp_path / "releases" / "1.0.0"
+    other = tmp_path / "releases" / "0.9.0" / "python"
+    release.mkdir(parents=True)
+    other.mkdir(parents=True)
+    current = tmp_path / "current"
+    current.symlink_to(release)
+    monkeypatch.setattr(runtime, "STANDALONE_CURRENT_DIR", current)
+
+    assert runtime.stable_package_path(other) == other
+
+
+def test_stable_package_path_without_current_symlink(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime, "STANDALONE_CURRENT_DIR", tmp_path / "current")
+    path = tmp_path / "somewhere" / "bin"
+
+    assert runtime.stable_package_path(path) == path

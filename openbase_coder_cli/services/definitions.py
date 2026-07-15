@@ -155,7 +155,10 @@ SERVICES: list[ServiceDefinition] = [
         command_template=(
             'CLAUDE_THREAD_DEVICE_SYNC_INTERVAL="${{CLAUDE_THREAD_DEVICE_SYNC_INTERVAL:-60}}"\n'
             'CLAUDE_THREAD_DEVICE_SYNC_MAX_AGE_DAYS="${{CLAUDE_THREAD_DEVICE_SYNC_MAX_AGE_DAYS:-15}}"\n'
-            'CLAUDE_THREAD_DEVICE_SYNC_EXCHANGE_DIR="${{CLAUDE_THREAD_DEVICE_SYNC_EXCHANGE_DIR:-{data_dir}/claude-thread-sync}}"\n'
+            # Same exchange folder as codex: one transported product-state
+            # dir carries both backends (snapshots are self-describing and
+            # each importer skips the other backend's).
+            'CLAUDE_THREAD_DEVICE_SYNC_EXCHANGE_DIR="${{CLAUDE_THREAD_DEVICE_SYNC_EXCHANGE_DIR:-{data_dir}/thread-sync}}"\n'
             'exec {openbase_coder} claude-sync devices run --interval "$CLAUDE_THREAD_DEVICE_SYNC_INTERVAL" --max-age-days "$CLAUDE_THREAD_DEVICE_SYNC_MAX_AGE_DAYS" --exchange-dir "$CLAUDE_THREAD_DEVICE_SYNC_EXCHANGE_DIR"'
         ),
         workdir_template="{data_dir}",
@@ -253,7 +256,8 @@ SERVICES: list[ServiceDefinition] = [
         name="code-sync",
         description="Code Sync (managed Syncthing)",
         command_template=(
-            'exec {syncthing} serve --config "{data_dir}/code-sync" '
+            # --home sets config+data together (Syncthing v2 requires both).
+            'exec {syncthing} serve --home "{data_dir}/code-sync" '
             "--no-browser --no-restart --no-upgrade"
         ),
         workdir_template="{data_dir}",

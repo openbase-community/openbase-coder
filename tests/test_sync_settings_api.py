@@ -194,6 +194,10 @@ def test_sync_conflicts_list_and_resolve(monkeypatch, tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.data["unresolved_count"] == 1
     assert response.data["conflicts"][0]["id"] == record["id"]
+    assert response.data["conflicts"][0]["type"] == "repo-divergence"
+    assert response.data["conflicts"][0]["kind"] == "branch"
+    assert response.data["conflicts"][0]["repo_relpath"] == "repo"
+    assert response.data["conflicts"][0]["folder_relpath"] == ""
 
     response = sync_settings.sync_conflicts_resolve(
         _authenticated_request(
@@ -205,6 +209,13 @@ def test_sync_conflicts_list_and_resolve(monkeypatch, tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.data["conflict"]["resolved"] is True
 
+    response = sync_settings.sync_conflicts(
+        _authenticated_request("GET", "/api/sync/conflicts/")
+    )
+    assert response.status_code == 200
+    assert response.data["unresolved_count"] == 0
+    assert response.data["conflicts"] == []
+
     response = sync_settings.sync_conflicts_resolve(
         _authenticated_request(
             "POST",
@@ -213,6 +224,77 @@ def test_sync_conflicts_list_and_resolve(monkeypatch, tmp_path: Path) -> None:
         )
     )
     assert response.status_code == 400
+
+
+def test_sync_conflict_ignore_containing_folder(monkeypatch, tmp_path: Path) -> None:
+    _patch_environment(monkeypatch, tmp_path)
+    conflicts_path = tmp_path / "conflicts.json"
+    monkeypatch.setattr(conflicts_module, "CODE_SYNC_CONFLICTS_PATH", conflicts_path)
+    apply_calls = []
+    monkeypatch.setattr(
+        sync_manager, "apply_settings_change", lambda: apply_calls.append(True)
+    )
+    sync_config.set_sync_folders(
+        [{"relpath": "Projects", "extra_ignores": ["/already-ignored"]}]
+    )
+    folder_id = sync_config.folder_id_for_relpath("Projects")
+    target = conflicts_module.record_file_conflict(
+        folder_id=folder_id,
+        file_relpath="openbase/data/db/file.sync-conflict-20260713-112233-ABC1234.txt",
+    )
+    sibling = conflicts_module.record_file_conflict(
+        folder_id=folder_id,
+        file_relpath=(
+            "openbase/data/db/other.sync-conflict-20260713-112234-ABC1234.txt"
+        ),
+    )
+    outside = conflicts_module.record_file_conflict(
+        folder_id=folder_id,
+        file_relpath="openbase/data/logs/app.sync-conflict-20260713-112235-ABC1234.txt",
+    )
+
+    response = sync_settings.sync_conflicts(
+        _authenticated_request("GET", "/api/sync/conflicts/")
+    )
+    assert response.status_code == 200
+    conflict = next(
+        item for item in response.data["conflicts"] if item["id"] == target["id"]
+    )
+    assert conflict["type"] == "file-conflict"
+    assert conflict["kind"] == "file"
+    assert conflict["folder_relpath"] == "Projects"
+    assert conflict["path"] == (
+        "openbase/data/db/file.sync-conflict-20260713-112233-ABC1234.txt"
+    )
+    assert conflict["files"] == [
+        "openbase/data/db/file.sync-conflict-20260713-112233-ABC1234.txt"
+    ]
+    assert conflict["containing_folder"] == "openbase/data/db"
+    assert conflict["original_path"] == "openbase/data/db/file.txt"
+    assert conflict["conflict_device_hint"] == "ABC1234"
+    assert conflict["ignored_containing_folder"] is False
+
+    response = sync_settings.sync_conflicts_ignore_containing_folder(
+        _authenticated_request(
+            "POST",
+            "/api/sync/conflicts/ignore-containing-folder/",
+            {"id": target["id"]},
+        )
+    )
+
+    assert response.status_code == 200
+    assert response.data["ignore_pattern"] == "/openbase/data/db"
+    assert response.data["added"] is True
+    assert response.data["resolved_count"] == 2
+    assert apply_calls == [True]
+    assert sync_config.sync_folders()[0].extra_ignores == (
+        "/already-ignored",
+        "/openbase/data/db",
+    )
+    conflicts = {item["id"]: item for item in conflicts_module.read_conflicts()}
+    assert conflicts[target["id"]]["resolved"] is True
+    assert conflicts[sibling["id"]]["resolved"] is True
+    assert conflicts[outside["id"]].get("resolved") is not True
 
 
 def test_sync_versions_purge_reports_freed_bytes(monkeypatch, tmp_path: Path) -> None:

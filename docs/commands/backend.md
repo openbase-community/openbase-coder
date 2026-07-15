@@ -27,9 +27,20 @@ The command persists the selection in `~/.openbase/.env` as
 
 The backend setting controls `super-agents-mcp` coding sessions. Codex and
 Openbase Cloud use the local `codex-app-server` service; Claude Code bypasses
-that service for Super Agents UI-driver sessions. After switching backend,
-restart Openbase services and recreate the dispatcher/MCP host so the new
-environment is loaded.
+that service for Super Agents UI-driver sessions. In the apps, saving a changed
+backend first asks for confirmation, then automatically restarts Openbase
+services and recreates the dispatcher thread. The restart interrupts active
+voice calls, may interrupt coding turns, and clears the current dispatcher
+conversation context; it does not delete Super Agent threads or project files.
+Separately running Codex or Claude clients may still need to be reopened so
+their MCP process reloads the backend.
+
+When switching with the CLI, restart Openbase services and recreate the
+dispatcher explicitly so the new environment is loaded:
+
+```bash
+openbase-coder restart --recreate-dispatcher
+```
 
 For Claude Code, Openbase uses its managed `CLAUDE_CONFIG_DIR` at
 `~/.openbase/claude_config`. Check and configure that scoped login with:

@@ -36,7 +36,8 @@ CERT_FILENAME = "cert.pem"
 # Staggered versioning: history thins automatically; bound is time (30 days).
 VERSIONS_MAX_AGE_SECONDS = 30 * 24 * 3600
 REST_TIMEOUT_SECONDS = 10
-_DEVICE_ID_RE = re.compile(r"Device ID:\s*([A-Z2-7]{7}(?:-[A-Z2-7]{7}){7})")
+# v1 prints "Device ID: <id>"; v2 prints "... (device=<id> log.pkg=...)".
+_DEVICE_ID_RE = re.compile(r"(?:Device ID:\s*|device=)([A-Z2-7]{7}(?:-[A-Z2-7]{7}){7})")
 
 
 @dataclass(frozen=True)
@@ -92,13 +93,12 @@ def ensure_identity(config_dir: Path = CODE_SYNC_DIR, binary: str | None = None)
 
     syncthing = binary or resolve_syncthing_binary()
     config_dir.mkdir(parents=True, exist_ok=True)
+    # --home sets config+data together (Syncthing v2 requires both, and v2
+    # dropped v1's --no-default-folder). A default folder in the generated
+    # config.xml is irrelevant anyway: write_config replaces it wholesale —
+    # generate only exists to mint the key/cert identity.
     result = subprocess.run(
-        [
-            syncthing,
-            "generate",
-            "--no-default-folder",
-            f"--config={config_dir}",
-        ],
+        [syncthing, "generate", f"--home={config_dir}"],
         capture_output=True,
         text=True,
         check=False,
@@ -344,6 +344,17 @@ class SyncthingClient:
     def rescan(self, folder_id: str | None = None) -> None:
         query = f"?folder={folder_id}" if folder_id else ""
         self._request("POST", f"/rest/db/scan{query}")
+
+    def connections(self) -> dict[str, Any]:
+        """Per-device connection state (``connections`` key of the API)."""
+        payload = self._request("GET", "/rest/system/connections") or {}
+        value = payload.get("connections")
+        return value if isinstance(value, dict) else {}
+
+    def pending_folders(self) -> dict[str, Any]:
+        """Folders peers offered that are not in our config yet."""
+        payload = self._request("GET", "/rest/cluster/pending/folders")
+        return payload if isinstance(payload, dict) else {}
 
     def latest_event_time(self, event_type: str) -> str | None:
         """RFC3339 time of the most recent buffered event of a type, if any."""

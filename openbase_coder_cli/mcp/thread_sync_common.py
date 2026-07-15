@@ -14,6 +14,68 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
+# The super-agents package keeps its single SQLite agent store in the
+# Claude Code app dir (see ``super_agents.agent_store.app_dir``); both
+# backends' Super Agents sessions are recorded there.
+DEFAULT_SUPER_AGENTS_STORE_HOME = (
+    Path.home() / ".local" / "share" / "super-agents-claude-code"
+)
+SUPER_AGENTS_STORE_HOME_ENV = "SUPER_AGENTS_CLAUDE_CODE_HOME"
+
+
+def translate_home_path(
+    value: str | None,
+    *,
+    target_home: Path | None = None,
+    source_home: Path | None = None,
+) -> str | None:
+    """Translate a source device's home-relative path onto this device.
+
+    Older snapshots did not record ``source_home``, so recognize conventional
+    macOS and Linux home roots as a backward-compatible fallback. Paths outside
+    a recognized/source home are deliberately preserved even when absent.
+    """
+    if not value:
+        return value
+    target = target_home or Path.home()
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        return value
+    source = source_home or _recognized_user_home(path)
+    if source is None:
+        return value
+    try:
+        relative = path.relative_to(source)
+    except ValueError:
+        return value
+    return str(target / relative)
+
+
+def _recognized_user_home(path: Path) -> Path | None:
+    parts = path.parts
+    if len(parts) >= 3 and parts[1] in {"Users", "home"}:
+        return Path(*parts[:3])
+    if len(parts) >= 2 and parts[1] == "root":
+        return Path("/root")
+    return None
+
+
+def super_agents_state_db_path() -> Path:
+    configured = os.environ.get(SUPER_AGENTS_STORE_HOME_ENV)
+    home = (
+        Path(configured).expanduser() if configured else DEFAULT_SUPER_AGENTS_STORE_HOME
+    )
+    return home / "state.sqlite3"
+
+
+def remove_empty_dir(path: Path) -> None:
+    try:
+        path.rmdir()
+    except OSError:
+        return
+
 
 @dataclass(frozen=True)
 class DeviceIdentity:
@@ -201,6 +263,32 @@ def record_device_conflict(
     entry_ledger["conflict"] = conflict
 
 
+def file_content_relation(local_path: Path, snapshot_path: Path) -> str | None:
+    """Byte-compare an append-only local artifact with a snapshot copy.
+
+    Returns ``identical`` when the contents match, ``local_extends`` when the
+    snapshot is a strict byte-prefix of the local file, ``snapshot_extends``
+    when the local file is a strict byte-prefix of the snapshot, or ``None``
+    when the contents genuinely diverge or either file is unreadable.
+    """
+    try:
+        local_size = local_path.stat().st_size
+        snapshot_size = snapshot_path.stat().st_size
+        shared = min(local_size, snapshot_size)
+        with local_path.open("rb") as local_file, snapshot_path.open("rb") as snap_file:
+            remaining = shared
+            while remaining:
+                chunk = min(remaining, 1024 * 1024)
+                if local_file.read(chunk) != snap_file.read(chunk):
+                    return None
+                remaining -= chunk
+    except OSError:
+        return None
+    if local_size == snapshot_size:
+        return "identical"
+    return "local_extends" if local_size > snapshot_size else "snapshot_extends"
+
+
 def import_snapshot_decision(
     *,
     has_local: bool,
@@ -344,6 +432,46 @@ def device_snapshot_dirs(exchange_dir: Path) -> list[Path]:
     )
 
 
+def collect_snapshot_records(
+    exchange_dir: Path,
+    *,
+    entity_id: str,
+    entity_id_key: str,
+    read_metadata: Callable[[Path], dict[str, Any]],
+    metadata_error: type[Exception],
+    source_device_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """List exchange snapshots for one entity as {path, metadata} records."""
+    records: list[dict[str, Any]] = []
+    for snapshot_dir in device_snapshot_dirs(exchange_dir):
+        try:
+            metadata = read_metadata(snapshot_dir / "metadata.json")
+        except metadata_error:
+            continue
+        if metadata[entity_id_key] != entity_id:
+            continue
+        if source_device_id and metadata["source_device_id"] != source_device_id:
+            continue
+        records.append({"path": snapshot_dir, "metadata": metadata})
+    return records
+
+
+def find_snapshot_record(
+    records: list[dict[str, Any]],
+    fingerprint_id: str | None,
+) -> dict[str, Any] | None:
+    if not fingerprint_id:
+        return None
+    return next(
+        (
+            record
+            for record in records
+            if record["metadata"].get("fingerprint") == fingerprint_id
+        ),
+        None,
+    )
+
+
 @dataclass(frozen=True)
 class SnapshotExportCandidate:
     """One exportable entity, or a skip decision made by the session source."""
@@ -376,6 +504,15 @@ class SnapshotImportSource:
     import_blocked_reason: Callable[[dict[str, Any], LocalSnapshotState], str | None]
     perform_import: Callable[[Path, dict[str, Any], LocalSnapshotState], str | None]
     conflict_includes_snapshot_path: bool = False
+    # Optional byte-level comparison between the local artifact and the
+    # snapshot (see ``file_content_relation`` return values). Fingerprints
+    # include volatile metadata, so two devices can report divergence while
+    # holding equal or strictly-ordered content; this callback lets the
+    # import loop fast-forward or ignore such snapshots instead of minting a
+    # conflict, and auto-clear an existing conflict once content converges.
+    compare_content: (
+        Callable[[Path, dict[str, Any], LocalSnapshotState], str | None] | None
+    ) = None
 
 
 def run_snapshot_export(
@@ -449,6 +586,9 @@ def run_snapshot_import(
     source: SnapshotImportSource,
     result_factory: Callable[..., Any],
 ) -> list[Any]:
+    # Oldest-first so that within one pass a stale divergent snapshot is
+    # processed before the newer one that proves convergence and clears the
+    # conflict, never the other way around.
     return [
         _import_one_snapshot(
             snapshot_dir,
@@ -457,8 +597,19 @@ def run_snapshot_import(
             source=source,
             result_factory=result_factory,
         )
-        for snapshot_dir in device_snapshot_dirs(exchange_dir)
+        for snapshot_dir in sorted(
+            device_snapshot_dirs(exchange_dir), key=_snapshot_exported_at
+        )
     ]
+
+
+def _snapshot_exported_at(snapshot_dir: Path) -> float:
+    try:
+        raw = json.loads((snapshot_dir / "metadata.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0.0
+    value = raw.get("exported_at") if isinstance(raw, dict) else None
+    return float(value) if isinstance(value, int | float) else 0.0
 
 
 def _import_one_snapshot(
@@ -500,7 +651,9 @@ def _import_one_snapshot(
         entry_ledger, device_id=source_device_id, fingerprint_id=fingerprint_id
     ):
         return result("already_imported", "fingerprint_seen")
-    if entry_ledger.get("conflict"):
+    had_conflict = isinstance(entry_ledger.get("conflict"), dict)
+
+    def unresolved_conflict() -> Any:
         record_device_snapshot(
             entry_ledger,
             device_id=source_device_id,
@@ -510,11 +663,45 @@ def _import_one_snapshot(
         )
         return result("conflict", "conflict_unresolved")
 
+    if had_conflict and source.compare_content is None:
+        return unresolved_conflict()
+
     validation_error = source.validate_snapshot(snapshot_dir, metadata)
     if validation_error:
+        if had_conflict:
+            return unresolved_conflict()
         return result("skipped", validation_error)
 
     local = source.load_local(metadata)
+    relation: str | None = None
+    if had_conflict and source.compare_content is not None:
+        relation = source.compare_content(snapshot_dir, metadata, local)
+        if relation is None:
+            return unresolved_conflict()
+        # The sides converged (or became strictly ordered) after the
+        # conflict was minted, so it no longer describes real divergence.
+        # Snapshots seen while the conflict stood are retired alongside it,
+        # so a stale divergent one cannot re-mint the conflict just cleared.
+        entry_ledger.pop("conflict", None)
+        for device in entry_ledger.get("devices", {}).values():
+            snapshots = device.get("snapshots") if isinstance(device, dict) else None
+            if not isinstance(snapshots, dict):
+                continue
+            for snapshot in snapshots.values():
+                if (
+                    isinstance(snapshot, dict)
+                    and snapshot.get("status") == "seen_after_conflict"
+                    and snapshot.get("fingerprint") != fingerprint_id
+                ):
+                    snapshot["status"] = "ignored"
+        logger.info(
+            "thread_device_sync event=conflict_auto_cleared entity_id=%s "
+            "relation=%s source_device_id=%s",
+            entity_id,
+            relation,
+            source_device_id,
+        )
+
     parent_fingerprint = metadata.get("parent_fingerprint")
     if not isinstance(parent_fingerprint, str) or not parent_fingerprint:
         parent_fingerprint = None
@@ -535,17 +722,47 @@ def _import_one_snapshot(
         )
         return result("already_imported", "same_content")
     if decision == "conflict":
-        record_device_conflict(
-            entry_ledger,
-            local_fingerprint=local.fingerprint_id,
-            incoming_fingerprint=fingerprint_id,
-            source_device_id=source_device_id,
-            reason="divergent_fingerprint",
-            snapshot_path=snapshot_dir
-            if source.conflict_includes_snapshot_path
-            else None,
-        )
-        return result("conflict", "divergent_fingerprint")
+        if relation is None and source.compare_content is not None:
+            relation = source.compare_content(snapshot_dir, metadata, local)
+        if relation == "identical":
+            record_device_snapshot(
+                entry_ledger,
+                device_id=source_device_id,
+                fingerprint_id=fingerprint_id,
+                snapshot_path=snapshot_dir,
+                status="same_content",
+            )
+            return result("already_imported", "same_content_bytes")
+        if relation == "local_extends":
+            record_device_snapshot(
+                entry_ledger,
+                device_id=source_device_id,
+                fingerprint_id=fingerprint_id,
+                snapshot_path=snapshot_dir,
+                status="ignored",
+            )
+            return result("skipped", "superseded_by_local")
+        if relation != "snapshot_extends":
+            record_device_snapshot(
+                entry_ledger,
+                device_id=source_device_id,
+                fingerprint_id=fingerprint_id,
+                snapshot_path=snapshot_dir,
+                status="seen_after_conflict",
+            )
+            record_device_conflict(
+                entry_ledger,
+                local_fingerprint=local.fingerprint_id,
+                incoming_fingerprint=fingerprint_id,
+                source_device_id=source_device_id,
+                reason="divergent_fingerprint",
+                snapshot_path=snapshot_dir
+                if source.conflict_includes_snapshot_path
+                else None,
+            )
+            return result("conflict", "divergent_fingerprint")
+        # The snapshot strictly extends the local artifact: a safe
+        # append-only fast-forward despite the fingerprint mismatch.
 
     blocked_reason = source.import_blocked_reason(metadata, local)
     if blocked_reason:

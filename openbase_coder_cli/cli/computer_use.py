@@ -124,7 +124,9 @@ def queue(instructions: tuple[str, ...]) -> None:
 @computer_use.command("interrupt")
 def interrupt() -> None:
     """Interrupt the active computer-use run and stop screen sharing."""
-    response = CompanionClient().interrupt_computer_use()
+    client = CompanionClient()
+    client.interrupt_computer_use()
+    response = client.stop_screen_share()
     click.echo(f"Computer use interrupted ({response.get('state') or 'off'}).")
 
 

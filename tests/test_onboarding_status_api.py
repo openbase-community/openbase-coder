@@ -24,6 +24,7 @@ def _fake_status_payload() -> dict:
             "services_installed": True,
         },
         "authenticated": True,
+        "backend_auth": {"backend": "claude_code", "ready": True},
         "tailscale_self": {"available": True},
         "tailscale_serve": {"healthy": True},
         "cloud": {},
@@ -79,6 +80,11 @@ def test_onboarding_status_payload_composes_checks(monkeypatch, tmp_path) -> Non
     monkeypatch.setattr(
         onboarding, "read_onboarding_cache", lambda: {"last_register": {"ok": True}}
     )
+    monkeypatch.setattr(
+        onboarding,
+        "backend_auth_status",
+        lambda *, authenticated: {"backend": "codex", "ready": authenticated},
+    )
 
     payload = onboarding.onboarding_status_payload()
 
@@ -89,6 +95,7 @@ def test_onboarding_status_payload_composes_checks(monkeypatch, tmp_path) -> Non
         "services_installed": True,
     }
     assert payload["authenticated"] is True
+    assert payload["backend_auth"] == {"backend": "codex", "ready": True}
     assert payload["tailscale_self"]["dns_name"] == "mac.tailnet.ts.net"
     assert payload["tailscale_serve"] == {"healthy": True}
     assert payload["cloud"] == {"last_register": {"ok": True}}
@@ -135,3 +142,76 @@ def test_cli_configured_false_when_service_not_installed(
     assert checks["installation_config"] is True
     assert checks["env_file"] is True
     assert checks["services_installed"] is False
+
+
+def test_backend_auth_claude_code_uses_claude_auth_status(monkeypatch) -> None:
+    monkeypatch.setattr(onboarding, "selected_coding_backend", lambda: "claude_code")
+    monkeypatch.setattr(
+        onboarding,
+        "claude_auth_status",
+        lambda: SimpleNamespace(logged_in=True),
+    )
+
+    assert onboarding.backend_auth_status() == {
+        "backend": "claude_code",
+        "ready": True,
+    }
+
+
+def test_backend_auth_codex_requires_service_auth_json(
+    monkeypatch, tmp_path
+) -> None:
+    codex_home = tmp_path / "codex_home"
+    monkeypatch.setattr(onboarding, "CODEX_HOME_DIR", codex_home)
+    monkeypatch.setattr(onboarding, "selected_coding_backend", lambda: "codex")
+
+    assert onboarding.backend_auth_status()["ready"] is False
+
+    codex_home.mkdir(parents=True)
+    (codex_home / "auth.json").write_text('{"tokens": {}}', encoding="utf-8")
+    assert onboarding.backend_auth_status()["ready"] is True
+
+
+def test_backend_auth_codex_ignores_empty_or_dangling_auth(
+    monkeypatch, tmp_path
+) -> None:
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir(parents=True)
+    monkeypatch.setattr(onboarding, "CODEX_HOME_DIR", codex_home)
+    monkeypatch.setattr(onboarding, "selected_coding_backend", lambda: "codex")
+
+    (codex_home / "auth.json").symlink_to(tmp_path / "missing-auth.json")
+    assert onboarding.backend_auth_status()["ready"] is False
+
+    (codex_home / "auth.json").unlink()
+    (codex_home / "auth.json").write_text("{}", encoding="utf-8")
+    assert onboarding.backend_auth_status()["ready"] is False
+
+
+def test_backend_auth_openbase_cloud_follows_cli_login(monkeypatch) -> None:
+    monkeypatch.setattr(
+        onboarding, "selected_coding_backend", lambda: "openbase_cloud"
+    )
+
+    assert onboarding.backend_auth_status(authenticated=True) == {
+        "backend": "openbase_cloud",
+        "ready": True,
+    }
+    assert onboarding.backend_auth_status(authenticated=False)["ready"] is False
+
+
+def test_selected_coding_backend_reads_installation_env_file(
+    monkeypatch, tmp_path
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENBASE_CODING_BACKEND=claude_code\n", encoding="utf-8")
+    monkeypatch.setattr(
+        onboarding.InstallationConfig, "exists", classmethod(lambda cls: True)
+    )
+    monkeypatch.setattr(
+        onboarding.InstallationConfig,
+        "load",
+        classmethod(lambda cls: SimpleNamespace(env_file=str(env_file))),
+    )
+
+    assert onboarding.selected_coding_backend() == "claude_code"

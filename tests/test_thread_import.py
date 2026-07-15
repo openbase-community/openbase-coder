@@ -8,6 +8,7 @@ from pathlib import Path
 
 from openbase_coder_cli.mcp.thread_import import (
     CodexThreadSyncResult,
+    _active_super_agent_thread_ids,
     _log_sync_result,
     export_voice_codex_threads,
     import_normal_codex_threads,
@@ -497,7 +498,9 @@ def test_sync_codex_threads_once_repairs_append_only_prefix_conflict(
         updated_at=20,
     )
     _append_terminal(normal_rollout, message="first")
-    voice_rollout.write_text(normal_rollout.read_text(encoding="utf-8"), encoding="utf-8")
+    voice_rollout.write_text(
+        normal_rollout.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     _append_terminal(normal_rollout, message="second")
     ledger.write_text(
         json.dumps(
@@ -633,3 +636,93 @@ def test_sync_result_logging_suppresses_routine_results(caplog) -> None:
     assert "thread-active" in caplog.text
     assert "thread-transferred" in caplog.text
     assert "thread-unexpected" in caplog.text
+
+
+def _create_super_agents_store(db_path: Path, rows: list[tuple]) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            create table sessions (
+                id text primary key,
+                status text not null,
+                active_turn_id text,
+                backend_session_id text
+            )
+            """
+        )
+        conn.executemany("insert into sessions values (?, ?, ?, ?)", rows)
+
+
+def test_active_super_agent_thread_ids_reads_sqlite_store(tmp_path: Path) -> None:
+    db_path = tmp_path / "store" / "state.sqlite3"
+    _create_super_agents_store(
+        db_path,
+        [
+            ("s_running", "running", None, "0197aaaa-1111-2222-3333-444455556666"),
+            ("s_turn", "waiting", "turn-1", "0197bbbb-1111-2222-3333-444455556666"),
+            ("s_idle", "waiting", None, "0197cccc-1111-2222-3333-444455556666"),
+            ("codex_0197dddd111122223333444455556666", "running", None, None),
+            ("claude_0197eeee111122223333444455556666", "running", None, None),
+        ],
+    )
+
+    active = _active_super_agent_thread_ids(
+        state_path=tmp_path / "missing-state.json",
+        db_path=db_path,
+    )
+
+    assert active == {
+        "0197aaaa-1111-2222-3333-444455556666",
+        "0197bbbb-1111-2222-3333-444455556666",
+        # Prefixed codex store ids are mapped back to thread UUIDs.
+        "0197dddd-1111-2222-3333-444455556666",
+    }
+
+
+def test_active_super_agent_thread_ids_merges_sqlite_and_legacy_state(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "store" / "state.sqlite3"
+    _create_super_agents_store(
+        db_path,
+        [("s_running", "running", None, "0197aaaa-1111-2222-3333-444455556666")],
+    )
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "sessions": {
+                    "legacy-thread": {
+                        "threadId": "legacy-thread",
+                        "lastStatus": "running",
+                        "activeTurnId": "turn-1",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    active = _active_super_agent_thread_ids(state_path=state_path, db_path=db_path)
+
+    assert active == {
+        "0197aaaa-1111-2222-3333-444455556666",
+        "legacy-thread",
+    }
+
+
+def test_active_super_agent_thread_ids_honors_store_home_env(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store_home = tmp_path / "store"
+    _create_super_agents_store(
+        store_home / "state.sqlite3",
+        [("s_running", "running", None, "0197aaaa-1111-2222-3333-444455556666")],
+    )
+    monkeypatch.setenv("SUPER_AGENTS_CLAUDE_CODE_HOME", str(store_home))
+
+    active = _active_super_agent_thread_ids(state_path=tmp_path / "missing-state.json")
+
+    assert active == {"0197aaaa-1111-2222-3333-444455556666"}

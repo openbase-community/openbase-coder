@@ -46,13 +46,18 @@ from .thread_sync_common import (
     LocalSnapshotState,
     SnapshotExportCandidate,
     SnapshotImportSource,
+    collect_snapshot_records,
     device_snapshot_dirs,
+    file_content_relation,
+    find_snapshot_record,
     read_device_ledger,
     read_scoped_ledger,
     record_device_snapshot,
+    remove_empty_dir,
     run_snapshot_export,
     run_snapshot_import,
     sync_cutoff_ms,
+    translate_home_path,
     write_json_atomic,
 )
 from .thread_sync_common import (
@@ -65,6 +70,8 @@ from .thread_sync_common import (
 SCHEMA_VERSION = 1
 DEVICE_IDENTITY_NAME = "thread-sync-device.json"
 LEDGER_NAME = "codex-thread-device-sync-ledger.json"
+IMPORT_STAGING_DIR_NAME = ".codex-thread-sync-staging"
+IMPORT_BACKUP_DIR_NAME = ".codex-thread-sync-backups"
 DEFAULT_EXCHANGE_DIR = OPENBASE_BASE_DIR / "thread-sync"
 DEFAULT_DEVICE_IDENTITY_PATH = OPENBASE_BASE_DIR / DEVICE_IDENTITY_NAME
 DEFAULT_LEDGER_PATH = OPENBASE_BASE_DIR / LEDGER_NAME
@@ -117,6 +124,7 @@ def sync_thread_snapshots_once(
     ledger_path: Path = DEFAULT_LEDGER_PATH,
     stability_delay_seconds: float = 0.2,
     max_age_days: int | None = DEFAULT_SYNC_MAX_AGE_DAYS,
+    user_home: Path | None = None,
 ) -> dict[str, list[ThreadSnapshotResult]]:
     exports = export_thread_snapshots(
         codex_home=codex_home,
@@ -125,12 +133,14 @@ def sync_thread_snapshots_once(
         ledger_path=ledger_path,
         stability_delay_seconds=stability_delay_seconds,
         max_age_days=max_age_days,
+        source_user_home=user_home,
     )
     imports = import_thread_snapshots(
         codex_home=codex_home,
         exchange_dir=exchange_dir,
         device_identity_path=device_identity_path,
         ledger_path=ledger_path,
+        target_user_home=user_home,
     )
     return {"exports": exports, "imports": imports}
 
@@ -144,6 +154,7 @@ def export_thread_snapshots(
     stability_delay_seconds: float = 0.2,
     max_age_days: int | None = DEFAULT_SYNC_MAX_AGE_DAYS,
     active_thread_ids: set[str] | None = None,
+    source_user_home: Path | None = None,
 ) -> list[ThreadSnapshotResult]:
     state_db = codex_home / STATE_DB_NAME
     if not state_db.exists():
@@ -164,6 +175,7 @@ def export_thread_snapshots(
                 codex_home / SESSION_INDEX_NAME
             ),
             stability_delay_seconds=stability_delay_seconds,
+            source_user_home=source_user_home or Path.home(),
         ),
         device_id=identity.device_id,
         ledger=ledger,
@@ -184,6 +196,7 @@ def _export_candidates(
     cutoff_ms: int | None,
     index_entries: dict[str, dict[str, Any]],
     stability_delay_seconds: float,
+    source_user_home: Path,
 ) -> Iterator[SnapshotExportCandidate]:
     for row in _thread_rows(state_db):
         thread_id = _string(row.get("id"))
@@ -225,6 +238,7 @@ def _export_candidates(
                 fingerprint=fingerprint,
                 fingerprint_id=fingerprint_id,
                 index_entry=index_entries.get(thread_id),
+                source_user_home=source_user_home,
             ),
         )
 
@@ -240,6 +254,7 @@ def _snapshot_writer(
     fingerprint: dict[str, Any],
     fingerprint_id: str,
     index_entry: dict[str, Any] | None,
+    source_user_home: Path,
 ) -> Callable[[str | None], Path]:
     def write(parent_fingerprint: str | None) -> Path:
         return _write_snapshot(
@@ -253,6 +268,7 @@ def _snapshot_writer(
             parent_fingerprint=parent_fingerprint,
             index_entry=index_entry,
             dynamic_tools=_thread_dynamic_tools(state_db, row["id"]),
+            source_user_home=source_user_home,
         )
 
     return write
@@ -264,18 +280,25 @@ def import_thread_snapshots(
     exchange_dir: Path = DEFAULT_EXCHANGE_DIR,
     device_identity_path: Path = DEFAULT_DEVICE_IDENTITY_PATH,
     ledger_path: Path = DEFAULT_LEDGER_PATH,
+    target_user_home: Path | None = None,
 ) -> list[ThreadSnapshotResult]:
     state_db = codex_home / STATE_DB_NAME
     if not state_db.exists():
         raise ThreadTransferError(f"Codex state database not found: {state_db}")
 
+    target_home = target_user_home or Path.home()
+    _translate_existing_thread_cwds(state_db, target_home)
     identity = get_or_create_device_identity(device_identity_path)
     ledger = _read_exchange_ledger(ledger_path)
     results = run_snapshot_import(
         exchange_dir=exchange_dir,
         device_id=identity.device_id,
         ledger=ledger,
-        source=_exchange_import_source(state_db=state_db, codex_home=codex_home),
+        source=_exchange_import_source(
+            state_db=state_db,
+            codex_home=codex_home,
+            target_user_home=target_home,
+        ),
         result_factory=ThreadSnapshotResult,
     )
     _write_exchange_ledger(ledger_path, ledger)
@@ -286,6 +309,7 @@ def _exchange_import_source(
     *,
     state_db: Path,
     codex_home: Path,
+    target_user_home: Path,
 ) -> SnapshotImportSource:
     def load_local(metadata: dict[str, Any]) -> LocalSnapshotState:
         thread_id = metadata["thread_id"]
@@ -316,8 +340,19 @@ def _exchange_import_source(
             metadata=metadata,
             codex_home=codex_home,
             overwrite=local.exists,
+            target_user_home=target_user_home,
         )
         return None
+
+    def compare_content(
+        snapshot_dir: Path, metadata: dict[str, Any], local: LocalSnapshotState
+    ) -> str | None:
+        if not local.exists or not isinstance(local.context, dict):
+            return None
+        rollout = _source_rollout_path(local.context, codex_home, metadata["thread_id"])
+        if rollout is None:
+            return None
+        return file_content_relation(rollout, snapshot_dir / "rollout.jsonl")
 
     return SnapshotImportSource(
         scope_key="threads",
@@ -328,6 +363,7 @@ def _exchange_import_source(
         load_local=load_local,
         import_blocked_reason=import_blocked_reason,
         perform_import=perform_import,
+        compare_content=compare_content,
     )
 
 
@@ -543,6 +579,7 @@ def resolve_thread_snapshot_conflict(
     exchange_dir: Path = DEFAULT_EXCHANGE_DIR,
     device_identity_path: Path = DEFAULT_DEVICE_IDENTITY_PATH,
     ledger_path: Path = DEFAULT_LEDGER_PATH,
+    target_user_home: Path | None = None,
 ) -> dict[str, Any]:
     if action not in {"accept_local", "accept_remote_latest"}:
         raise ThreadConflictResolutionError("unsupported_resolution_action")
@@ -584,6 +621,7 @@ def resolve_thread_snapshot_conflict(
             metadata=latest["metadata"],
             codex_home=codex_home,
             overwrite=local_row is not None,
+            target_user_home=target_user_home or Path.home(),
         )
         resolved_fingerprint = _string(latest["metadata"].get("fingerprint"))
         for snapshot in snapshots:
@@ -641,6 +679,7 @@ def _write_snapshot(
     parent_fingerprint: str | None,
     index_entry: dict[str, Any] | None,
     dynamic_tools: list[dict[str, Any]],
+    source_user_home: Path,
 ) -> Path:
     thread_id = _string(row.get("id"))
     if not thread_id:
@@ -669,6 +708,7 @@ def _write_snapshot(
             parent_fingerprint=parent_fingerprint,
             index_entry=index_entry,
             dynamic_tools=dynamic_tools,
+            source_user_home=source_user_home,
         )
         (tmp_dir / "metadata.json").write_text(
             json.dumps(metadata, indent=2, sort_keys=True) + "\n",
@@ -692,6 +732,7 @@ def _snapshot_metadata(
     parent_fingerprint: str | None,
     index_entry: dict[str, Any] | None,
     dynamic_tools: list[dict[str, Any]],
+    source_user_home: Path,
 ) -> dict[str, Any]:
     thread_row = dict(row)
     thread_row.pop("rollout_path", None)
@@ -703,6 +744,7 @@ def _snapshot_metadata(
         "schema_version": SCHEMA_VERSION,
         "source_device_id": identity.device_id,
         "source_device_name": identity.device_name,
+        "source_user_home": str(source_user_home),
         "thread_id": row["id"],
         "fingerprint": fingerprint_id,
         "parent_fingerprint": parent_fingerprint,
@@ -751,6 +793,7 @@ def _import_snapshot_into_home(
     metadata: dict[str, Any],
     codex_home: Path,
     overwrite: bool,
+    target_user_home: Path,
 ) -> None:
     thread_id = metadata["thread_id"]
     relative_path = Path(_string(metadata.get("rollout_relative_path")) or "sessions")
@@ -758,27 +801,117 @@ def _import_snapshot_into_home(
         relative_path = Path("sessions") / f"rollout-{thread_id}.jsonl"
     target_rollout = codex_home / relative_path
     target_rollout.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(snapshot_dir / "rollout.jsonl", target_rollout)
 
-    state_db = codex_home / STATE_DB_NAME
-    _upsert_thread_row(
-        state_db,
-        thread_id,
-        metadata.get("thread_row")
-        if isinstance(metadata.get("thread_row"), dict)
-        else {},
-        target_rollout,
-        overwrite=overwrite,
-    )
-    _replace_thread_dynamic_tools(
-        state_db,
-        thread_id,
-        metadata.get("dynamic_tools")
-        if isinstance(metadata.get("dynamic_tools"), list)
-        else [],
-    )
+    staging_dir = codex_home / IMPORT_STAGING_DIR_NAME
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    staged_rollout = staging_dir / f"{thread_id}-{uuid.uuid4()}.jsonl"
+    backup_rollout: Path | None = None
+    rollout_committed = False
+    try:
+        shutil.copy2(snapshot_dir / "rollout.jsonl", staged_rollout)
+        if target_rollout.exists() or target_rollout.is_symlink():
+            backup_dir = codex_home / IMPORT_BACKUP_DIR_NAME
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            backup_rollout = backup_dir / f"{thread_id}-{uuid.uuid4()}.jsonl"
+            shutil.move(str(target_rollout), str(backup_rollout))
+        os.replace(staged_rollout, target_rollout)
+        rollout_committed = True
+        # State mutations run only after the rollout file commit succeeded,
+        # so a failure here rolls the rollout back instead of leaving a
+        # half-written import.
+        _apply_snapshot_db_state(
+            codex_home=codex_home,
+            thread_id=thread_id,
+            metadata=metadata,
+            target_rollout=target_rollout,
+            overwrite=overwrite,
+            target_user_home=target_user_home,
+        )
+    except Exception:
+        staged_rollout.unlink(missing_ok=True)
+        _restore_rollout_backup(
+            target_rollout,
+            backup_rollout,
+            rollout_committed=rollout_committed,
+        )
+        raise
+    finally:
+        remove_empty_dir(staging_dir)
+    if backup_rollout is not None:
+        backup_rollout.unlink(missing_ok=True)
+        remove_empty_dir(backup_rollout.parent)
+
+
+def _restore_rollout_backup(
+    target_rollout: Path,
+    backup_rollout: Path | None,
+    *,
+    rollout_committed: bool,
+) -> None:
+    if backup_rollout is not None and backup_rollout.exists():
+        target_rollout.unlink(missing_ok=True)
+        shutil.move(str(backup_rollout), str(target_rollout))
+        remove_empty_dir(backup_rollout.parent)
+        return
+    if rollout_committed:
+        target_rollout.unlink(missing_ok=True)
+
+
+def _snapshot_source_user_home(metadata: dict[str, Any]) -> Path | None:
+    value = _string(metadata.get("source_user_home"))
+    if not value:
+        return None
+    path = Path(value)
+    return path if path.is_absolute() else None
+
+
+def _translate_existing_thread_cwds(state_db: Path, target_user_home: Path) -> None:
+    """Migrate previously imported foreign-home cwd values in place."""
+    with closing(_connect(state_db)) as conn:
+        conn.row_factory = sqlite3.Row
+        if not _has_table(conn, "threads") or "cwd" not in _table_columns(
+            conn, "threads"
+        ):
+            return
+        rows = conn.execute("SELECT id, cwd FROM threads").fetchall()
+        for row in rows:
+            translated = translate_home_path(row["cwd"], target_home=target_user_home)
+            if translated and translated != row["cwd"]:
+                conn.execute(
+                    "UPDATE threads SET cwd = ? WHERE id = ?",
+                    (translated, row["id"]),
+                )
+        conn.commit()
+
+
+def _apply_snapshot_db_state(
+    *,
+    codex_home: Path,
+    thread_id: str,
+    metadata: dict[str, Any],
+    target_rollout: Path,
+    overwrite: bool,
+    target_user_home: Path,
+) -> None:
     thread_row = metadata.get("thread_row")
     thread_row = thread_row if isinstance(thread_row, dict) else {}
+    thread_row = dict(thread_row)
+    source_user_home = _snapshot_source_user_home(metadata)
+    translated_cwd = translate_home_path(
+        _string(thread_row.get("cwd")),
+        source_home=source_user_home,
+        target_home=target_user_home,
+    )
+    if translated_cwd is not None:
+        thread_row["cwd"] = translated_cwd
+    dynamic_tools = metadata.get("dynamic_tools")
+    dynamic_tools = dynamic_tools if isinstance(dynamic_tools, list) else []
+    with closing(_connect(codex_home / STATE_DB_NAME)) as conn:
+        _upsert_thread_row(
+            conn, thread_id, thread_row, target_rollout, overwrite=overwrite
+        )
+        _replace_thread_dynamic_tools(conn, thread_id, dynamic_tools)
+        conn.commit()
     _append_session_index_metadata(
         codex_home / SESSION_INDEX_NAME,
         metadata.get("session_index_entry"),
@@ -788,54 +921,48 @@ def _import_snapshot_into_home(
 
 
 def _upsert_thread_row(
-    db_path: Path,
+    conn: sqlite3.Connection,
     thread_id: str,
     row: dict[str, Any],
     rollout_path: Path,
     *,
     overwrite: bool,
 ) -> None:
-    with closing(_connect(db_path)) as conn:
-        target_columns = _table_columns(conn, "threads")
-        values = {key: value for key, value in row.items() if key in target_columns}
-        values["id"] = thread_id
-        values["rollout_path"] = str(rollout_path)
-        columns = [column for column in target_columns if column in values]
-        placeholders = ", ".join("?" for _ in columns)
-        column_sql = ", ".join(columns)
-        verb = "INSERT OR REPLACE" if overwrite else "INSERT OR IGNORE"
-        conn.execute(
-            f"{verb} INTO threads ({column_sql}) VALUES ({placeholders})",
-            [values[column] for column in columns],
-        )
-        conn.commit()
+    target_columns = _table_columns(conn, "threads")
+    values = {key: value for key, value in row.items() if key in target_columns}
+    values["id"] = thread_id
+    values["rollout_path"] = str(rollout_path)
+    columns = [column for column in target_columns if column in values]
+    placeholders = ", ".join("?" for _ in columns)
+    column_sql = ", ".join(columns)
+    verb = "INSERT OR REPLACE" if overwrite else "INSERT OR IGNORE"
+    conn.execute(
+        f"{verb} INTO threads ({column_sql}) VALUES ({placeholders})",
+        [values[column] for column in columns],
+    )
 
 
 def _replace_thread_dynamic_tools(
-    db_path: Path,
+    conn: sqlite3.Connection,
     thread_id: str,
     rows: list[Any],
 ) -> None:
-    with closing(_connect(db_path)) as conn:
-        if not _has_table(conn, "thread_dynamic_tools"):
-            return
-        columns = _table_columns(conn, "thread_dynamic_tools")
+    if not _has_table(conn, "thread_dynamic_tools"):
+        return
+    columns = _table_columns(conn, "thread_dynamic_tools")
+    conn.execute("DELETE FROM thread_dynamic_tools WHERE thread_id = ?", (thread_id,))
+    for raw_row in rows:
+        if not isinstance(raw_row, dict):
+            continue
+        values = {key: value for key, value in raw_row.items() if key in columns}
+        values["thread_id"] = thread_id
+        insert_columns = [column for column in columns if column in values]
+        placeholders = ", ".join("?" for _ in insert_columns)
+        column_sql = ", ".join(insert_columns)
         conn.execute(
-            "DELETE FROM thread_dynamic_tools WHERE thread_id = ?", (thread_id,)
+            f"INSERT OR REPLACE INTO thread_dynamic_tools ({column_sql}) VALUES ({placeholders})",
+            [values[column] for column in insert_columns],
         )
-        for raw_row in rows:
-            if not isinstance(raw_row, dict):
-                continue
-            values = {key: value for key, value in raw_row.items() if key in columns}
-            values["thread_id"] = thread_id
-            insert_columns = [column for column in columns if column in values]
-            placeholders = ", ".join("?" for _ in insert_columns)
-            column_sql = ", ".join(insert_columns)
-            conn.execute(
-                f"INSERT OR REPLACE INTO thread_dynamic_tools ({column_sql}) VALUES ({placeholders})",
-                [values[column] for column in insert_columns],
-            )
-        conn.commit()
 
 
 def _append_session_index_metadata(
@@ -903,35 +1030,17 @@ def _snapshot_records(
     thread_id: str,
     source_device_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for snapshot_dir in device_snapshot_dirs(exchange_dir):
-        metadata_path = snapshot_dir / "metadata.json"
-        try:
-            metadata = _read_snapshot_metadata(metadata_path)
-        except ThreadTransferError:
-            continue
-        if metadata["thread_id"] != thread_id:
-            continue
-        if source_device_id and metadata["source_device_id"] != source_device_id:
-            continue
-        records.append({"path": snapshot_dir, "metadata": metadata})
-    return records
-
-
-def _find_snapshot_record(
-    records: list[dict[str, Any]],
-    fingerprint_id: str | None,
-) -> dict[str, Any] | None:
-    if not fingerprint_id:
-        return None
-    return next(
-        (
-            record
-            for record in records
-            if record["metadata"].get("fingerprint") == fingerprint_id
-        ),
-        None,
+    return collect_snapshot_records(
+        exchange_dir,
+        entity_id=thread_id,
+        entity_id_key="thread_id",
+        read_metadata=_read_snapshot_metadata,
+        metadata_error=ThreadTransferError,
+        source_device_id=source_device_id,
     )
+
+
+_find_snapshot_record = find_snapshot_record
 
 
 def _latest_snapshot_record(records: list[dict[str, Any]]) -> dict[str, Any] | None:

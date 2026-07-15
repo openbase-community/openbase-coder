@@ -3,6 +3,8 @@ resolution, shim safety, and backend selection."""
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 from openbase_coder_cli.cli.setup import _require_backend_choice
@@ -57,18 +59,60 @@ def test_selected_backend_reads_env_file(tmp_path) -> None:
     assert launchd._selected_backend(config) == "claude_code"
 
 
-def test_install_cli_shim_leaves_uv_tool_script_alone(tmp_path, monkeypatch) -> None:
+def test_install_cli_shim_replaces_uv_tool_script(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(workspace_phase.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(workspace_phase, "current_runtime_package", lambda: None)
     shim_path = tmp_path / ".local" / "bin" / "openbase-coder"
     shim_path.parent.mkdir(parents=True)
     uv_tool_script = (
         "#!/home/user/.local/share/uv/tools/openbase-coder/bin/python\nimport sys\n"
     )
     shim_path.write_text(uv_tool_script, encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    venv_cli = workspace / ".venv" / "bin" / "openbase-coder"
+    venv_cli.parent.mkdir(parents=True)
+    venv_cli.write_text("#!/bin/sh\n", encoding="utf-8")
 
-    workspace_phase._install_cli_shim(str(tmp_path / "workspace"))
+    workspace_phase._install_cli_shim(str(workspace))
 
-    assert shim_path.read_text(encoding="utf-8") == uv_tool_script
+    shim = shim_path.read_text(encoding="utf-8")
+    assert str(venv_cli) in shim
+    assert "uv/tools" not in shim
+
+
+def test_standalone_setup_refuses_to_clobber_dev_install(monkeypatch) -> None:
+    setup_module = importlib.import_module("openbase_coder_cli.cli.setup")
+
+    monkeypatch.setattr(
+        setup_module.InstallationConfig, "exists", classmethod(lambda cls: True)
+    )
+    monkeypatch.setattr(
+        setup_module.InstallationConfig,
+        "load",
+        classmethod(
+            lambda cls: InstallationConfig(
+                workspace_path="/workspace/checkout", standalone=False
+            )
+        ),
+    )
+
+    with pytest.raises(Exception, match="Uninstall it first"):
+        setup_module._refuse_to_clobber_dev_install()
+
+
+def test_standalone_setup_allows_rerun_over_standalone_install(monkeypatch) -> None:
+    setup_module = importlib.import_module("openbase_coder_cli.cli.setup")
+
+    monkeypatch.setattr(
+        setup_module.InstallationConfig, "exists", classmethod(lambda cls: True)
+    )
+    monkeypatch.setattr(
+        setup_module.InstallationConfig,
+        "load",
+        classmethod(lambda cls: InstallationConfig(standalone=True)),
+    )
+
+    setup_module._refuse_to_clobber_dev_install()
 
 
 def test_install_cli_shim_dev_mode_execs_workspace_venv(tmp_path, monkeypatch) -> None:

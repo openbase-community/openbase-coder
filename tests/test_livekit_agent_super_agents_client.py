@@ -8,6 +8,9 @@ from typing import Any
 
 import pytest
 
+from openbase_coder_cli.livekit_agent import (
+    super_agents_client as super_agents_client_module,
+)
 from openbase_coder_cli.livekit_agent.super_agents_client import (
     SuperAgentsLiveKitClient,
     _extract_turn_id,
@@ -41,7 +44,7 @@ class FakeSuperAgentsBackend:
         turn_input: dict[str, Any],
     ) -> dict[str, Any]:
         self.started_turns.append((input_data, turn_input))
-        return {"turnId": "turn-1"}
+        return {"turnId": f"turn-{len(self.started_turns)}"}
 
     async def steer_by_label(
         self,
@@ -259,7 +262,7 @@ class FakeLongRunningSuperAgentsBackend(FakeSuperAgentsBackend):
         turn_input: dict[str, Any],
     ) -> dict[str, Any]:
         self.started_turns.append((input_data, turn_input))
-        return {"turnId": "turn-1"}
+        return {"turnId": f"turn-{len(self.started_turns)}"}
 
     async def steer_by_label(
         self,
@@ -496,6 +499,327 @@ async def test_super_agents_livekit_client_preserves_started_turn_after_cancella
 
 
 @pytest.mark.asyncio
+async def test_super_agents_livekit_client_preserves_completed_speech_after_cancellation(
+    tmp_path: Path,
+) -> None:
+    backend = FakeLongRunningSuperAgentsBackend()
+    state_path = tmp_path / "livekit-voice-route.json"
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(state_path),
+        backend_client=backend,
+    )
+    handed_off: list[tuple[str, str]] = []
+
+    def handle_completed(_client, turn_id: str, speech: str) -> None:
+        assert client.claim_speech(turn_id)
+        handed_off.append((turn_id, speech))
+
+    client.set_orphaned_result_handler(handle_completed)
+
+    first = asyncio.create_task(client.run_turn("find the old conversation"))
+    await backend.progress_called.wait()
+    first.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    backend.release_progress.set()
+    await asyncio.sleep(0)
+
+    assert await client.steer_active_turn("are you there") is None
+    result = await client.run_turn("are you there")
+
+    assert len(backend.started_turns) == 2
+    assert backend.steered == []
+    assert handed_off == [
+        ("turn-1", "The proactively steered turn is ready."),
+    ]
+    assert result["_livekit_turn_id"] == "turn-2"
+    assert result["_livekit_speech_text"] == "The proactively steered turn is ready."
+
+
+class FakeFlakyProgressSuperAgentsBackend(FakeSuperAgentsBackend):
+    def __init__(self, failures_before_success: int) -> None:
+        super().__init__()
+        self.failures_before_success = failures_before_success
+        self.steered: list[tuple[Any, str]] = []
+
+    async def steer_by_label(
+        self,
+        input_data,
+        prompt: str,
+        turn_input: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.steered.append((input_data, prompt))
+        return {"turnId": input_data.turn_id, "prompt": prompt}
+
+    async def progress_by_label(self, input_data) -> dict[str, Any]:
+        self.progress_calls += 1
+        if self.progress_calls <= self.failures_before_success:
+            raise TimeoutError(
+                "Timed out waiting for app-server response to thread/read."
+            )
+        return {
+            "status": "waiting",
+            "threadId": input_data.thread_id,
+            "turnId": input_data.turn_id,
+            "summary": {
+                "items": [
+                    {
+                        "type": "agentMessage",
+                        "text": "The answer survived the poll timeouts.",
+                    }
+                ]
+            },
+        }
+
+
+@pytest.mark.asyncio
+async def test_super_agents_livekit_client_survives_transient_poll_timeouts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(super_agents_client_module, "TURN_POLL_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(
+        super_agents_client_module, "TURN_POLL_FAILURE_BACKOFF_MAX_SECONDS", 0.02
+    )
+    backend = FakeFlakyProgressSuperAgentsBackend(failures_before_success=3)
+    state_path = tmp_path / "livekit-voice-route.json"
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(state_path),
+        backend_client=backend,
+    )
+
+    result = await client.run_turn("find the old conversation")
+
+    assert backend.progress_calls == 4
+    assert result["_livekit_turn_id"] == "turn-1"
+    assert result["_livekit_speech_text"] == "The answer survived the poll timeouts."
+
+
+@pytest.mark.asyncio
+async def test_super_agents_livekit_client_recovers_after_poll_gave_up(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(super_agents_client_module, "TURN_POLL_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(
+        super_agents_client_module, "TURN_POLL_FAILURE_BACKOFF_MAX_SECONDS", 0.02
+    )
+    monkeypatch.setattr(
+        super_agents_client_module, "TURN_POLL_MAX_CONSECUTIVE_FAILURES", 2
+    )
+    # The first progress call happens before the turn starts (latest-turn
+    # lookup) and is swallowed there; the next two are wait-poll failures.
+    backend = FakeFlakyProgressSuperAgentsBackend(failures_before_success=3)
+    state_path = tmp_path / "livekit-voice-route.json"
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(state_path),
+        backend_client=backend,
+    )
+
+    with pytest.raises(TimeoutError):
+        await client.run_turn("find the old conversation")
+
+    # The backend turn is preserved so the next utterance can rejoin it and
+    # the finished answer still gets spoken.
+    result = await client.run_turn("are you there")
+
+    assert len(backend.started_turns) == 1
+    assert result["_livekit_turn_id"] == "turn-1"
+    assert result["_livekit_speech_text"] == "The answer survived the poll timeouts."
+
+
+@pytest.mark.asyncio
+async def test_super_agents_livekit_client_delivers_orphaned_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        super_agents_client_module, "ORPHANED_RESULT_GRACE_SECONDS", 0.01
+    )
+    backend = FakeLongRunningSuperAgentsBackend()
+    state_path = tmp_path / "livekit-voice-route.json"
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(state_path),
+        backend_client=backend,
+    )
+    orphaned: list[tuple[str, str]] = []
+
+    def handler(source_client, turn_id: str, speech_text: str) -> None:
+        assert source_client is client
+        if client.claim_speech(turn_id):
+            orphaned.append((turn_id, speech_text))
+
+    client.set_orphaned_result_handler(handler)
+
+    first = asyncio.create_task(client.run_turn("find the old conversation"))
+    await backend.progress_called.wait()
+    assert client.has_pending_voice_answer()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    assert client.has_pending_voice_answer()
+
+    backend.release_progress.set()
+    await asyncio.sleep(0.1)
+
+    assert orphaned == [("turn-1", "The proactively steered turn is ready.")]
+    assert not client.has_pending_voice_answer()
+
+    # The delivered answer must not be re-joined; the next utterance starts a
+    # fresh turn.
+    result = await client.run_turn("next question")
+    assert len(backend.started_turns) == 2
+    assert result["_livekit_turn_id"] == "turn-2"
+
+
+@pytest.mark.asyncio
+async def test_orphan_spoken_turn_suppresses_duplicate_prompt_fresh_turn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The Fable incident: a correction is steered into a running turn, the
+    # waiter dies, orphan delivery speaks the finished answer — and then a
+    # twin/repeat of the correction arrives as a fresh prompt. It must not
+    # start another backend turn that answers with the same gist again.
+    monkeypatch.setattr(
+        super_agents_client_module, "ORPHANED_RESULT_GRACE_SECONDS", 0.01
+    )
+    backend = FakeLongRunningSuperAgentsBackend()
+    state_path = tmp_path / "livekit-voice-route.json"
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(state_path),
+        backend_client=backend,
+    )
+    orphaned: list[str] = []
+
+    def handler(_client, turn_id: str, _speech: str) -> None:
+        if client.claim_speech(turn_id):
+            orphaned.append(turn_id)
+
+    client.set_orphaned_result_handler(handler)
+
+    first = asyncio.create_task(client.run_turn("what was fable working on"))
+    await backend.progress_called.wait()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    steered_turn = await client.steer_active_turn("im not like what did fable do")
+    assert steered_turn == "turn-1"
+
+    backend.release_progress.set()
+    await asyncio.sleep(0.1)
+    assert orphaned == ["turn-1"]
+
+    # A formatted STT twin (or the user restating) of the steered correction.
+    result = await client.run_turn("I'm not, like, what did Fable do?")
+    assert result["_livekit_speech_text"] == ""
+    assert result["_livekit_turn_id"] == "turn-1"
+    assert len(backend.started_turns) == 1
+
+    # A twin of the original prompt is likewise already answered.
+    result = await client.run_turn("What was Fable working on?")
+    assert result["_livekit_speech_text"] == ""
+    assert len(backend.started_turns) == 1
+
+    # Genuinely new content still gets a fresh backend turn.
+    result = await client.run_turn("start a new agent for the report")
+    assert len(backend.started_turns) == 2
+
+
+@pytest.mark.asyncio
+async def test_super_agents_livekit_client_hands_off_completed_result_before_new_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        super_agents_client_module, "ORPHANED_RESULT_GRACE_SECONDS", 0.01
+    )
+    backend = FakeLongRunningSuperAgentsBackend()
+    state_path = tmp_path / "livekit-voice-route.json"
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(state_path),
+        backend_client=backend,
+    )
+    orphaned: list[str] = []
+
+    def handle_completed(_client, turn_id, _speech) -> None:
+        assert client.claim_speech(turn_id)
+        orphaned.append(turn_id)
+
+    client.set_orphaned_result_handler(handle_completed)
+
+    first = asyncio.create_task(client.run_turn("find the old conversation"))
+    await backend.progress_called.wait()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    backend.release_progress.set()
+    await asyncio.sleep(0)
+
+    # The old result is handed off, and the new utterance gets its own turn.
+    result = await client.run_turn("are you there")
+    assert client.claim_speech(result["_livekit_turn_id"])
+    await asyncio.sleep(0.1)
+
+    assert orphaned == ["turn-1"]
+    assert result["_livekit_turn_id"] == "turn-2"
+
+
+class FakeSteerRejectedSuperAgentsBackend(FakeSuperAgentsBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.queued_turns: list[tuple[Any, dict[str, Any]]] = []
+
+    async def steer_by_label(
+        self,
+        input_data,
+        prompt: str,
+        turn_input: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        raise RuntimeError("turn cannot accept steering")
+
+    async def queue_turn_by_label(
+        self,
+        input_data,
+        turn_input: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.queued_turns.append((input_data, turn_input))
+        return {"turnId": "turn-2", "queued": False}
+
+
+@pytest.mark.asyncio
+async def test_super_agents_livekit_client_submits_rejected_steer_to_queue_endpoint(
+    tmp_path: Path,
+) -> None:
+    backend = FakeSteerRejectedSuperAgentsBackend()
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(tmp_path / "livekit-voice-route.json"),
+        backend_client=backend,
+    )
+    await client.prepare()
+    client._active_turn_id = "turn-1"
+    client._active_turn_prompt_hash = "previous-prompt"
+
+    result = await client.run_turn("do this after the current work")
+
+    assert result["_livekit_turn_id"] == "turn-2"
+    assert len(backend.queued_turns) == 1
+    assert backend.queued_turns[0][1]["prompt"] == "do this after the current work"
+
+
+@pytest.mark.asyncio
 async def test_super_agents_livekit_client_proactively_steers_active_turn(
     tmp_path: Path,
 ) -> None:
@@ -511,9 +835,7 @@ async def test_super_agents_livekit_client_proactively_steers_active_turn(
     await backend.progress_called.wait()
 
     turn_id = await client.steer_active_turn("stop and write about blueberries")
-    follow_up = asyncio.create_task(
-        client.run_turn("stop and write about blueberries")
-    )
+    follow_up = asyncio.create_task(client.run_turn("stop and write about blueberries"))
     await asyncio.sleep(0)
 
     assert turn_id == "turn-1"

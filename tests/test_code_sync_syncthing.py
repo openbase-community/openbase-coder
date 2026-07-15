@@ -140,8 +140,16 @@ def test_code_sync_service_definition() -> None:
 
     assert service.install_by_default is False
     assert (
-        'exec /opt/homebrew/bin/syncthing serve --config "/tmp/openbase/code-sync"'
+        'exec /opt/homebrew/bin/syncthing serve --home "/tmp/openbase/code-sync"'
         in command
     )
     assert "--no-browser" in command
     assert "--no-restart" in command
+
+
+def test_device_id_parsing_v2_output() -> None:
+    text = (
+        "2026-07-10 16:08:01 INF Calculated device ID "
+        f"(device={SELF_ID} log.pkg=github)"
+    )
+    assert syncthing._device_id_from_output(text) == SELF_ID

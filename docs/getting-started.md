@@ -40,22 +40,26 @@ Optional:
 
 ## Install
 
-The preferred first-time setup path is the standalone installer:
+There are exactly two ways to install Openbase Coder:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/openbase-community/openbase-coder/main/cli/scripts/install.sh | sh
-openbase-coder setup
-```
+**Production: the Mac desktop app.** Download the Apple Silicon app from
+[Downloads](downloads.md) and open it. The app bundles the CLI runtime,
+activates it, and walks you through setup — see
+[Desktop App](desktop-app.md). If you prefer to run the underlying setup
+commands yourself in a terminal, follow
+[Manual Setup for the Desktop App](manual-installation.md); it is the same
+installation, operated by hand.
 
-For fully local speech-to-text and text-to-speech:
+After setup, for fully local speech-to-text and text-to-speech:
 
 ```bash
 openbase-coder setup --audio-provider local
 ```
 
-For source development, clone the workspace repo yourself and run its setup
-script from the workspace root. It syncs the sub-repos with `multi`, builds
-the console from source, and runs `openbase-coder setup` against your checkout:
+**Development: the workspace checkout.** Clone the workspace repo and run
+its setup script from the workspace root. It syncs the sub-repos with
+`multi`, builds the console from source, and runs `openbase-coder setup`
+against your checkout:
 
 ```bash
 git clone https://github.com/openbase-community/openbase-coder-workspace

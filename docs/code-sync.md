@@ -45,18 +45,54 @@ editing it.
 Commits made on either machine propagate through a small reconciler that runs
 every minute:
 
+- Every ordinary repository publishes a small `.openbase-repo.json` manifest
+  containing its active branch and commit. The file stays out of local Git
+  status but travels through code sync. It makes the checked-out
+  branch authoritative across machines: when one machine checks out another
+  branch, peers attach `HEAD` to that branch without rewriting the working
+  files that Syncthing already delivered.
+- If a repository's files arrive on a machine that has never cloned it, the
+  manifest bootstraps a machine-local `.git`, fetches the branch history from
+  the peer, and restores a safe credential-free `origin` URL when one was
+  available. No manual first clone is required.
 - When the peer committed and Syncthing has already delivered the resulting
   files, your local branch pointer is **fast-forwarded** to the same commit —
   status goes clean, nothing moves twice. This only happens when it is
   provably safe: no merge/rebase in progress, your head is an ancestor of the
   peer's, and your working tree already matches the peer's commit exactly.
-- When both machines committed different things, nothing happens
-  automatically: a **repo sync conflict** is recorded and surfaced in the
-  console and iOS app (like thread sync conflicts), with *Keep Local* /
-  *Use Remote* resolution. *Use Remote* safety-stashes your working tree
-  first, so nothing is lost.
+- When branch histories diverge, the synced manifest deterministically brings
+  both active branch pointers back to one history. A commit displaced by that
+  move is retained under `refs/openbase-code-sync/backups/` for recovery; it
+  is never discarded. A repo sync conflict remains visible only while safe
+  convergence is blocked (for example, by staged changes or an in-progress
+  rebase), and clears after the branch heads agree.
 - Uncommitted work needs no reconciliation at all — it syncs as files and
   simply shows as a dirty tree on both sides.
+
+The staging area, stashes, reflog, and in-progress Git operations remain
+machine-local. The reconciler pauses instead of changing a checkout with
+staged changes or an active merge/rebase/cherry-pick.
+
+Git **worktrees** under synced folders are first-class: the worktree's
+files sync like any files, and each machine attaches its own local git
+identity automatically (a small synced manifest tells the other machine
+which repository and branch to attach). Run git commands in a worktree on
+either computer; commits reconcile back through the same branch
+fast-forward machinery as any repository.
+
+Coding threads (Codex and Claude Code) also travel between your machines
+over the same channel: each device exports snapshots of recent threads and
+imports the other's automatically. Only threads active in the **last 15
+days** are exchanged — after a long gap between machines, older threads
+stay where they were created (they are never deleted, just not carried
+across). Working directories beneath the source device's home are translated
+to the same home-relative location on the receiving device (for example, a
+Mac home path becomes the analogous path under a Linux DevSpace home); paths
+outside a user home are preserved as recorded. A thread sync conflict is only
+raised when the two machines hold
+genuinely divergent transcripts; identical or append-only-extended copies
+sync silently, and a standing conflict clears itself once the two sides
+converge again.
 
 Machines fetch from each other directly over Tailscale (read-only git smart
 HTTP served by the local API with your own credentials); no GitHub round-trip
@@ -93,10 +129,11 @@ machine, the console shows an "add a second machine" nudge and
 
 ## Conflicts
 
-Two kinds of conflicts are surfaced, never auto-resolved:
+Two kinds of conflicts can be surfaced:
 
-- **Repo conflicts** — both machines committed divergent work on the same
-  branch (see above).
+- **Repo conflicts** — a divergent branch could not yet follow its repository
+  manifest safely. These self-clear after convergence; manual *Keep Local* /
+  *Use Remote* controls remain available when intervention is needed.
 - **File conflicts** — Syncthing's last-resort `*.sync-conflict-*` copies
   from truly simultaneous edits of one file. The reconciler finds and lists
   them so they are cleaned up deliberately instead of discovered by grep.

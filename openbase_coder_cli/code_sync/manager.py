@@ -197,12 +197,24 @@ def _service_definition():
     return find_service(CODE_SYNC_SERVICE_NAME)
 
 
+# Cross-device thread sync rides the code-sync transport (the thread-sync
+# exchange folder is a product-state sync folder), so mirroring devices
+# implies running both backends' device-sync services.
+COMPANION_SERVICE_NAMES = (
+    "codex-thread-device-sync",
+    "claude-thread-device-sync",
+)
+
+
 def install_and_start_service() -> None:
     from openbase_coder_cli.services.launchd import install_service
-    from openbase_coder_cli.services.registry import require_installation
+    from openbase_coder_cli.services.registry import find_service, require_installation
 
     try:
-        install_service(require_installation(), _service_definition())
+        installation = require_installation()
+        install_service(installation, _service_definition())
+        for name in COMPANION_SERVICE_NAMES:
+            install_service(installation, find_service(name))
     except click.ClickException as exc:
         raise CodeSyncError(str(exc)) from exc
 
@@ -220,8 +232,12 @@ def restart_service_if_installed() -> None:
 
 def stop_and_remove_service() -> bool:
     from openbase_coder_cli.services.launchd import remove_service
+    from openbase_coder_cli.services.registry import find_service
 
-    return remove_service(_service_definition())
+    removed = remove_service(_service_definition())
+    for name in COMPANION_SERVICE_NAMES:
+        remove_service(find_service(name))
+    return removed
 
 
 def enable_code_sync(
@@ -240,6 +256,7 @@ def enable_code_sync(
     from openbase_coder_cli.code_sync.install import ensure_syncthing_installed
 
     ensure_syncthing_installed()
+    ensure_product_state_folders(config_path)
     rendered = render_configuration(eligibility, config_path=config_path)
     set_code_sync_enabled(True, config_path)
     SYNC_VERSIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -284,6 +301,81 @@ def apply_settings_change(config_path: Path | None = None) -> dict[str, Any]:
     except CodeSyncError:
         pass  # The restart itself rescans; REST may not be back up yet.
     return {"applied": True, **rendered}
+
+
+def ensure_product_state_folders(config_path: Path | None = None) -> list[str]:
+    """Add the first-class product-state folders when missing.
+
+    Thread sync between devices and the Openbase-managed agent homes'
+    skills (codex AND claude) ride code sync automatically — they are not
+    something the user discovers and adds by hand.
+    """
+    from openbase_coder_cli.sync_config import (
+        PRODUCT_STATE_RELPATHS,
+        add_sync_folder,
+        sync_folders,
+    )
+
+    existing = {folder.relpath for folder in sync_folders(config_path)}
+    added: list[str] = []
+    for relpath in PRODUCT_STATE_RELPATHS:
+        if relpath in existing:
+            continue
+        (Path.home() / relpath).mkdir(parents=True, exist_ok=True)
+        add_sync_folder(relpath, config_path)
+        added.append(relpath)
+    return added
+
+
+def accept_pending_folders(config_path: Path | None = None) -> list[str]:
+    """Adopt folders a paired peer offered, making console adds bidirectional.
+
+    Folder configs are per-device, so a folder added through one machine's
+    console would otherwise sit unshared on the peer. Syncthing records the
+    peer's offer as a pending folder; adopt it when it is trustworthy:
+    the offer's label must validate as a home-relative path AND the offered
+    folder ID must equal the deterministic ID derived from that label —
+    which proves the offer came from a code-sync peer using the same
+    derivation, not an arbitrary share.
+    """
+    from openbase_coder_cli.sync_config import (
+        add_sync_folder,
+        folder_id_for_relpath,
+        sync_folders,
+        validate_relpath,
+    )
+
+    try:
+        pending = SyncthingClient().pending_folders()
+    except CodeSyncError:
+        return []
+    if not pending:
+        return []
+
+    known = {folder.folder_id for folder in sync_folders(config_path)}
+    accepted: list[str] = []
+    for folder_id, offer in pending.items():
+        if folder_id in known:
+            continue  # Configured already; share completes on next render.
+        offered_by = offer.get("offeredBy") if isinstance(offer, dict) else None
+        if not isinstance(offered_by, dict):
+            continue
+        for meta in offered_by.values():
+            label = meta.get("label") if isinstance(meta, dict) else None
+            if not isinstance(label, str) or not label:
+                continue
+            try:
+                relpath = validate_relpath(label)
+            except ValueError:
+                continue
+            if folder_id_for_relpath(relpath) != folder_id:
+                continue
+            add_sync_folder(relpath, config_path)
+            accepted.append(relpath)
+            break
+    if accepted:
+        apply_settings_change(config_path)
+    return accepted
 
 
 def versions_usage_bytes(versions_dir: Path | None = None) -> int:

@@ -3,8 +3,9 @@
 The bundled ``openbase-onboarding`` skill instructs the reading agent to
 create ``~/.openbase/onboarding-skill-read`` as soon as the skill is read,
 even if onboarding is not completed. Until that marker exists, every user
-message bound for the dispatcher gets a short note appended prompting the
-agent to offer onboarding via that skill.
+message bound for the dispatcher gets a note appended requiring the agent
+to ask the user to complete or skip onboarding; skipping creates the same
+marker directly.
 """
 
 from __future__ import annotations
@@ -12,12 +13,13 @@ from __future__ import annotations
 from openbase_coder_cli.paths import ONBOARDING_SKILL_READ_MARKER_PATH
 
 ONBOARDING_REMINDER = (
-    "[Openbase system note: this user has not been onboarded yet — the "
-    "openbase-onboarding skill has never been read on this machine. Unless "
-    "the user's message clearly requires otherwise, offer to walk them "
-    "through setup now, and if they agree, read and follow the "
-    "openbase-onboarding skill. Reading that skill creates the marker file "
-    "that removes this note from future messages.]"
+    "[Openbase system note: onboarding is pending on this machine — the "
+    "openbase-onboarding skill has never been read here. To remove this note "
+    "from future messages, read and follow the openbase-onboarding skill now; "
+    "its first step records that it was read even if the user skips the rest "
+    "of onboarding. Act on this in this reply: after addressing the user's "
+    "message, use the skill to ask them to choose between completing onboarding "
+    "now and skipping it. Do not ignore this note or postpone the question.]"
 )
 
 

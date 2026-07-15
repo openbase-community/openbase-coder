@@ -419,6 +419,44 @@ def test_livekit_room_token_blocks_openbase_cloud_audio_without_subscription(
     assert response.data["code"] == "subscription_required"
 
 
+def test_livekit_room_token_includes_proven_cloud_workspace_identity(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        views._livekit,
+        "_livekit_client_token_credentials",
+        lambda: ("livekit-client-key", "livekit-client-secret"),
+    )
+    monkeypatch.setattr(
+        views._livekit,
+        "ensure_openbase_cloud_audio_subscription",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        views._livekit,
+        "cloud_workspace_id",
+        lambda: "abc123def456",
+    )
+
+    response = views.livekit_room_token(
+        _jwt_authenticated_request(
+            "POST",
+            "/api/livekit-room-token/",
+            {
+                "room_name": "room-test",
+                "livekit_dispatch_agent_name": "livekit-agent",
+            },
+        )
+    )
+
+    assert response.status_code == 200
+    assert response.data["room_name"] == "room-test"
+    assert response.data["workspace"] == {
+        "kind": "openbase_cloud",
+        "id": "abc123def456",
+    }
+
+
 def test_apple_music_playback_entitlement_reports_subscription_required(
     monkeypatch,
 ) -> None:

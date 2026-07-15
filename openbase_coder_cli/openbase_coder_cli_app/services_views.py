@@ -16,6 +16,13 @@ from rest_framework.response import Response
 from openbase_coder_cli.codex_home_instructions import (
     refresh_openbase_instruction_files_from_installation,
 )
+from openbase_coder_cli.mcp.claude_thread_sync import (
+    ClaudeConflictResolutionError,
+    claude_thread_snapshot_conflicts_payload,
+    claude_thread_snapshot_status,
+    claude_thread_sync_conflicts_payload,
+    resolve_claude_snapshot_conflict,
+)
 from openbase_coder_cli.mcp.thread_exchange import (
     ThreadConflictResolutionError,
     resolve_thread_snapshot_conflict,
@@ -55,6 +62,7 @@ from openbase_coder_cli.services.openbase_services import (
     schedule_openbase_restart_payload,
 )
 from openbase_coder_cli.services.restart import restart_target_names
+from openbase_coder_cli.services.selection import configured_coding_backend
 from openbase_coder_cli.services.tailscale_serve import tailscale_serve_health
 
 logger = logging.getLogger(__name__)
@@ -80,6 +88,11 @@ class OpenbaseRestartSerializer(serializers.Serializer):
 class ThreadSyncConflictResolutionSerializer(serializers.Serializer):
     action = serializers.ChoiceField(
         choices=["accept_local", "accept_remote_latest"],
+    )
+    backend = serializers.ChoiceField(
+        choices=["codex", "claude"],
+        required=False,
+        default="codex",
     )
 
 
@@ -253,37 +266,71 @@ def openbase_services_list(request):
     return Response(list_openbase_services_payload())
 
 
+def _with_conflict_backend(payload: dict, backend: str) -> dict:
+    """Tag each conflict entry with its backend without touching other fields."""
+    conflicts = payload.get("conflicts")
+    if not isinstance(conflicts, list):
+        return payload
+    return {
+        **payload,
+        "conflicts": [
+            {**conflict, "backend": backend} if isinstance(conflict, dict) else conflict
+            for conflict in conflicts
+        ],
+    }
+
+
 @api_view(["GET"])
 def thread_device_sync_status(request):
-    """Show cross-device Codex thread snapshot sync status."""
-    return Response(thread_snapshot_status())
+    """Show cross-device thread snapshot sync status for both backends."""
+    return Response(
+        {
+            **_with_conflict_backend(thread_snapshot_status(), "codex"),
+            "claude": _with_conflict_backend(claude_thread_snapshot_status(), "claude"),
+        }
+    )
 
 
 @api_view(["GET"])
 def thread_device_sync_conflicts(request):
-    """Show unresolved cross-device Codex thread snapshot sync conflicts."""
-    return Response(thread_snapshot_conflicts_payload())
+    """Show unresolved cross-device thread snapshot sync conflicts for both backends."""
+    return Response(
+        {
+            **_with_conflict_backend(thread_snapshot_conflicts_payload(), "codex"),
+            "claude": _with_conflict_backend(
+                claude_thread_snapshot_conflicts_payload(), "claude"
+            ),
+        }
+    )
 
 
 @api_view(["GET"])
 def thread_sync_conflicts(request):
-    """Show unresolved Codex thread sync conflicts across homes and devices."""
-    return Response(thread_sync_conflicts_payload())
+    """Show unresolved thread sync conflicts across homes and devices for both backends."""
+    return Response(
+        {
+            **_with_conflict_backend(thread_sync_conflicts_payload(), "codex"),
+            "claude": _with_conflict_backend(
+                claude_thread_sync_conflicts_payload(), "claude"
+            ),
+        }
+    )
 
 
 @api_view(["POST"])
 def thread_device_sync_conflict_resolve(request, thread_id):
-    """Resolve one cross-device Codex thread snapshot sync conflict."""
+    """Resolve one cross-device thread snapshot sync conflict."""
     serializer = ThreadSyncConflictResolutionSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+    action = serializer.validated_data["action"]
+    backend = serializer.validated_data["backend"]
     try:
-        return Response(
-            resolve_thread_snapshot_conflict(
-                thread_id,
-                action=serializer.validated_data["action"],
-            )
-        )
-    except ThreadConflictResolutionError as exc:
+        if backend == "claude":
+            payload = resolve_claude_snapshot_conflict(thread_id, action=action)
+        else:
+            payload = resolve_thread_snapshot_conflict(thread_id, action=action)
+        return Response(payload)
+    except (ClaudeConflictResolutionError, ThreadConflictResolutionError) as exc:
         return Response(
             {"error": str(exc)},
             status=status.HTTP_400_BAD_REQUEST,
@@ -389,13 +436,26 @@ def service_status(request):
         },
         "tailscale": {"name": "Tailscale", "port": None, "optional": False},
     }
+    # Backend-scoped services (e.g. the Codex App Server on the claude_code
+    # backend) are intentionally not installed, so reporting them would raise
+    # a false "stopped" warning in the apps.
+    coding_backend = configured_coding_backend()
+    codex_app_server = next(
+        (svc for svc in SERVICES if svc.name == "codex-app-server"), None
+    )
+    if codex_app_server is not None and not codex_app_server.supports_backend(
+        coding_backend
+    ):
+        del services["codex_app_server"]
     for service_name in (
         "codex-thread-sync",
         "codex-thread-device-sync",
+        "claude-thread-sync",
+        "claude-thread-device-sync",
         "openbase-routines",
     ):
         service = next((svc for svc in SERVICES if svc.name == service_name), None)
-        if not service:
+        if not service or not service.supports_backend(coding_backend):
             continue
         status_payload = launchctl_status(service)
         services[service_name.replace("-", "_")] = {
