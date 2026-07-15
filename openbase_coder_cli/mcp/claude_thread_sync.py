@@ -47,6 +47,7 @@ from .thread_sync_common import (
     run_snapshot_import,
     super_agents_state_db_path,
     sync_cutoff_ms,
+    translate_home_path,
     write_json_atomic,
     write_scoped_ledger,
 )
@@ -229,6 +230,7 @@ def sync_claude_thread_snapshots_once(
     super_agents_db_path: Path | None = None,
     stability_delay_seconds: float = 0.2,
     max_age_days: int | None = DEFAULT_SYNC_MAX_AGE_DAYS,
+    user_home: Path | None = None,
 ) -> dict[str, list[ClaudeThreadSnapshotResult]]:
     exports = export_claude_thread_snapshots(
         openbase_home=openbase_home,
@@ -238,6 +240,7 @@ def sync_claude_thread_snapshots_once(
         super_agents_db_path=super_agents_db_path,
         stability_delay_seconds=stability_delay_seconds,
         max_age_days=max_age_days,
+        source_user_home=user_home,
     )
     imports = import_claude_thread_snapshots(
         openbase_home=openbase_home,
@@ -245,6 +248,7 @@ def sync_claude_thread_snapshots_once(
         device_identity_path=device_identity_path,
         ledger_path=ledger_path,
         super_agents_db_path=super_agents_db_path,
+        target_user_home=user_home,
     )
     return {"exports": exports, "imports": imports}
 
@@ -259,6 +263,7 @@ def export_claude_thread_snapshots(
     stability_delay_seconds: float = 0.2,
     max_age_days: int | None = DEFAULT_SYNC_MAX_AGE_DAYS,
     active_session_ids: set[str] | None = None,
+    source_user_home: Path | None = None,
 ) -> list[ClaudeThreadSnapshotResult]:
     openbase_home = openbase_home.expanduser()
     openbase_home.mkdir(parents=True, exist_ok=True)
@@ -279,6 +284,7 @@ def export_claude_thread_snapshots(
             openbase_home=openbase_home,
             active_ids=active_ids,
             cutoff_ms=sync_cutoff_ms(max_age_days),
+            source_user_home=source_user_home or Path.home(),
         ),
         device_id=identity.device_id,
         ledger=ledger,
@@ -297,6 +303,7 @@ def _export_candidates(
     openbase_home: Path,
     active_ids: set[str],
     cutoff_ms: int | None,
+    source_user_home: Path,
 ) -> Iterator[SnapshotExportCandidate]:
     for snapshot in sorted(
         sessions.values(), key=lambda item: item.updated_at_ms, reverse=True
@@ -321,6 +328,7 @@ def _export_candidates(
                 openbase_home=openbase_home,
                 snapshot=snapshot,
                 fingerprint_id=fingerprint_id,
+                source_user_home=source_user_home,
             ),
         )
 
@@ -332,6 +340,7 @@ def _device_snapshot_writer(
     openbase_home: Path,
     snapshot: ClaudeSessionSnapshot,
     fingerprint_id: str,
+    source_user_home: Path,
 ) -> Callable[[str | None], Path]:
     def write(parent_fingerprint: str | None) -> Path:
         return _write_device_snapshot(
@@ -341,6 +350,7 @@ def _device_snapshot_writer(
             snapshot=snapshot,
             fingerprint_id=fingerprint_id,
             parent_fingerprint=parent_fingerprint,
+            source_user_home=source_user_home,
         )
 
     return write
@@ -353,9 +363,12 @@ def import_claude_thread_snapshots(
     device_identity_path: Path = DEFAULT_DEVICE_IDENTITY_PATH,
     ledger_path: Path = DEFAULT_DEVICE_LEDGER_PATH,
     super_agents_db_path: Path | None = None,
+    target_user_home: Path | None = None,
 ) -> list[ClaudeThreadSnapshotResult]:
     openbase_home = openbase_home.expanduser()
     openbase_home.mkdir(parents=True, exist_ok=True)
+    target_home = target_user_home or Path.home()
+    _translate_super_agent_session_cwds(super_agents_db_path, target_home)
     identity = get_or_create_device_identity(device_identity_path)
     ledger = _read_device_ledger(ledger_path)
     results = run_snapshot_import(
@@ -366,6 +379,7 @@ def import_claude_thread_snapshots(
             openbase_home=openbase_home,
             active_ids=_active_claude_session_ids(super_agents_db_path),
             super_agents_db_path=super_agents_db_path,
+            target_user_home=target_home,
         ),
         result_factory=ClaudeThreadSnapshotResult,
     )
@@ -378,6 +392,7 @@ def _device_import_source(
     openbase_home: Path,
     active_ids: set[str],
     super_agents_db_path: Path | None,
+    target_user_home: Path,
 ) -> SnapshotImportSource:
     def load_local(metadata: dict[str, Any]) -> LocalSnapshotState:
         local_snapshot = _read_session_snapshot(
@@ -428,6 +443,7 @@ def _device_import_source(
             _backfill_openbase_session_metadata(
                 imported_snapshot,
                 db_path=super_agents_db_path,
+                cwd_override=_translated_metadata_cwd(metadata, target_user_home),
             )
         return None
 
@@ -681,6 +697,7 @@ def resolve_claude_snapshot_conflict(
     device_identity_path: Path = DEFAULT_DEVICE_IDENTITY_PATH,
     ledger_path: Path = DEFAULT_DEVICE_LEDGER_PATH,
     super_agents_db_path: Path | None = None,
+    target_user_home: Path | None = None,
 ) -> dict[str, Any]:
     """Resolve one cross-device Claude session snapshot sync conflict."""
     if action not in {"accept_local", "accept_remote_latest"}:
@@ -716,6 +733,7 @@ def resolve_claude_snapshot_conflict(
         raise ClaudeConflictResolutionError("source_snapshots_not_found")
 
     if action == "accept_remote_latest":
+        target_home = target_user_home or Path.home()
         latest = _latest_snapshot_record(snapshots)
         if latest is None:
             raise ClaudeConflictResolutionError("source_snapshots_not_found")
@@ -737,6 +755,7 @@ def resolve_claude_snapshot_conflict(
             _backfill_openbase_session_metadata(
                 imported_snapshot,
                 db_path=super_agents_db_path,
+                cwd_override=_translated_metadata_cwd(latest["metadata"], target_home),
             )
         resolved_fingerprint = _string(latest["metadata"].get("fingerprint"))
         for snapshot in snapshots:
@@ -1402,6 +1421,7 @@ def _write_device_snapshot(
     snapshot: ClaudeSessionSnapshot,
     fingerprint_id: str,
     parent_fingerprint: str | None,
+    source_user_home: Path,
 ) -> Path:
     target_dir = (
         exchange_dir
@@ -1433,6 +1453,7 @@ def _write_device_snapshot(
             fingerprint_id=fingerprint_id,
             parent_fingerprint=parent_fingerprint,
             copied_files=copied_files,
+            source_user_home=source_user_home,
         )
         (tmp_dir / "metadata.json").write_text(
             json.dumps(metadata, indent=2, sort_keys=True) + "\n",
@@ -1452,11 +1473,13 @@ def _device_snapshot_metadata(
     fingerprint_id: str,
     parent_fingerprint: str | None,
     copied_files: list[str],
+    source_user_home: Path,
 ) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "source_device_id": identity.device_id,
         "source_device_name": identity.device_name,
+        "source_user_home": str(source_user_home),
         "session_id": snapshot.session_id,
         "fingerprint": fingerprint_id,
         "parent_fingerprint": parent_fingerprint,
@@ -1553,10 +1576,50 @@ def _target_root_path(source_root: Path, source_home: Path, target_home: Path) -
     return target_home / source_root.relative_to(source_home)
 
 
+def _translated_metadata_cwd(
+    metadata: dict[str, Any], target_user_home: Path
+) -> str | None:
+    source_value = _string(metadata.get("source_user_home"))
+    source_home = Path(source_value) if source_value else None
+    if source_home is not None and not source_home.is_absolute():
+        source_home = None
+    return translate_home_path(
+        _string(metadata.get("cwd")),
+        source_home=source_home,
+        target_home=target_user_home,
+    )
+
+
+def _translate_super_agent_session_cwds(
+    db_path: Path | None, target_user_home: Path
+) -> None:
+    """Migrate foreign-home cwd values retained by older thread imports."""
+    resolved_db = db_path or _super_agents_db_path()
+    if not resolved_db.is_file():
+        return
+    with sqlite3.connect(resolved_db) as conn:
+        conn.row_factory = sqlite3.Row
+        has_sessions = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'"
+        ).fetchone()
+        if has_sessions is None:
+            return
+        rows = conn.execute("SELECT id, cwd FROM sessions").fetchall()
+        for row in rows:
+            translated = translate_home_path(row["cwd"], target_home=target_user_home)
+            if translated and translated != row["cwd"]:
+                conn.execute(
+                    "UPDATE sessions SET cwd = ? WHERE id = ?",
+                    (translated, row["id"]),
+                )
+        conn.commit()
+
+
 def _backfill_openbase_session_metadata(
     snapshot: ClaudeSessionSnapshot,
     *,
     db_path: Path | None,
+    cwd_override: str | None = None,
 ) -> None:
     resolved_db = db_path or _super_agents_db_path()
     resolved_db.parent.mkdir(parents=True, exist_ok=True)
@@ -1582,7 +1645,7 @@ def _backfill_openbase_session_metadata(
                 (
                     session_id,
                     name,
-                    snapshot.cwd or str(Path.home()),
+                    cwd_override or snapshot.cwd or str(Path.home()),
                     json.dumps(["claude", "--resume", snapshot.session_id]),
                     "waiting",
                     _session_observed_state(snapshot),
@@ -1601,8 +1664,9 @@ def _backfill_openbase_session_metadata(
             and existing["last_useful_message"] != snapshot.latest_assistant_message
         ):
             updates["last_useful_message"] = snapshot.latest_assistant_message
-        if not existing["cwd"] and snapshot.cwd:
-            updates["cwd"] = snapshot.cwd
+        desired_cwd = cwd_override or snapshot.cwd
+        if desired_cwd and existing["cwd"] != desired_cwd:
+            updates["cwd"] = desired_cwd
         if _should_refresh_observed_state(existing["last_observed_state"]):
             updates["last_observed_state"] = _session_observed_state(snapshot)
         if not updates:

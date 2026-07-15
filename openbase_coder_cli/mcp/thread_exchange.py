@@ -57,6 +57,7 @@ from .thread_sync_common import (
     run_snapshot_export,
     run_snapshot_import,
     sync_cutoff_ms,
+    translate_home_path,
     write_json_atomic,
 )
 from .thread_sync_common import (
@@ -123,6 +124,7 @@ def sync_thread_snapshots_once(
     ledger_path: Path = DEFAULT_LEDGER_PATH,
     stability_delay_seconds: float = 0.2,
     max_age_days: int | None = DEFAULT_SYNC_MAX_AGE_DAYS,
+    user_home: Path | None = None,
 ) -> dict[str, list[ThreadSnapshotResult]]:
     exports = export_thread_snapshots(
         codex_home=codex_home,
@@ -131,12 +133,14 @@ def sync_thread_snapshots_once(
         ledger_path=ledger_path,
         stability_delay_seconds=stability_delay_seconds,
         max_age_days=max_age_days,
+        source_user_home=user_home,
     )
     imports = import_thread_snapshots(
         codex_home=codex_home,
         exchange_dir=exchange_dir,
         device_identity_path=device_identity_path,
         ledger_path=ledger_path,
+        target_user_home=user_home,
     )
     return {"exports": exports, "imports": imports}
 
@@ -150,6 +154,7 @@ def export_thread_snapshots(
     stability_delay_seconds: float = 0.2,
     max_age_days: int | None = DEFAULT_SYNC_MAX_AGE_DAYS,
     active_thread_ids: set[str] | None = None,
+    source_user_home: Path | None = None,
 ) -> list[ThreadSnapshotResult]:
     state_db = codex_home / STATE_DB_NAME
     if not state_db.exists():
@@ -170,6 +175,7 @@ def export_thread_snapshots(
                 codex_home / SESSION_INDEX_NAME
             ),
             stability_delay_seconds=stability_delay_seconds,
+            source_user_home=source_user_home or Path.home(),
         ),
         device_id=identity.device_id,
         ledger=ledger,
@@ -190,6 +196,7 @@ def _export_candidates(
     cutoff_ms: int | None,
     index_entries: dict[str, dict[str, Any]],
     stability_delay_seconds: float,
+    source_user_home: Path,
 ) -> Iterator[SnapshotExportCandidate]:
     for row in _thread_rows(state_db):
         thread_id = _string(row.get("id"))
@@ -231,6 +238,7 @@ def _export_candidates(
                 fingerprint=fingerprint,
                 fingerprint_id=fingerprint_id,
                 index_entry=index_entries.get(thread_id),
+                source_user_home=source_user_home,
             ),
         )
 
@@ -246,6 +254,7 @@ def _snapshot_writer(
     fingerprint: dict[str, Any],
     fingerprint_id: str,
     index_entry: dict[str, Any] | None,
+    source_user_home: Path,
 ) -> Callable[[str | None], Path]:
     def write(parent_fingerprint: str | None) -> Path:
         return _write_snapshot(
@@ -259,6 +268,7 @@ def _snapshot_writer(
             parent_fingerprint=parent_fingerprint,
             index_entry=index_entry,
             dynamic_tools=_thread_dynamic_tools(state_db, row["id"]),
+            source_user_home=source_user_home,
         )
 
     return write
@@ -270,18 +280,25 @@ def import_thread_snapshots(
     exchange_dir: Path = DEFAULT_EXCHANGE_DIR,
     device_identity_path: Path = DEFAULT_DEVICE_IDENTITY_PATH,
     ledger_path: Path = DEFAULT_LEDGER_PATH,
+    target_user_home: Path | None = None,
 ) -> list[ThreadSnapshotResult]:
     state_db = codex_home / STATE_DB_NAME
     if not state_db.exists():
         raise ThreadTransferError(f"Codex state database not found: {state_db}")
 
+    target_home = target_user_home or Path.home()
+    _translate_existing_thread_cwds(state_db, target_home)
     identity = get_or_create_device_identity(device_identity_path)
     ledger = _read_exchange_ledger(ledger_path)
     results = run_snapshot_import(
         exchange_dir=exchange_dir,
         device_id=identity.device_id,
         ledger=ledger,
-        source=_exchange_import_source(state_db=state_db, codex_home=codex_home),
+        source=_exchange_import_source(
+            state_db=state_db,
+            codex_home=codex_home,
+            target_user_home=target_home,
+        ),
         result_factory=ThreadSnapshotResult,
     )
     _write_exchange_ledger(ledger_path, ledger)
@@ -292,6 +309,7 @@ def _exchange_import_source(
     *,
     state_db: Path,
     codex_home: Path,
+    target_user_home: Path,
 ) -> SnapshotImportSource:
     def load_local(metadata: dict[str, Any]) -> LocalSnapshotState:
         thread_id = metadata["thread_id"]
@@ -322,6 +340,7 @@ def _exchange_import_source(
             metadata=metadata,
             codex_home=codex_home,
             overwrite=local.exists,
+            target_user_home=target_user_home,
         )
         return None
 
@@ -560,6 +579,7 @@ def resolve_thread_snapshot_conflict(
     exchange_dir: Path = DEFAULT_EXCHANGE_DIR,
     device_identity_path: Path = DEFAULT_DEVICE_IDENTITY_PATH,
     ledger_path: Path = DEFAULT_LEDGER_PATH,
+    target_user_home: Path | None = None,
 ) -> dict[str, Any]:
     if action not in {"accept_local", "accept_remote_latest"}:
         raise ThreadConflictResolutionError("unsupported_resolution_action")
@@ -601,6 +621,7 @@ def resolve_thread_snapshot_conflict(
             metadata=latest["metadata"],
             codex_home=codex_home,
             overwrite=local_row is not None,
+            target_user_home=target_user_home or Path.home(),
         )
         resolved_fingerprint = _string(latest["metadata"].get("fingerprint"))
         for snapshot in snapshots:
@@ -658,6 +679,7 @@ def _write_snapshot(
     parent_fingerprint: str | None,
     index_entry: dict[str, Any] | None,
     dynamic_tools: list[dict[str, Any]],
+    source_user_home: Path,
 ) -> Path:
     thread_id = _string(row.get("id"))
     if not thread_id:
@@ -686,6 +708,7 @@ def _write_snapshot(
             parent_fingerprint=parent_fingerprint,
             index_entry=index_entry,
             dynamic_tools=dynamic_tools,
+            source_user_home=source_user_home,
         )
         (tmp_dir / "metadata.json").write_text(
             json.dumps(metadata, indent=2, sort_keys=True) + "\n",
@@ -709,6 +732,7 @@ def _snapshot_metadata(
     parent_fingerprint: str | None,
     index_entry: dict[str, Any] | None,
     dynamic_tools: list[dict[str, Any]],
+    source_user_home: Path,
 ) -> dict[str, Any]:
     thread_row = dict(row)
     thread_row.pop("rollout_path", None)
@@ -720,6 +744,7 @@ def _snapshot_metadata(
         "schema_version": SCHEMA_VERSION,
         "source_device_id": identity.device_id,
         "source_device_name": identity.device_name,
+        "source_user_home": str(source_user_home),
         "thread_id": row["id"],
         "fingerprint": fingerprint_id,
         "parent_fingerprint": parent_fingerprint,
@@ -768,6 +793,7 @@ def _import_snapshot_into_home(
     metadata: dict[str, Any],
     codex_home: Path,
     overwrite: bool,
+    target_user_home: Path,
 ) -> None:
     thread_id = metadata["thread_id"]
     relative_path = Path(_string(metadata.get("rollout_relative_path")) or "sessions")
@@ -799,6 +825,7 @@ def _import_snapshot_into_home(
             metadata=metadata,
             target_rollout=target_rollout,
             overwrite=overwrite,
+            target_user_home=target_user_home,
         )
     except Exception:
         staged_rollout.unlink(missing_ok=True)
@@ -830,6 +857,33 @@ def _restore_rollout_backup(
         target_rollout.unlink(missing_ok=True)
 
 
+def _snapshot_source_user_home(metadata: dict[str, Any]) -> Path | None:
+    value = _string(metadata.get("source_user_home"))
+    if not value:
+        return None
+    path = Path(value)
+    return path if path.is_absolute() else None
+
+
+def _translate_existing_thread_cwds(state_db: Path, target_user_home: Path) -> None:
+    """Migrate previously imported foreign-home cwd values in place."""
+    with closing(_connect(state_db)) as conn:
+        conn.row_factory = sqlite3.Row
+        if not _has_table(conn, "threads") or "cwd" not in _table_columns(
+            conn, "threads"
+        ):
+            return
+        rows = conn.execute("SELECT id, cwd FROM threads").fetchall()
+        for row in rows:
+            translated = translate_home_path(row["cwd"], target_home=target_user_home)
+            if translated and translated != row["cwd"]:
+                conn.execute(
+                    "UPDATE threads SET cwd = ? WHERE id = ?",
+                    (translated, row["id"]),
+                )
+        conn.commit()
+
+
 def _apply_snapshot_db_state(
     *,
     codex_home: Path,
@@ -837,9 +891,19 @@ def _apply_snapshot_db_state(
     metadata: dict[str, Any],
     target_rollout: Path,
     overwrite: bool,
+    target_user_home: Path,
 ) -> None:
     thread_row = metadata.get("thread_row")
     thread_row = thread_row if isinstance(thread_row, dict) else {}
+    thread_row = dict(thread_row)
+    source_user_home = _snapshot_source_user_home(metadata)
+    translated_cwd = translate_home_path(
+        _string(thread_row.get("cwd")),
+        source_home=source_user_home,
+        target_home=target_user_home,
+    )
+    if translated_cwd is not None:
+        thread_row["cwd"] = translated_cwd
     dynamic_tools = metadata.get("dynamic_tools")
     dynamic_tools = dynamic_tools if isinstance(dynamic_tools, list) else []
     with closing(_connect(codex_home / STATE_DB_NAME)) as conn:

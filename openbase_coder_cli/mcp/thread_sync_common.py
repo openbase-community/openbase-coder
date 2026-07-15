@@ -25,6 +25,43 @@ DEFAULT_SUPER_AGENTS_STORE_HOME = (
 SUPER_AGENTS_STORE_HOME_ENV = "SUPER_AGENTS_CLAUDE_CODE_HOME"
 
 
+def translate_home_path(
+    value: str | None,
+    *,
+    target_home: Path | None = None,
+    source_home: Path | None = None,
+) -> str | None:
+    """Translate a source device's home-relative path onto this device.
+
+    Older snapshots did not record ``source_home``, so recognize conventional
+    macOS and Linux home roots as a backward-compatible fallback. Paths outside
+    a recognized/source home are deliberately preserved even when absent.
+    """
+    if not value:
+        return value
+    target = target_home or Path.home()
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        return value
+    source = source_home or _recognized_user_home(path)
+    if source is None:
+        return value
+    try:
+        relative = path.relative_to(source)
+    except ValueError:
+        return value
+    return str(target / relative)
+
+
+def _recognized_user_home(path: Path) -> Path | None:
+    parts = path.parts
+    if len(parts) >= 3 and parts[1] in {"Users", "home"}:
+        return Path(*parts[:3])
+    if len(parts) >= 2 and parts[1] == "root":
+        return Path("/root")
+    return None
+
+
 def super_agents_state_db_path() -> Path:
     configured = os.environ.get(SUPER_AGENTS_STORE_HOME_ENV)
     home = (

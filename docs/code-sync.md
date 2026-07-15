@@ -85,7 +85,11 @@ over the same channel: each device exports snapshots of recent threads and
 imports the other's automatically. Only threads active in the **last 15
 days** are exchanged — after a long gap between machines, older threads
 stay where they were created (they are never deleted, just not carried
-across). A thread sync conflict is only raised when the two machines hold
+across). Working directories beneath the source device's home are translated
+to the same home-relative location on the receiving device (for example, a
+Mac home path becomes the analogous path under a Linux DevSpace home); paths
+outside a user home are preserved as recorded. A thread sync conflict is only
+raised when the two machines hold
 genuinely divergent transcripts; identical or append-only-extended copies
 sync silently, and a standing conflict clears itself once the two sides
 converge again.

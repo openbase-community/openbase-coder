@@ -539,9 +539,11 @@ def test_import_claude_thread_snapshot_creates_session_and_backfills_metadata(
     exchange_dir = tmp_path / "exchange"
     db_path = tmp_path / "target-state.sqlite3"
     session_id = "1416448e-c428-455b-bceb-5ac34da8ee4e"
+    source_cwd = "/Users/gabe/Projects/openbase/code/openbase-coder-workspace"
+    target_cwd = "/home/ubuntu/Projects/openbase/code/openbase-coder-workspace"
     _write_session(
         source_home,
-        "/tmp/project",
+        source_cwd,
         session_id,
         user_text="Build cross device",
         assistant_text="Cross device done.",
@@ -554,6 +556,7 @@ def test_import_claude_thread_snapshot_creates_session_and_backfills_metadata(
         super_agents_db_path=tmp_path / "source-state.sqlite3",
         stability_delay_seconds=0,
         max_age_days=None,
+        source_user_home=Path("/Users/gabe"),
     )
 
     results = import_claude_thread_snapshots(
@@ -562,16 +565,56 @@ def test_import_claude_thread_snapshot_creates_session_and_backfills_metadata(
         device_identity_path=tmp_path / "target-device.json",
         ledger_path=tmp_path / "target-ledger.json",
         super_agents_db_path=db_path,
+        target_user_home=Path("/home/ubuntu"),
     )
 
     assert results[0].status == "imported"
-    target_session = _session_path(target_home, "/tmp/project", session_id)
+    target_session = _session_path(target_home, source_cwd, session_id)
     assert target_session.exists()
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
-            "select name, backend_session_id, last_useful_message from sessions"
+            "select name, backend_session_id, last_useful_message, cwd from sessions"
         ).fetchone()
-    assert row == ("Build cross device", session_id, "Cross device done.")
+    assert row == (
+        "Build cross device",
+        session_id,
+        "Cross device done.",
+        target_cwd,
+    )
+
+
+def test_import_claude_snapshots_migrates_existing_foreign_home_cwd(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "state.sqlite3"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            create table sessions (
+                id text primary key,
+                cwd text not null
+            )
+            """
+        )
+        conn.execute(
+            "insert into sessions (id, cwd) values (?, ?)",
+            ("session-1", "/Users/gabe/Projects/example"),
+        )
+
+    import_claude_thread_snapshots(
+        openbase_home=tmp_path / "openbase-home",
+        exchange_dir=tmp_path / "empty-exchange",
+        device_identity_path=tmp_path / "device.json",
+        ledger_path=tmp_path / "ledger.json",
+        super_agents_db_path=db_path,
+        target_user_home=Path("/home/ubuntu"),
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        cwd = conn.execute(
+            "select cwd from sessions where id = ?", ("session-1",)
+        ).fetchone()[0]
+    assert cwd == "/home/ubuntu/Projects/example"
 
 
 def test_import_claude_thread_snapshot_is_idempotent(tmp_path: Path) -> None:

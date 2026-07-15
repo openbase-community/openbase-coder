@@ -68,6 +68,7 @@ def _insert_thread(
     title: str,
     updated_at: int,
     terminal_message: str = "done",
+    cwd: str = "/tmp/project",
 ) -> Path:
     rollout_path = (
         home
@@ -116,7 +117,7 @@ def _insert_thread(
                 updated_at,
                 "cli",
                 "openai",
-                "/tmp/project",
+                cwd,
                 title,
                 "danger-full-access",
                 "never",
@@ -245,6 +246,72 @@ def test_import_snapshot_creates_local_thread_state(tmp_path: Path) -> None:
         (target_home / "session_index.jsonl").read_text(encoding="utf-8").splitlines()
     )
     assert json.loads(index_lines[-1])["thread_name"] == "Indexed title"
+
+
+def test_import_snapshot_translates_source_home_cwd(tmp_path: Path) -> None:
+    source_home = tmp_path / "source-codex"
+    target_home = tmp_path / "target-codex"
+    exchange_dir = tmp_path / "exchange"
+    source_user_home = Path("/Users/gabe")
+    target_user_home = Path("/home/ubuntu")
+    _create_state_db(source_home / "state_5.sqlite")
+    _create_state_db(target_home / "state_5.sqlite")
+    _insert_thread(
+        source_home,
+        "thread-1",
+        title="Thread title",
+        updated_at=20,
+        cwd="/Users/gabe/Projects/openbase/code/openbase-coder-workspace",
+    )
+    export_thread_snapshots(
+        codex_home=source_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "source-device.json",
+        ledger_path=tmp_path / "source-ledger.json",
+        stability_delay_seconds=0,
+        max_age_days=None,
+        source_user_home=source_user_home,
+    )
+
+    import_thread_snapshots(
+        codex_home=target_home,
+        exchange_dir=exchange_dir,
+        device_identity_path=tmp_path / "target-device.json",
+        ledger_path=tmp_path / "target-ledger.json",
+        target_user_home=target_user_home,
+    )
+
+    with sqlite3.connect(target_home / "state_5.sqlite") as conn:
+        cwd = conn.execute(
+            "SELECT cwd FROM threads WHERE id = ?", ("thread-1",)
+        ).fetchone()[0]
+    assert cwd == "/home/ubuntu/Projects/openbase/code/openbase-coder-workspace"
+
+
+def test_import_migrates_existing_foreign_home_cwd(tmp_path: Path) -> None:
+    codex_home = tmp_path / "codex"
+    _create_state_db(codex_home / "state_5.sqlite")
+    _insert_thread(
+        codex_home,
+        "thread-1",
+        title="Thread title",
+        updated_at=20,
+        cwd="/Users/gabe/Projects/example",
+    )
+
+    import_thread_snapshots(
+        codex_home=codex_home,
+        exchange_dir=tmp_path / "empty-exchange",
+        device_identity_path=tmp_path / "device.json",
+        ledger_path=tmp_path / "ledger.json",
+        target_user_home=Path("/home/ubuntu"),
+    )
+
+    with sqlite3.connect(codex_home / "state_5.sqlite") as conn:
+        cwd = conn.execute(
+            "SELECT cwd FROM threads WHERE id = ?", ("thread-1",)
+        ).fetchone()[0]
+    assert cwd == "/home/ubuntu/Projects/example"
 
 
 def test_import_snapshot_is_idempotent(tmp_path: Path) -> None:
