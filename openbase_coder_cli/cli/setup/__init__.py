@@ -515,7 +515,7 @@ def _run_setup_phases(
         # Standalone packages bundle the pinned engine; dev installs download
         # the same pin so both pathways exercise one livekit-server.
         ensure_pinned_livekit_server()
-    if selected_coding_backend in (CODEX_BACKEND, OPENBASE_CLOUD_BACKEND):
+    if selected_coding_backend == CODEX_BACKEND:
         _symlink_codex_auth()
     _ensure_normal_claude_md_symlink()
     _ensure_codex_home_default_files(workspace_dir if use_dev_workspace else "")

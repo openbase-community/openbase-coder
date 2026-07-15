@@ -285,6 +285,109 @@ def test_setup_phases_do_not_report_to_cloud(monkeypatch, tmp_path) -> None:
     assert all(event[0] != "cloud_report" for event in progress.events)
 
 
+def test_openbase_cloud_setup_does_not_require_local_codex_login(
+    monkeypatch, tmp_path
+) -> None:
+    class FakeInstallationConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def save(self) -> None:
+            return None
+
+    class CaptureProgress:
+        enabled = False
+
+        def step(self, step_id: str, step_status: str, detail: str | None = None):
+            return None
+
+    def noop(*args, **kwargs):
+        return None
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    env_file = tmp_path / ".env"
+    codex_auth_calls: list[bool] = []
+    machine_token_calls: list[bool] = []
+    codex_config_calls: list[dict] = []
+
+    monkeypatch.setattr(setup_cli, "OPENBASE_BASE_DIR", tmp_path / ".openbase")
+    monkeypatch.setattr(setup_cli, "InstallationConfig", FakeInstallationConfig)
+    monkeypatch.setattr(setup_cli, "current_runtime_package", lambda: None)
+    monkeypatch.setattr(
+        setup_cli, "resolve_dev_workspace_dir", lambda value: str(workspace)
+    )
+    for name in (
+        "_ensure_thread_sync_exchange_dir",
+        "_ensure_bundled_sounds",
+        "_ensure_env_file",
+        "ensure_backend_binary",
+        "_ensure_normal_claude_md_symlink",
+        "_ensure_codex_home_default_files",
+        "_ensure_codex_home_dispatcher_config",
+        "set_dispatcher_service_tier",
+        "_symlink_codex_home_skills",
+        "_init_cli_workspace",
+        "_ensure_claude_config",
+        "_ensure_claude_auth_bridge",
+        "_ensure_normal_codex_mcp",
+        "_ensure_normal_claude_mcp",
+        "_install_cli_shim",
+        "_build_console",
+        "install_all_services",
+        "configure_tailscale_serve",
+        "_ensure_session_id_hook_script",
+    ):
+        monkeypatch.setattr(setup_cli, name, noop)
+    monkeypatch.setattr(
+        setup_cli,
+        "_symlink_codex_auth",
+        lambda: codex_auth_calls.append(True),
+    )
+    monkeypatch.setattr(
+        setup_cli,
+        "_ensure_openbase_cloud_machine_token",
+        lambda _env_file: machine_token_calls.append(True),
+    )
+    monkeypatch.setattr(
+        setup_cli,
+        "_selected_coding_backend",
+        lambda *args: "openbase_cloud",
+    )
+
+    def capture_codex_home_config(*args, **kwargs):
+        codex_config_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        setup_cli, "_ensure_codex_home_config", capture_codex_home_config
+    )
+    monkeypatch.setattr(
+        setup_cli,
+        "tailscale_serve_health",
+        lambda: SimpleNamespace(
+            healthy=True, openbase_url="http://workspace", error=None
+        ),
+    )
+
+    setup_cli._run_setup_phases(
+        CaptureProgress(),
+        workspace_dir=str(workspace),
+        env_file=str(env_file),
+        assembly_ai_api_key="",
+        cartesia_api_key="",
+        skip_services=False,
+        link_codex_config=False,
+        link_claude_config=False,
+        fast_mode=True,
+        coding_backend="openbase_cloud",
+        audio_provider="openbase-cloud",
+    )
+
+    assert machine_token_calls == [True]
+    assert codex_auth_calls == []
+    assert codex_config_calls[-1]["coding_backend"] == "openbase_cloud"
+
+
 def _run_claude_code_setup_phases(monkeypatch, tmp_path, *, json_progress: bool):
     """Run _run_setup_phases with a claude_code backend, capturing auth calls."""
 
