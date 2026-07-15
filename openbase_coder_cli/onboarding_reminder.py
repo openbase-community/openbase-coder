@@ -14,13 +14,12 @@ from openbase_coder_cli.paths import ONBOARDING_SKILL_READ_MARKER_PATH
 
 ONBOARDING_REMINDER = (
     "[Openbase system note: onboarding is pending on this machine — the "
-    "openbase-onboarding skill has never been read here. Act on this in "
-    "this reply: after addressing the user's message, ask them to choose "
-    "between completing onboarding now and skipping it. Do not ignore this "
-    "note or postpone the question. If they choose to complete it, read and "
-    "follow the openbase-onboarding skill. If they choose to skip, create "
-    "the empty marker file ~/.openbase/onboarding-skill-read yourself. "
-    "Either action removes this note from future messages.]"
+    "openbase-onboarding skill has never been read here. To remove this note "
+    "from future messages, read and follow the openbase-onboarding skill now; "
+    "its first step records that it was read even if the user skips the rest "
+    "of onboarding. Act on this in this reply: after addressing the user's "
+    "message, use the skill to ask them to choose between completing onboarding "
+    "now and skipping it. Do not ignore this note or postpone the question.]"
 )
 
 
