@@ -19,6 +19,10 @@ from openbase_coder_cli.openbase_coder_cli_app import health_warnings as hw
 class FakeService:
     name: str
     install_by_default: bool = True
+    backends: tuple[str, ...] | None = None
+
+    def supports_backend(self, coding_backend: str) -> bool:
+        return self.backends is None or coding_backend in self.backends
 
 
 def test_expected_service_not_running_warns(monkeypatch) -> None:
@@ -65,6 +69,32 @@ def test_conditional_service_expected_only_when_enabled(monkeypatch) -> None:
         assert hw._service_warnings() == []
     finally:
         hw._CONDITIONAL_SERVICES["code-sync"] = hw._code_sync_expected
+
+
+def test_backend_scoped_service_not_expected_on_other_backend(monkeypatch) -> None:
+    services = [
+        FakeService("django-cli"),
+        FakeService("codex-app-server", backends=("codex", "openbase_cloud")),
+    ]
+    monkeypatch.setattr("openbase_coder_cli.services.definitions.SERVICES", services)
+    monkeypatch.setattr(
+        "openbase_coder_cli.services.launchd.launchctl_status",
+        lambda svc: {"installed": svc.name == "django-cli", "pid": 123},
+    )
+    monkeypatch.setattr(
+        "openbase_coder_cli.services.selection.configured_coding_backend",
+        lambda: "claude_code",
+    )
+
+    assert hw._service_warnings() == []
+
+    monkeypatch.setattr(
+        "openbase_coder_cli.services.selection.configured_coding_backend",
+        lambda: "codex",
+    )
+    assert [warning["id"] for warning in hw._service_warnings()] == [
+        "service-missing:codex-app-server"
+    ]
 
 
 def test_collect_skips_sync_checks_when_disabled(monkeypatch) -> None:

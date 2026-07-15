@@ -154,10 +154,17 @@ def test_doctor_allows_optional_stopped_services(monkeypatch, tmp_path):
             workspace_path=str(tmp_path),
         ),
     )
+    monkeypatch.setattr(doctor_cli, "configured_coding_backend", lambda: "codex")
     monkeypatch.setattr(
         doctor_cli,
         "SERVICES",
-        [SimpleNamespace(name="codex-thread-device-sync", install_by_default=False)],
+        [
+            SimpleNamespace(
+                name="codex-thread-device-sync",
+                install_by_default=False,
+                supports_backend=lambda _backend: True,
+            )
+        ],
     )
     monkeypatch.setattr(
         doctor_cli,
@@ -221,6 +228,91 @@ def test_doctor_allows_optional_stopped_services(monkeypatch, tmp_path):
     assert "codex-thread-device-sync: optional (not running" in result.output
 
 
+def test_doctor_skips_backend_scoped_services_on_other_backends(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENBASE_CODER_CLI_SECRET_KEY=x\n", encoding="utf-8")
+    monkeypatch.setattr(doctor_cli.InstallationConfig, "exists", lambda: True)
+    monkeypatch.setattr(
+        doctor_cli.InstallationConfig,
+        "load",
+        lambda: SimpleNamespace(
+            standalone=False,
+            workspace_path=str(tmp_path),
+            package_path="",
+            python_path="",
+            livekit_server_path="",
+            console_build_dir="",
+        ),
+    )
+    monkeypatch.setattr(doctor_cli, "configured_coding_backend", lambda: "claude_code")
+    monkeypatch.setattr(
+        doctor_cli,
+        "SERVICES",
+        [
+            SimpleNamespace(
+                name="codex-app-server",
+                install_by_default=True,
+                supports_backend=lambda backend: backend in ("codex", "openbase_cloud"),
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        doctor_cli,
+        "launchctl_status",
+        lambda _svc: {"installed": False, "pid": None, "last_exit_code": None},
+    )
+    monkeypatch.setattr(
+        doctor_cli,
+        "_get_listening_sockets",
+        lambda: [("127.0.0.1", 7999), ("127.0.0.1", 7880)],
+    )
+    monkeypatch.setattr(doctor_cli, "DEFAULT_ENV_FILE_PATH", env_file)
+    monkeypatch.setattr(
+        doctor_cli,
+        "_parse_env_file",
+        lambda: {
+            "OPENBASE_CODER_CLI_SECRET_KEY": "secret",
+            "LIVEKIT_API_KEY": "server-key",
+            "LIVEKIT_API_SECRET": "server-secret",
+            "LIVEKIT_CLIENT_API_KEY": "client-key",
+            "LIVEKIT_CLIENT_API_SECRET": "client-secret",
+            "OPENBASE_CODING_BACKEND": "claude_code",
+        },
+    )
+    monkeypatch.setattr(
+        doctor_cli,
+        "tailscale_serve_health",
+        lambda: SimpleNamespace(
+            tailscale_available=True,
+            tailscale_running=True,
+            host="mac.tailnet.ts.net",
+            openbase_url="http://mac.tailnet.ts.net:18080",
+            openbase_configured=True,
+            livekit_configured=True,
+            openbase_reachable=True,
+            error=None,
+        ),
+    )
+    monkeypatch.setattr(doctor_cli, "selected_tts_provider_id", lambda: "cartesia")
+    monkeypatch.setattr(doctor_cli, "selected_stt_provider_id", lambda: "assemblyai")
+    monkeypatch.setattr(
+        doctor_cli,
+        "claude_auth_status",
+        lambda: SimpleNamespace(logged_in=True, raw_output="", returncode=0),
+    )
+    monkeypatch.setattr(
+        doctor_cli.Path,
+        "home",
+        classmethod(lambda cls: tmp_path),
+    )
+
+    result = CliRunner().invoke(doctor_cli.doctor)
+
+    assert result.exit_code == 0, result.output
+    assert "codex-app-server: not used (claude_code backend)" in result.output
+    assert "codex-app-server: not installed" not in result.output
+
+
 def test_doctor_reports_missing_tailscale_as_setup_action(monkeypatch, tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("OPENBASE_CODER_CLI_SECRET_KEY=x\n", encoding="utf-8")
@@ -233,6 +325,7 @@ def test_doctor_reports_missing_tailscale_as_setup_action(monkeypatch, tmp_path)
             workspace_path=str(tmp_path),
         ),
     )
+    monkeypatch.setattr(doctor_cli, "configured_coding_backend", lambda: "codex")
     monkeypatch.setattr(doctor_cli, "SERVICES", [])
     monkeypatch.setattr(doctor_cli, "_get_listening_sockets", lambda: [])
     monkeypatch.setattr(doctor_cli, "DEFAULT_ENV_FILE_PATH", env_file)
