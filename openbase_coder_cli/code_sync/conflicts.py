@@ -1,8 +1,9 @@
 """Conflict records for code-sync (repo divergence and file conflicts).
 
 Records live in ``~/.openbase/code-sync/conflicts.json`` and are surfaced in
-the console/iOS alongside thread sync conflicts. Nothing is ever resolved
-automatically; resolution is an explicit user action.
+the console/iOS alongside thread sync conflicts. Branch records clear when
+the repository manifest brings both heads back together; explicit resolution
+remains available when safe automatic convergence is blocked.
 """
 
 from __future__ import annotations
@@ -85,6 +86,40 @@ def record_branch_conflict(
     conflicts.append(record)
     _write_conflicts(conflicts, path)
     return record
+
+
+def mark_branch_conflicts_resolved(
+    *,
+    folder_id: str,
+    repo_relpath: str,
+    branch: str,
+    resolution: str = "converged",
+    path: Path | None = None,
+) -> int:
+    """Resolve stale branch-conflict records after both refs converge."""
+    conflicts = read_conflicts(path)
+    resolved_count = 0
+    now = _timestamp()
+    for conflict in conflicts:
+        if (
+            conflict.get("resolved")
+            or conflict.get("kind") != BRANCH_CONFLICT_KIND
+            or conflict.get("folder_id") != folder_id
+            or conflict.get("repo_relpath") != repo_relpath
+            or conflict.get("branch") != branch
+        ):
+            continue
+        conflict.update(
+            {
+                "resolved": True,
+                "resolution": resolution,
+                "resolved_at": now,
+            }
+        )
+        resolved_count += 1
+    if resolved_count:
+        _write_conflicts(conflicts, path)
+    return resolved_count
 
 
 def record_file_conflict(

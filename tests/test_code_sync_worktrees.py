@@ -4,7 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from openbase_coder_cli.code_sync import reconciler, worktrees
+from openbase_coder_cli.code_sync import reconciler, repositories, worktrees
 
 GIT_IDENTITY = ["-c", "user.email=test@example.com", "-c", "user.name=Test"]
 
@@ -29,6 +29,13 @@ def _make_main_repo(path: Path) -> Path:
     _git(path, "add", "-A")
     _git(path, "commit", "-m", "initial")
     return path
+
+
+def _commit_worktree_file(repo: Path, filename: str, content: str, message: str) -> str:
+    (repo / filename).write_text(content, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", message)
+    return _git(repo, "rev-parse", "HEAD")
 
 
 def _copy_files_without_git(src: Path, dst: Path) -> None:
@@ -62,6 +69,7 @@ def test_manifest_written_for_worktree_only(tmp_path: Path) -> None:
     manifest = worktrees.read_manifest(wt)
     assert manifest["main_repo"] == "Projects/app"
     assert manifest["branch"] == "dev"
+    assert manifest["head"] == _git(wt, "rev-parse", "HEAD")
     # Excluded from status via the machine-local exclude, not .gitignore.
     assert _git(wt, "status", "--porcelain") == ""
 
@@ -145,6 +153,39 @@ def test_adopt_fetches_missing_branch_from_peer(tmp_path: Path) -> None:
     action = worktrees.adopt_worktree(peer_wt, home=peer_home, remote_url=str(wt))
     assert action == "adopted"
     assert _git(peer_wt, "rev-parse", "HEAD") == _git(wt, "rev-parse", "HEAD")
+
+
+def test_existing_worktree_follows_synced_branch_manifest(tmp_path: Path) -> None:
+    origin_home = tmp_path / "origin"
+    peer_home = tmp_path / "peer"
+    main, wt = _origin_with_worktree(origin_home)
+    worktrees.ensure_worktree_manifest(wt, home=origin_home)
+    peer_main = peer_home / "Projects" / "app"
+    peer_main.parent.mkdir(parents=True)
+    subprocess.run(
+        ["git", "clone", "-q", str(main), str(peer_main)],
+        capture_output=True,
+        check=True,
+    )
+    _git(peer_main, "branch", "dev", "origin/dev")
+    peer_wt = peer_home / "Projects" / "app-worktrees" / "dev"
+    _copy_files_without_git(wt, peer_wt)
+    assert worktrees.adopt_worktree(peer_wt, home=peer_home) == "adopted"
+
+    _git(wt, "checkout", "-q", "-b", "feature")
+    head = _commit_worktree_file(wt, "feature.py", "feature v2\n", "feature branch")
+    worktrees.ensure_worktree_manifest(wt, home=origin_home)
+    _copy_files_without_git(wt, peer_wt)
+    manifest = worktrees.read_manifest(peer_wt)
+    assert manifest is not None
+
+    action = repositories.converge_repository_to_manifest(
+        peer_wt, manifest, remote_urls=(str(wt),)
+    )
+
+    assert action == "converged"
+    assert _git(peer_wt, "rev-parse", "--abbrev-ref", "HEAD") == "feature"
+    assert _git(peer_wt, "rev-parse", "HEAD") == head
 
 
 def test_adopt_skips_when_unsafe(tmp_path: Path) -> None:

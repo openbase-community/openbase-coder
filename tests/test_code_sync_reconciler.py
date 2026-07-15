@@ -159,6 +159,14 @@ def test_diverged_branches_record_a_conflict(tmp_path: Path) -> None:
     _reconcile(local, peer, conflicts_path)
     assert len(conflicts_module.unresolved_conflicts(conflicts_path)) == 1
 
+    # Manifest-driven convergence (or a manual resolution) clears the stale
+    # record as soon as both machines advertise the same branch head.
+    _git(local, "reset", "--hard", peer_head)
+    assert (
+        _reconcile(local, peer, conflicts_path).action == reconciler.ACTION_UP_TO_DATE
+    )
+    assert conflicts_module.unresolved_conflicts(conflicts_path) == []
+
 
 def test_mid_merge_repo_is_never_touched(tmp_path: Path) -> None:
     local, peer = _pair(tmp_path)
@@ -299,6 +307,24 @@ def test_scan_file_conflicts_records_sync_conflict_copies(tmp_path: Path) -> Non
     records = conflicts_module.unresolved_conflicts(conflicts_path)
     assert len(records) == 1
     assert records[0]["kind"] == "file"
+
+
+def test_scan_file_conflicts_cleans_internal_repo_manifest_copy(tmp_path: Path) -> None:
+    from openbase_coder_cli.sync_config import SyncFolder
+
+    home = tmp_path / "home"
+    folder = SyncFolder(relpath="Projects/demo")
+    folder_root = folder.absolute_path(home)
+    folder_root.mkdir(parents=True)
+    conflict_copy = (
+        folder_root / ".openbase-repo.sync-conflict-20260706-101112-ABCDEF.json"
+    )
+    conflict_copy.write_text("{}\n", encoding="utf-8")
+
+    found = reconciler.scan_file_conflicts(folder, home, tmp_path / "conflicts.json")
+
+    assert found == []
+    assert not conflict_copy.exists()
 
 
 def test_discover_git_repos_skips_unreadable_directories(tmp_path: Path) -> None:

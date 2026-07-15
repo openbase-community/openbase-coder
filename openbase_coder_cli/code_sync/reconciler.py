@@ -11,8 +11,9 @@ branch ONLY when it is provably safe:
 - the local working tree already matches the fetched commit's tree
   (Syncthing has delivered the files, so nothing moves twice).
 
-Anything diverged becomes a conflict record for the product UI; nothing is
-ever merged or reset automatically.
+Divergence is normally converged through a synced repository manifest while
+preserving displaced commits under recovery refs. Unsafe states remain
+untouched and surface as conflict records for the product UI.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from typing import Any
 from urllib.parse import quote
 
 from openbase_coder_cli.code_sync.conflicts import (
+    mark_branch_conflicts_resolved,
     record_branch_conflict,
     record_file_conflict,
     unresolved_conflicts,
@@ -100,41 +102,21 @@ def discover_repos_and_worktree_candidates(
     but no ``.git`` — its git identity is machine-local and must be
     materialized here by adoption.
     """
-    from openbase_coder_cli.code_sync.worktrees import WORKTREE_MANIFEST_NAME
+    repos, worktree_candidates, _repo_candidates = discover_repos_and_candidates(
+        folder_root, max_depth
+    )
+    return repos, worktree_candidates
 
-    repos: list[Path] = []
-    candidates: list[Path] = []
 
-    def _walk(directory: Path, depth: int) -> None:
-        try:
-            # Path.exists() raises (not returns False) on EACCES — e.g. a
-            # root-owned docker volume inside a synced folder.
-            is_repo = (directory / ".git").exists()
-        except OSError:
-            return  # Unreadable directory: nothing to reconcile below it.
-        if is_repo:
-            repos.append(directory)
-            # Keep descending: multi workspaces nest subrepos (each with its
-            # own .git) inside the workspace repo, and each needs its own
-            # branch reconciliation.
-        elif (directory / WORKTREE_MANIFEST_NAME).is_file():
-            candidates.append(directory)
-        if depth >= max_depth:
-            return
-        try:
-            children = sorted(directory.iterdir())
-        except OSError:
-            return
-        for child in children:
-            if not child.is_dir() or child.is_symlink():
-                continue
-            if child.name.startswith(".") or child.name in SKIP_DIR_NAMES:
-                continue
-            _walk(child, depth + 1)
+def discover_repos_and_candidates(
+    folder_root: Path, max_depth: int = MAX_REPO_DEPTH
+) -> tuple[list[Path], list[Path], list[Path]]:
+    """One walk yielding repos plus unattached worktree/repo directories."""
+    from openbase_coder_cli.code_sync.repositories import discover_sync_checkouts
 
-    if folder_root.is_dir():
-        _walk(folder_root, 0)
-    return repos, candidates
+    return discover_sync_checkouts(
+        folder_root, max_depth=max_depth, skip_dir_names=SKIP_DIR_NAMES
+    )
 
 
 def peer_git_url(peer: SyncPeer, folder_id: str, repo_relpath: str) -> str:
@@ -263,6 +245,12 @@ def reconcile_repo(
     if not fetched_sha or not local_sha:
         return result(ACTION_FETCH_FAILED, branch, "could not resolve heads")
     if fetched_sha == local_sha:
+        mark_branch_conflicts_resolved(
+            folder_id=folder_id,
+            repo_relpath=repo_relpath,
+            branch=branch,
+            path=conflicts_path,
+        )
         return result(ACTION_UP_TO_DATE, branch)
 
     local_is_ancestor = (
@@ -284,6 +272,12 @@ def reconcile_repo(
             return result(ACTION_FETCH_FAILED, branch, update.stderr.strip()[:200])
         # Refresh the index to the (already matching) new HEAD.
         _git(["reset", "--quiet"], repo)
+        mark_branch_conflicts_resolved(
+            folder_id=folder_id,
+            repo_relpath=repo_relpath,
+            branch=branch,
+            path=conflicts_path,
+        )
         return result(
             ACTION_FAST_FORWARDED, branch, f"{local_sha[:12]} -> {fetched_sha[:12]}"
         )
@@ -314,12 +308,26 @@ def scan_file_conflicts(
     conflicts_path: Path | None = None,
 ) -> list[str]:
     """Record Syncthing ``*.sync-conflict-*`` copies inside a folder."""
+    from openbase_coder_cli.code_sync.repositories import (
+        is_repository_manifest_conflict,
+    )
+
     folder_root = folder.absolute_path(home)
     found: list[str] = []
     if not folder_root.is_dir():
         return found
     for path in folder_root.rglob("*.sync-conflict-*"):
         if not path.is_file():
+            continue
+        if is_repository_manifest_conflict(path):
+            # Simultaneous branch/commit changes can race two manifests. The
+            # canonical Syncthing winner drives convergence and the losing
+            # commit is retained in a recovery ref, so this metadata copy is
+            # redundant and should not become a user-facing file conflict.
+            try:
+                path.unlink()
+            except OSError:
+                pass
             continue
         if any(part in SKIP_DIR_NAMES or part == ".git" for part in path.parts):
             continue
@@ -358,17 +366,30 @@ def run_reconcile_once(
             summary["errors"].append(f"auth: {exc}")
             peers = ()
 
+    from openbase_coder_cli.code_sync.repositories import (
+        adopt_repository,
+        repository_state,
+        sync_checkout_manifest,
+    )
     from openbase_coder_cli.code_sync.worktrees import (
         adopt_worktree,
         ensure_worktree_manifest,
     )
+
+    reconcile_state = read_reconcile_state()
+    previous_repo_states = reconcile_state.get("repo_states")
+    if not isinstance(previous_repo_states, dict):
+        previous_repo_states = {}
+    next_repo_states: dict[str, dict[str, str]] = {}
 
     for folder in sync_folders(config_path):
         folder_root = folder.absolute_path(home)
         summary["file_conflicts"].extend(
             scan_file_conflicts(folder, home, conflicts_path)
         )
-        repos, worktree_candidates = discover_repos_and_worktree_candidates(folder_root)
+        repos, worktree_candidates, repo_candidates = discover_repos_and_candidates(
+            folder_root
+        )
         for candidate in worktree_candidates:
             rel = str(candidate.relative_to(folder_root))
             remote = peer_git_url(peers[0], folder.folder_id, rel) if peers else None
@@ -379,14 +400,53 @@ def run_reconcile_once(
             except (OSError, subprocess.TimeoutExpired) as exc:
                 action = f"adopt_error: {exc}"
             summary.setdefault("worktrees", []).append({"path": rel, "action": action})
+        for candidate in repo_candidates:
+            rel = str(candidate.relative_to(folder_root))
+            if rel == ".":
+                rel = ""
+            try:
+                action = adopt_repository(
+                    candidate,
+                    remote_urls=(
+                        peer_git_url(peer, folder.folder_id, rel) for peer in peers
+                    ),
+                    auth_header=auth_header,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                action = f"adopt_error: {exc}"
+            summary.setdefault("repository_bootstrap", []).append(
+                {"path": rel, "action": action}
+            )
+        if repo_candidates:
+            repos = discover_git_repos(folder_root)
         for repo in repos:
             try:
-                ensure_worktree_manifest(repo, home)
+                is_worktree = ensure_worktree_manifest(repo, home)
             except (OSError, subprocess.TimeoutExpired):
-                pass
+                is_worktree = False
             repo_relpath = str(repo.relative_to(folder_root))
             if repo_relpath == ".":
                 repo_relpath = ""
+            state_key = f"{folder.folder_id}:{repo_relpath}"
+            previous_state = previous_repo_states.get(state_key)
+            manifest_action = sync_checkout_manifest(
+                repo,
+                is_worktree=is_worktree,
+                home=home,
+                previous_state=(
+                    previous_state if isinstance(previous_state, dict) else None
+                ),
+                remote_urls=(
+                    peer_git_url(peer, folder.folder_id, repo_relpath) for peer in peers
+                ),
+                auth_header=auth_header,
+            )
+            manifest_summary_key = (
+                "worktree_manifests" if is_worktree else "repository_manifests"
+            )
+            summary.setdefault(manifest_summary_key, []).append(
+                {"path": repo_relpath, "action": manifest_action}
+            )
             for peer in peers:
                 try:
                     outcome = reconcile_repo(
@@ -404,12 +464,16 @@ def run_reconcile_once(
                     )
                     continue
                 summary["repos"].append({"peer": peer.name, **asdict(outcome)})
+            final_state = repository_state(repo)
+            if final_state is not None:
+                next_repo_states[state_key] = final_state
 
     summary["conflicts_count"] = len(unresolved_conflicts(conflicts_path))
     write_reconcile_state(
         {
-            **read_reconcile_state(),
+            **reconcile_state,
             "last_reconcile_at": _timestamp(),
+            "repo_states": next_repo_states,
             **_counts(summary),
         }
     )

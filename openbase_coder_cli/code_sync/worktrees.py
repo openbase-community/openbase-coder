@@ -78,14 +78,14 @@ def ensure_worktree_manifest(repo: Path, home: Path | None = None) -> bool:
 
     Returns True when ``repo`` is a linked worktree (manifest ensured).
     """
-    from openbase_coder_cli.code_sync.reconciler import current_branch
+    from openbase_coder_cli.code_sync.repositories import repository_state
 
     home = home or Path.home()
     main_repo = worktree_main_repo(repo)
     if main_repo is None:
         return False
-    branch = current_branch(repo)
-    if not branch:
+    state = repository_state(repo)
+    if state is None:
         return True  # Detached worktrees stay machine-local.
     try:
         main_relhome = str(main_repo.relative_to(home))
@@ -95,7 +95,7 @@ def ensure_worktree_manifest(repo: Path, home: Path | None = None) -> bool:
     manifest = {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "main_repo": main_relhome,
-        "branch": branch,
+        **state,
     }
     path = repo / WORKTREE_MANIFEST_NAME
     rendered = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
