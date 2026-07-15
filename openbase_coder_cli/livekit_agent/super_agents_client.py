@@ -836,8 +836,8 @@ class SuperAgentsLiveKitClient:
     def has_pending_voice_answer(self) -> bool:
         """Whether a backend turn still owes the user a spoken answer.
 
-        True while the shared wait task is polling with no live voice dispatch
-        awaiting it, or when it finished with speech text nobody has claimed.
+        True while the shared wait task is polling for a response, or when it
+        finished with speech text nobody has claimed.
         """
         wait_task = self._active_turn_wait_task
         turn_id = self._active_turn_id
@@ -848,7 +848,7 @@ class SuperAgentsLiveKitClient:
         ):
             return False
         if not wait_task.done():
-            return self._active_turn_wait_waiters == 0
+            return True
         if wait_task.cancelled() or wait_task.exception():
             return False
         if turn_id in self._claimed_speech_turns:

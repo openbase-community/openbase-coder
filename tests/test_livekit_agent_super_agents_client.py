@@ -659,6 +659,7 @@ async def test_super_agents_livekit_client_delivers_orphaned_result(
 
     first = asyncio.create_task(client.run_turn("find the old conversation"))
     await backend.progress_called.wait()
+    assert client.has_pending_voice_answer()
     first.cancel()
     with pytest.raises(asyncio.CancelledError):
         await first
