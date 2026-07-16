@@ -290,22 +290,16 @@ def _ensure_claude_auth_bridge(
     *, login_if_needed: bool = False, required: bool = True
 ) -> None:
     """Prepare Openbase's managed Claude Code auth state."""
-    status = claude_auth_status()
-    if status.logged_in:
-        click.echo("Openbase Claude Code auth already configured.")
-        return
-
     result = sync_normal_claude_state()
     if result.state_updated:
         click.echo("Updated Openbase Claude Code state.")
     click.echo(result.message)
+    if copy_normal_claude_keychain():
+        click.echo("Copied normal Claude Code login into Openbase's keychain entry.")
 
     status = claude_auth_status()
-    if not status.logged_in and copy_normal_claude_keychain():
-        click.echo("Copied normal Claude Code login into Openbase's keychain entry.")
-        status = claude_auth_status()
     if status.logged_in:
-        click.echo("Openbase Claude Code auth configured.")
+        click.echo("Openbase Claude Code auth already configured.")
         return
 
     if login_if_needed:

@@ -885,9 +885,6 @@ def test_ensure_claude_auth_bridge_runs_login_when_requested(monkeypatch) -> Non
             claude_auth.ClaudeAuthStatus(
                 logged_in=False, raw_output="{}", returncode=0
             ),
-            claude_auth.ClaudeAuthStatus(
-                logged_in=False, raw_output="{}", returncode=0
-            ),
             claude_auth.ClaudeAuthStatus(logged_in=True, raw_output="{}", returncode=0),
         ]
     )
@@ -910,6 +907,34 @@ def test_ensure_claude_auth_bridge_runs_login_when_requested(monkeypatch) -> Non
     setup_cli._ensure_claude_auth_bridge(login_if_needed=True)
 
     assert login_calls == [True]
+
+
+def test_ensure_claude_auth_bridge_syncs_before_status(monkeypatch) -> None:
+    calls = []
+    _patch_setup(
+        monkeypatch,
+        "sync_normal_claude_state",
+        lambda: calls.append("sync")
+        or claude_auth.ClaudeAuthBridgeResult(
+            state_updated=True,
+            message="synced normal state",
+        ),
+    )
+    _patch_setup(
+        monkeypatch,
+        "copy_normal_claude_keychain",
+        lambda: calls.append("copy-keychain") or True,
+    )
+    _patch_setup(
+        monkeypatch,
+        "claude_auth_status",
+        lambda: calls.append("status")
+        or claude_auth.ClaudeAuthStatus(logged_in=True, raw_output="{}", returncode=0),
+    )
+
+    setup_cli._ensure_claude_auth_bridge(login_if_needed=False)
+
+    assert calls == ["sync", "copy-keychain", "status"]
 
 
 def test_ensure_claude_auth_bridge_does_not_login_unless_requested(monkeypatch) -> None:
