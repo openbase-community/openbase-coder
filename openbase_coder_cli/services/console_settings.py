@@ -7,7 +7,7 @@ from openbase_coder_cli.paths import CONSOLE_SETTINGS_JSON_PATH
 
 DEFAULT_DANGEROUS_CONFIRMATION_PHRASE = "yes, proceed"
 DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS = True
-DEFAULT_KEEP_SYSTEM_AWAKE = True
+DEFAULT_KEEP_SYSTEM_AWAKE = False
 
 
 def get_ignored_launchctl_labels() -> list[str]:

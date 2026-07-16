@@ -180,7 +180,7 @@ def test_agents_generation_settings_can_restore_including_normal_agents(
     assert console_settings.include_normal_codex_agents_in_openbase_agents() is True
 
 
-def test_keep_awake_settings_defaults_to_enabled(
+def test_keep_awake_settings_defaults_to_disabled(
     tmp_path: Path, monkeypatch
 ) -> None:
     _setup_django()
@@ -199,8 +199,8 @@ def test_keep_awake_settings_defaults_to_enabled(
     )
 
     assert response.status_code == 200
-    assert response.data["keep_system_awake"] is True
-    assert response.data["default_keep_system_awake"] is True
+    assert response.data["keep_system_awake"] is False
+    assert response.data["default_keep_system_awake"] is False
     assert response.data["restart_required"] is True
 
 

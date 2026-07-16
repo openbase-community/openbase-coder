@@ -29,6 +29,7 @@ def test_start_keep_awake_runs_caffeinate_idle_and_display(monkeypatch) -> None:
     popen_calls = []
     fake_process = FakeProcess()
 
+    monkeypatch.setattr(keep_awake, "get_keep_system_awake_enabled", lambda: True)
     monkeypatch.setattr(keep_awake.sys, "platform", "darwin")
     monkeypatch.setattr(keep_awake.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(
@@ -70,6 +71,7 @@ def test_start_keep_awake_noops_off_macos(monkeypatch) -> None:
 def test_start_keep_awake_warns_when_caffeinate_missing(monkeypatch) -> None:
     warnings = []
 
+    monkeypatch.setattr(keep_awake, "get_keep_system_awake_enabled", lambda: True)
     monkeypatch.setattr(keep_awake.sys, "platform", "darwin")
     monkeypatch.setattr(keep_awake.shutil, "which", lambda _name: None)
 
