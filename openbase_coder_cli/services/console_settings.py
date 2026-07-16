@@ -6,6 +6,7 @@ from pathlib import Path
 from openbase_coder_cli.paths import CONSOLE_SETTINGS_JSON_PATH
 
 DEFAULT_DANGEROUS_CONFIRMATION_PHRASE = "yes, proceed"
+DEFAULT_USER_ADDRESS_NAME = "there"
 DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS = True
 DEFAULT_KEEP_SYSTEM_AWAKE = False
 
@@ -44,6 +45,24 @@ def set_dangerous_confirmation_phrase(phrase: str) -> str:
         raise ValueError("Dangerous confirmation phrase cannot be blank.")
     data = _read_settings()
     data["dangerous_confirmation_phrase"] = normalized
+    _write_settings(data)
+    return normalized
+
+
+def get_user_address_name() -> str:
+    data = _read_settings()
+    name = data.get("user_address_name")
+    if not isinstance(name, str) or not name.strip():
+        return DEFAULT_USER_ADDRESS_NAME
+    return name.strip()
+
+
+def set_user_address_name(name: str) -> str:
+    normalized = name.strip()
+    if not normalized:
+        raise ValueError("User address name cannot be blank.")
+    data = _read_settings()
+    data["user_address_name"] = normalized
     _write_settings(data)
     return normalized
 

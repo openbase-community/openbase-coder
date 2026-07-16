@@ -111,7 +111,7 @@ def approval_request(
     timeout_seconds: float,
     poll_interval: float,
 ) -> None:
-    """Ask Gabe to approve a skill action and wait for the answer."""
+    """Ask the user to approve a skill action and wait for the answer."""
     details = _parse_approval_details(detail_items)
     decision = request_approval(
         skill=skill,

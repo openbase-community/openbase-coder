@@ -1,38 +1,40 @@
 from __future__ import annotations
 
+import re
+
 from openbase_coder_cli.services.console_settings import (
     get_dangerous_confirmation_phrase,
+    get_user_address_name,
 )
 
 DANGEROUS_CONFIRMATION_PHRASE_TOKEN = "${dangerous_confirmation_phrase}"
+USER_ADDRESS_NAME_TOKEN = "${user_address_name}"
+INSTRUCTION_TEMPLATE_TOKENS = (
+    DANGEROUS_CONFIRMATION_PHRASE_TOKEN,
+    USER_ADDRESS_NAME_TOKEN,
+)
 
 
 def has_instruction_template_tokens(text: str) -> bool:
-    return DANGEROUS_CONFIRMATION_PHRASE_TOKEN in text
+    return any(token in text for token in INSTRUCTION_TEMPLATE_TOKENS)
 
 
 def render_instruction_template(text: str) -> str:
-    return text.replace(
-        DANGEROUS_CONFIRMATION_PHRASE_TOKEN,
-        get_dangerous_confirmation_phrase(),
+    replacements = (
+        (DANGEROUS_CONFIRMATION_PHRASE_TOKEN, get_dangerous_confirmation_phrase()),
+        (USER_ADDRESS_NAME_TOKEN, get_user_address_name()),
     )
+    rendered = text
+    for token, value in replacements:
+        rendered = rendered.replace(token, value)
+    return rendered
 
 
 def text_matches_instruction_template(text: str, template: str) -> bool:
-    parts = template.split(DANGEROUS_CONFIRMATION_PHRASE_TOKEN)
-    if len(parts) == 1:
+    if not has_instruction_template_tokens(template):
         return text == template
 
-    position = 0
-    for index, part in enumerate(parts):
-        if not part:
-            continue
-        next_position = text.find(part, position)
-        if next_position == -1:
-            return False
-        if index == 0 and next_position != 0:
-            return False
-        position = next_position + len(part)
-
-    final_part = parts[-1]
-    return not final_part or text.endswith(final_part)
+    pattern = re.escape(template)
+    for token in INSTRUCTION_TEMPLATE_TOKENS:
+        pattern = pattern.replace(re.escape(token), r".*?")
+    return re.fullmatch(pattern, text, flags=re.DOTALL) is not None

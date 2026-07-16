@@ -10,6 +10,8 @@ from livekit import rtc
 from livekit.agents import stt as livekit_stt
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN
 
+from openbase_coder_cli.services.console_settings import get_user_address_name
+
 STTProviderId = Literal["assemblyai", "openbase_cloud", "deepgram", "local_mlx_whisper"]
 
 ASSEMBLYAI_STT_PROVIDER_ID = "assemblyai"
@@ -18,11 +20,16 @@ DEEPGRAM_STT_PROVIDER_ID = "deepgram"
 LOCAL_MLX_WHISPER_STT_PROVIDER_ID = "local_mlx_whisper"
 DEFAULT_STT_PROVIDER_ID: STTProviderId = ASSEMBLYAI_STT_PROVIDER_ID
 LOCAL_MLX_WHISPER_MODEL_ID = "mlx-community/whisper-small.en-mlx"
-LOCAL_MLX_WHISPER_PROMPT = (
-    "Openbase Coder voice coding vocabulary: Gabe, Openbase, Kokoro, Cartesia, "
-    "Codex, LiveKit, TTS, STT, Python, React, TypeScript, Swift, Django, pytest, "
-    "uv, pnpm, GitHub, pull request."
-)
+
+
+def local_mlx_whisper_prompt() -> str:
+    user_address_name = get_user_address_name()
+    return (
+        "Openbase Coder voice coding vocabulary: "
+        f"{user_address_name}, Openbase, Kokoro, Cartesia, Codex, LiveKit, TTS, "
+        "STT, Python, React, TypeScript, Swift, Django, pytest, uv, pnpm, GitHub, "
+        "pull request."
+    )
 
 
 @dataclass(frozen=True)
@@ -117,7 +124,7 @@ class MLXWhisperSTT(livekit_stt.STT):
         self,
         *,
         model: str = LOCAL_MLX_WHISPER_MODEL_ID,
-        initial_prompt: str = LOCAL_MLX_WHISPER_PROMPT,
+        initial_prompt: str | None = None,
     ) -> None:
         super().__init__(
             capabilities=livekit_stt.STTCapabilities(
@@ -126,7 +133,7 @@ class MLXWhisperSTT(livekit_stt.STT):
             )
         )
         self._model = model
-        self._initial_prompt = initial_prompt
+        self._initial_prompt = initial_prompt or local_mlx_whisper_prompt()
 
     @property
     def model(self) -> str:

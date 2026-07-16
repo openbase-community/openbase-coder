@@ -89,6 +89,33 @@ def test_ensure_openbase_agents_md_interpolates_confirmation_phrase(
     assert "${dangerous_confirmation_phrase}" not in content
 
 
+def test_ensure_openbase_agents_md_interpolates_user_address_name(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = workspace / "instructions" / "AGENTS.md"
+    codex_home = tmp_path / "codex_home"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "- Tell ${user_address_name} the setup needs attention.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "openbase_coder_cli.instruction_templates.get_user_address_name",
+        lambda: "Sam",
+    )
+
+    codex_home_instructions.ensure_openbase_agents_md(
+        workspace,
+        codex_home_dir=codex_home,
+        include_normal_codex_agents=False,
+    )
+
+    content = (codex_home / "AGENTS.md").read_text(encoding="utf-8")
+    assert "Tell Sam" in content
+    assert "${user_address_name}" not in content
+
+
 def test_ensure_rendered_instruction_file_updates_managed_template(
     tmp_path, monkeypatch
 ) -> None:

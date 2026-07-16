@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import numpy as np
 from livekit import rtc
 
-from openbase_coder_cli.stt_providers import MLXWhisperSTT, _frame_to_whisper_audio
+from openbase_coder_cli.stt_providers import (
+    MLXWhisperSTT,
+    _frame_to_whisper_audio,
+    local_mlx_whisper_prompt,
+)
 
 
 def _audio_frame(
@@ -64,3 +68,15 @@ def test_mlx_whisper_stt_passes_audio_array_without_ffmpeg(monkeypatch) -> None:
     assert isinstance(audio, np.ndarray)
     assert kwargs["language"] == "en"
     assert kwargs["task"] == "transcribe"
+
+
+def test_local_mlx_whisper_prompt_uses_configured_user_address(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "openbase_coder_cli.stt_providers.get_user_address_name",
+        lambda: "Sam",
+    )
+
+    prompt = local_mlx_whisper_prompt()
+
+    assert "Sam" in prompt
+    assert "Gabe" not in prompt

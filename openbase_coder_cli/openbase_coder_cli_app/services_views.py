@@ -35,14 +35,17 @@ from openbase_coder_cli.services.console_settings import (
     DEFAULT_DANGEROUS_CONFIRMATION_PHRASE,
     DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS,
     DEFAULT_KEEP_SYSTEM_AWAKE,
+    DEFAULT_USER_ADDRESS_NAME,
     get_dangerous_confirmation_phrase,
     get_ignored_launchctl_labels,
     get_keep_system_awake_enabled,
+    get_user_address_name,
     include_normal_codex_agents_in_openbase_agents,
     set_dangerous_confirmation_phrase,
     set_ignored_launchctl_labels,
     set_include_normal_codex_agents_in_openbase_agents,
     set_keep_system_awake_enabled,
+    set_user_address_name,
 )
 from openbase_coder_cli.services.definitions import SERVICES
 from openbase_coder_cli.services.keep_awake import keep_awake_status_payload
@@ -102,7 +105,18 @@ class DangerousConfirmationSettingsSerializer(serializers.Serializer):
     dangerous_confirmation_phrase = serializers.CharField(
         allow_blank=False,
         trim_whitespace=True,
+        required=False,
     )
+    user_address_name = serializers.CharField(
+        allow_blank=False,
+        trim_whitespace=True,
+        required=False,
+    )
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("No settings were provided.")
+        return attrs
 
 
 class AgentsGenerationSettingsSerializer(serializers.Serializer):
@@ -117,6 +131,8 @@ def _dangerous_confirmation_settings_payload(*, refreshed: bool = False) -> dict
     return {
         "dangerous_confirmation_phrase": get_dangerous_confirmation_phrase(),
         "default_dangerous_confirmation_phrase": DEFAULT_DANGEROUS_CONFIRMATION_PHRASE,
+        "user_address_name": get_user_address_name(),
+        "default_user_address_name": DEFAULT_USER_ADDRESS_NAME,
         "refreshed": refreshed,
     }
 
@@ -173,16 +189,23 @@ def dangerous_confirmation_settings(request):
 
     serializer = DangerousConfirmationSettingsSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    phrase = set_dangerous_confirmation_phrase(
-        serializer.validated_data["dangerous_confirmation_phrase"]
-    )
+    phrase = None
+    user_address_name = None
+    if "dangerous_confirmation_phrase" in serializer.validated_data:
+        phrase = set_dangerous_confirmation_phrase(
+            serializer.validated_data["dangerous_confirmation_phrase"]
+        )
+    if "user_address_name" in serializer.validated_data:
+        user_address_name = set_user_address_name(
+            serializer.validated_data["user_address_name"]
+        )
     refreshed = refresh_openbase_instruction_files_from_installation()
-    return Response(
-        {
-            **_dangerous_confirmation_settings_payload(refreshed=refreshed),
-            "dangerous_confirmation_phrase": phrase,
-        }
-    )
+    payload = _dangerous_confirmation_settings_payload(refreshed=refreshed)
+    if phrase is not None:
+        payload["dangerous_confirmation_phrase"] = phrase
+    if user_address_name is not None:
+        payload["user_address_name"] = user_address_name
+    return Response(payload)
 
 
 @api_view(["GET", "PATCH"])

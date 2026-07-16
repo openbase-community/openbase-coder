@@ -46,6 +46,8 @@ def test_dangerous_confirmation_settings_defaults_to_existing_phrase(
     assert response.status_code == 200
     assert response.data["dangerous_confirmation_phrase"] == "yes, proceed"
     assert response.data["default_dangerous_confirmation_phrase"] == "yes, proceed"
+    assert response.data["user_address_name"] == "there"
+    assert response.data["default_user_address_name"] == "there"
 
 
 def test_dangerous_confirmation_settings_saves_phrase_and_refreshes(
@@ -72,15 +74,20 @@ def test_dangerous_confirmation_settings_saves_phrase_and_refreshes(
         _authenticated_request(
             "PATCH",
             "/api/settings/dangerous-confirmation/",
-            {"dangerous_confirmation_phrase": "ship it"},
+            {
+                "dangerous_confirmation_phrase": "ship it",
+                "user_address_name": "Sam",
+            },
         )
     )
 
     assert response.status_code == 200
     assert response.data["dangerous_confirmation_phrase"] == "ship it"
+    assert response.data["user_address_name"] == "Sam"
     assert response.data["refreshed"] is True
     assert refreshed == ["refresh"]
     assert console_settings.get_dangerous_confirmation_phrase() == "ship it"
+    assert console_settings.get_user_address_name() == "Sam"
 
 
 def test_agents_generation_settings_defaults_to_include_normal_agents(
