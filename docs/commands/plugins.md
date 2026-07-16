@@ -51,7 +51,7 @@ venv, which persists on its own.
 
 In standalone installs, the versioned runtime package is replaced wholesale on
 upgrade, so plugin packages install into the stable plugin site directory
-`~/.openbase/plugins/site` instead. Every Openbase Coder process adds that
+`~/.openbase/plugins/site` instead. Every Openbase process adds that
 directory to `sys.path` at startup, so desktop package upgrades do not lose
 installed plugins.
 

@@ -1,6 +1,6 @@
 # Desktop App
 
-The Openbase Coder desktop app is the main Mac interface to the product. It
+The Openbase desktop app is the main Mac interface to the product. It
 bundles the `openbase-coder` CLI runtime, walks you through first-time setup,
 and then presents the dashboard: projects, coding threads, reports, approvals,
 routines, skills, service health, and settings.

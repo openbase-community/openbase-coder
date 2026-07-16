@@ -71,7 +71,7 @@ def server(
     skip_migrations: bool,
     skip_collectstatic: bool,
 ) -> None:
-    """Start the Openbase Coder Cli server."""
+    """Start the Openbase CLI server."""
     # Set up the Django environment
     setup_django_environment()
     data_dir = get_data_dir()

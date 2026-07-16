@@ -37,7 +37,7 @@ class InstallationConfig:
         if found_version > INSTALLATION_SCHEMA_VERSION:
             raise ValueError(
                 f"installation.json schema {found_version} was written by a "
-                "newer Openbase Coder; update the CLI."
+                "newer Openbase; update the CLI."
             )
         field_names = {field.name for field in fields(cls)}
         return cls(**{key: value for key, value in data.items() if key in field_names})

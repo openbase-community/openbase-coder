@@ -59,7 +59,7 @@ Useful keys:
 
 ## TTS Replacements
 
-Openbase Coder formats spoken text before sending it to Cartesia. Built-in
+Openbase formats spoken text before sending it to Cartesia. Built-in
 pronunciation defaults cover common acronyms such as `AWS`, `API`, `TTS`, and
 `LLM`.
 
@@ -72,7 +72,7 @@ the voice process, edit:
 
 The formatter checks this file on each TTS formatting pass and reloads it when
 the path, modification time, or size changes. The file is optional. If it is
-missing or invalid, Openbase Coder keeps using built-in defaults.
+missing or invalid, Openbase keeps using built-in defaults.
 
 Example:
 

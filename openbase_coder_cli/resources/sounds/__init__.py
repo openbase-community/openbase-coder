@@ -1,1 +1,1 @@
-"""Bundled Openbase Coder sounds."""
+"""Bundled Openbase sounds."""

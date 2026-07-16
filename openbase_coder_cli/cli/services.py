@@ -64,7 +64,7 @@ def _install_default_services() -> None:
 
 @click.group()
 def services() -> None:
-    """Service lifecycle management for Openbase Coder."""
+    """Service lifecycle management for Openbase."""
 
 
 @services.command()

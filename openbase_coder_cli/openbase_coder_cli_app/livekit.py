@@ -145,7 +145,7 @@ def _livekit_client_token_credentials() -> tuple[str, str]:
                     "Local LiveKit client token credentials are not configured. "
                     "Run 'openbase-coder setup' to generate "
                     "LIVEKIT_CLIENT_API_KEY and LIVEKIT_CLIENT_API_SECRET, then "
-                    "restart the Openbase Coder services."
+                    "restart the Openbase services."
                 )
             }
         )
@@ -158,7 +158,7 @@ def _livekit_client_token_credentials() -> tuple[str, str]:
                 "detail": (
                     "Client-facing LiveKit token credentials must be separate "
                     "from the local server credentials. Run 'openbase-coder setup' "
-                    "to regenerate them, then restart the Openbase Coder services."
+                    "to regenerate them, then restart the Openbase services."
                 )
             }
         )

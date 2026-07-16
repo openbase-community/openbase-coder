@@ -1,6 +1,6 @@
 # Voice Routing
 
-Openbase Coder voice sessions normally start with the LiveKit dispatcher. The
+Openbase voice sessions normally start with the LiveKit dispatcher. The
 dispatcher is the routing agent for the private voice room: it can start or
 resume Super Agents, transfer the active voice route to one of them, and accept
 the route back when the user is done speaking directly with that agent.

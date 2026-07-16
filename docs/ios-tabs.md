@@ -1,6 +1,6 @@
 # iOS App
 
-The Openbase iOS app is the phone client for Openbase Coder. It is where you
+The Openbase iOS app is the phone client for Openbase. It is where you
 hold voice calls with the dispatcher and Super Agents, follow and steer coding
 threads, approve agent requests, read reports, and review diffs — all against
 the local runtime that the [desktop app](desktop-app.md) or `openbase-coder`

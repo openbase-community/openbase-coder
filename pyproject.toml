@@ -1,6 +1,6 @@
 [project]
 name = "openbase-coder"
-description = "OpenBase Coder CLI with embedded server"
+description = "Openbase CLI with embedded server"
 authors = [{ name = "Gabe Montague", email = "gabe@openbase.com" }]
 license = "AGPL-3.0-only"
 readme = "README.md"

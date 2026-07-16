@@ -72,3 +72,34 @@ def test_desktop_screen_share_rejects_linux(monkeypatch):
 
     assert result.exit_code != 0
     assert "macOS Electron app" in result.output
+
+
+def test_desktop_launch_prefers_rebranded_app(monkeypatch):
+    calls = []
+
+    def fake_run(args, **_kwargs):
+        calls.append(args)
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(desktop_cli.subprocess, "run", fake_run)
+
+    desktop_cli._launch_desktop_app()
+
+    assert calls == [["open", "-a", "Openbase"]]
+
+
+def test_desktop_launch_falls_back_to_legacy_app(monkeypatch):
+    calls = []
+
+    def fake_run(args, **_kwargs):
+        calls.append(args)
+        return type("Result", (), {"returncode": 0 if len(calls) == 2 else 1})()
+
+    monkeypatch.setattr(desktop_cli.subprocess, "run", fake_run)
+
+    desktop_cli._launch_desktop_app()
+
+    assert calls == [
+        ["open", "-a", "Openbase"],
+        ["open", "-a", "Openbase Coder"],
+    ]

@@ -1,4 +1,4 @@
-"""Self-update for standalone Openbase Coder installs.
+"""Self-update for standalone Openbase installs.
 
 The full contract (feed, atomicity, rollback, quiescing, channels, signing)
 lives in the workspace ``AUTO_UPDATE.md`` guide — keep the two in sync.

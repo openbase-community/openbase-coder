@@ -2,10 +2,10 @@
   "template": "https://github.com/openbase-community/templates.git#cli-with-db",
   "template_commit": "00040c2dc82463468f80a34f5dcfd387c125fe4f",
   "name_snake": "openbase_coder_cli",
-  "name_pretty": "Openbase Coder Cli",
+  "name_pretty": "Openbase CLI",
   "variables": {
     "cli_command": "openbase-coder",
-    "description": "OpenBase Coder CLI with embedded server",
+    "description": "Openbase CLI with embedded server",
     "author_name": "Gabe Montague",
     "author_email": "gabe@openbase.com",
     "author_github_name": "gabemontague",
@@ -15,6 +15,6 @@
     "homebrew_tap_location": "gabemontague/homebrew-tap",
     "publish": false,
     "name_snake": "openbase_coder_cli",
-    "name_pretty": "Openbase Coder Cli"
+    "name_pretty": "Openbase CLI"
   }
 }

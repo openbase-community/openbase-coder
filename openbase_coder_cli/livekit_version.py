@@ -1,4 +1,4 @@
-"""The livekit-server version Openbase Coder ships and dev installs run.
+"""The livekit-server version Openbase ships and dev installs run.
 
 Single source of truth for the pinned LiveKit engine: the release workflow
 refuses to package any other version (bump this constant deliberately when

@@ -1,7 +1,7 @@
 """Locate or install coding-backend CLI binaries (codex, claude).
 
 Neither backend CLI ships inside the standalone runtime package: both
-self-update and release far more often than Openbase Coder. Instead setup
+self-update and release far more often than Openbase. Instead setup
 installs the one the selected backend needs on demand — codex from its GitHub
 release binaries into ``~/.openbase/bin``, claude via Anthropic's official
 native installer.

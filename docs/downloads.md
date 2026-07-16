@@ -1,16 +1,16 @@
 # Downloads
 
-Download the Openbase Coder apps for your devices.
+Download the Openbase apps for your devices.
 
 | Platform | Download |
 |---|---|
-| Mac | [Download the Apple Silicon Mac app](https://openbase-coder-desktop-releases-632795836081-us-east-1.s3.amazonaws.com/mac/Openbase-Coder-latest-arm64.dmg) |
+| Mac | [Download the Apple Silicon Mac app](https://openbase-coder-desktop-releases-632795836081-us-east-1.s3.amazonaws.com/mac/Openbase-latest-arm64.dmg) |
 | iOS | [Join the iOS beta on TestFlight](https://testflight.apple.com/join/DVTh9CMH) |
 | Android | [Download the Android APK](https://openbase.cloud/downloads/openbase-coder-android.apk) |
 
 What each one is for:
 
-- The **Mac app** is how you install Openbase Coder: it bundles the CLI
+- The **Mac app** is how you install Openbase: it bundles the CLI
   runtime, runs guided setup, and hosts the full dashboard. See
   [Desktop App](desktop-app.md). To run the same setup by hand in a
   terminal instead of letting the app drive it, see

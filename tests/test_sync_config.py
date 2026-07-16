@@ -54,7 +54,7 @@ def test_read_sync_config_refuses_newer_schema(tmp_path: Path) -> None:
     config_path = tmp_path / "sync-config.json"
     config_path.write_text(json.dumps({"schema_version": 99}), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="newer Openbase Coder"):
+    with pytest.raises(ValueError, match="newer Openbase"):
         sync_config.read_sync_config(config_path)
 
 

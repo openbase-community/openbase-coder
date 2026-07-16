@@ -25,7 +25,7 @@ download_text() {
     wget -q -O - "$url"
     return
   fi
-  echo "curl or wget is required to install Openbase Coder." >&2
+  echo "curl or wget is required to install Openbase." >&2
   exit 1
 }
 
@@ -40,7 +40,7 @@ download_file() {
     wget -q -O "$output" "$url"
     return
   fi
-  echo "curl or wget is required to install Openbase Coder." >&2
+  echo "curl or wget is required to install Openbase." >&2
   exit 1
 }
 
@@ -54,7 +54,7 @@ file_sha256() {
     sha256sum "$path" | awk '{print $1}'
     return
   fi
-  echo "shasum or sha256sum is required to verify Openbase Coder." >&2
+  echo "shasum or sha256sum is required to verify Openbase." >&2
   exit 1
 }
 
@@ -79,7 +79,7 @@ resolve_version() {
   release_json="$(download_text "https://api.github.com/repos/$REPO/releases/latest")"
   resolved="$(printf '%s\n' "$release_json" | sed -n 's/.*"tag_name":[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -n 1)"
   if [ -z "$resolved" ]; then
-    echo "Unable to resolve latest Openbase Coder release." >&2
+    echo "Unable to resolve latest Openbase release." >&2
     exit 1
   fi
   printf '%s\n' "$resolved"
@@ -115,8 +115,8 @@ add_to_path() {
     *":$BIN_DIR:"*) return ;;
   esac
   profile="$(pick_profile)"
-  begin="# >>> Openbase Coder installer >>>"
-  end="# <<< Openbase Coder installer <<<"
+  begin="# >>> Openbase installer >>>"
+  end="# <<< Openbase installer <<<"
   if [ -f "$profile" ] && grep -F "$begin" "$profile" >/dev/null 2>&1; then
     return
   fi
@@ -167,14 +167,14 @@ if [ -n "$tarball" ]; then
     exit 1
   fi
   version="${OPENBASE_CODER_INSTALL_VERSION:-}"
-  step "Installing Openbase Coder from local tarball $tarball"
+  step "Installing Openbase from local tarball $tarball"
 else
   version="$(resolve_version)"
   asset="openbase-coder-package-$target.tar.gz"
   manifest="openbase-coder-package_SHA256SUMS"
   download_base="https://github.com/$REPO/releases/download/v$version"
 
-  step "Installing Openbase Coder $version for $target"
+  step "Installing Openbase $version for $target"
 
   download_file "$download_base/$manifest" "$tmp_dir/$manifest"
   expected="$(awk -v asset="$asset" '$2 == asset { print $1 }' "$tmp_dir/$manifest" | head -n 1)"
@@ -218,5 +218,5 @@ chmod 0755 "$BIN_PATH"
 add_to_path
 
 "$BIN_PATH" --version >/dev/null
-step "Openbase Coder installed at $BIN_PATH"
+step "Openbase installed at $BIN_PATH"
 printf 'Run: openbase-coder setup\n'

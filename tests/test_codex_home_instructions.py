@@ -22,7 +22,7 @@ def test_ensure_openbase_agents_md_preserves_user_h2_sections(tmp_path) -> None:
     agents.write_text(
         "# Personal instructions\n\n"
         "- Keep this custom top-level note.\n\n"
-        "## Openbase Coder Instructions\n\n"
+        "## Openbase Instructions\n\n"
         "- Old generated note.\n"
         "- Old repo rule.\n\n"
         "## My Project Notes\n\n"
@@ -38,7 +38,7 @@ def test_ensure_openbase_agents_md_preserves_user_h2_sections(tmp_path) -> None:
 
     assert changed is True
     assert agents.read_text(encoding="utf-8") == (
-        "## Openbase Coder Instructions\n\n"
+        "## Openbase Instructions\n\n"
         f"- These instructions are auto generated from {source}.\n\n"
         "- New repo rule\n"
     )
@@ -174,7 +174,7 @@ def test_refresh_openbase_agents_md_from_installation_uses_saved_workspace(
 
     assert codex_home_instructions.refresh_openbase_agents_md_from_installation()
     assert (codex_home / "AGENTS.md").read_text(encoding="utf-8") == (
-        "## Openbase Coder Instructions\n\n"
+        "## Openbase Instructions\n\n"
         f"- These instructions are auto generated from {source}.\n\n"
         "- Standard rule\n"
     )
@@ -208,7 +208,7 @@ def test_ensure_openbase_agents_md_can_include_normal_codex_agents(
         "## Non-Openbase Instructions\n\n"
         f"- These instructions are included from {normal_agents}.\n\n"
         "- Personal rule\n\n"
-        "## Openbase Coder Instructions\n\n"
+        "## Openbase Instructions\n\n"
         f"- These instructions are auto generated from {source}.\n\n"
         "- Openbase rule\n"
     )

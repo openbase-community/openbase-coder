@@ -1,6 +1,6 @@
 """Openbase git provenance hooks (inject-session-id).
 
-A SessionStart hook for each coding backend Openbase Coder manages. The hook
+A SessionStart hook for each coding backend Openbase manages. The hook
 reads the ``session_id`` from the hook's stdin JSON and injects it back into
 the conversation as additional context, so agents know their own
 thread/session ID and can stamp commits with an ``Agent-Thread-Id`` trailer
@@ -52,7 +52,7 @@ HOOK_SCRIPT = """#!/bin/sh
 # hook's stdin JSON and injects it into the conversation as additionalContext,
 # so the agent knows its own thread/session ID and can stamp commits with an
 # Agent-Thread-Id trailer. Claude Code and Codex share this hook wire format.
-# Managed by Openbase Coder; edits are overwritten on reinstall.
+# Managed by Openbase; edits are overwritten on reinstall.
 
 set -eu
 

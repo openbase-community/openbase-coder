@@ -146,8 +146,8 @@ def _ensure_local_audio_dependencies(runtime_package) -> None:
     version = _python_version(python_path)
     if version >= LOCAL_AUDIO_PYTHON_MAX:
         raise click.ClickException(
-            "Local audio currently requires a Python 3.12 Openbase Coder runtime "
-            "because Kokoro declares Python <3.13. Reinstall Openbase Coder with "
+            "Local audio currently requires a Python 3.12 Openbase runtime "
+            "because Kokoro declares Python <3.13. Reinstall Openbase with "
             "a Python 3.12 standalone package, or use --audio-provider openbase-cloud."
         )
     if _local_audio_dependencies_available(python_path):

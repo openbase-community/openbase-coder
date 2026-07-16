@@ -268,7 +268,7 @@ def test_installation_config_refuses_newer_schema(tmp_path, monkeypatch) -> None
     config_path.write_text(json.dumps({"schema_version": 99}), encoding="utf-8")
     monkeypatch.setattr(installation, "INSTALLATION_JSON_PATH", config_path)
 
-    with pytest.raises(ValueError, match="newer Openbase Coder"):
+    with pytest.raises(ValueError, match="newer Openbase"):
         InstallationConfig.load()
 
 
@@ -278,7 +278,7 @@ def test_dispatcher_config_refuses_newer_schema(tmp_path) -> None:
     config_path = tmp_path / "dispatcher-config.json"
     config_path.write_text(json.dumps({"schema_version": 99}), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="newer Openbase Coder"):
+    with pytest.raises(ValueError, match="newer Openbase"):
         dispatcher_config.read_dispatcher_config(config_path)
 
 

@@ -2,7 +2,7 @@
 
 Standalone runtime packages are replaced wholesale on upgrade, so plugin
 Python packages must not live inside them. They are installed into
-``~/.openbase/plugins/site`` instead, which every Openbase Coder process adds
+``~/.openbase/plugins/site`` instead, which every Openbase process adds
 to ``sys.path`` at import time (see the package ``__init__``).
 
 Dev installs use the same site dir: installing plugins into the workspace

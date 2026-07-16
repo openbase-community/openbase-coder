@@ -5,7 +5,7 @@ Code sync keeps the same working directories on two or more of your machines
 near-realtime sync, so your secondary machine is always ready to take a voice
 call. Files move on save — no commits, no pushes, no manual copying.
 
-Under the hood, Openbase Coder runs a fully managed
+Under the hood, Openbase runs a fully managed
 [Syncthing](https://syncthing.net) instance as the `code-sync` service. You
 never configure Syncthing yourself: device pairing comes from your Openbase
 Cloud device registry, transport is pinned to your private Tailscale network,

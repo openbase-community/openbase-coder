@@ -1,6 +1,6 @@
 # self-update
 
-Update a standalone Openbase Coder install to the latest release for its
+Update a standalone Openbase install to the latest release for its
 channel. The full contract (feed, atomicity, rollback, quiescing, channels,
 signing) lives in the workspace `AUTO_UPDATE.md` guide.
 

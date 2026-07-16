@@ -1,1 +1,1 @@
-"""Bundled Openbase Coder resources."""
+"""Bundled Openbase resources."""

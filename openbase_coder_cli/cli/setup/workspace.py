@@ -1,6 +1,6 @@
 """Workspace phase: locate the dev workspace and install local runtime assets.
 
-Openbase Coder has exactly two deployment modes:
+Openbase has exactly two deployment modes:
 
 - Development: the CLI is an editable install (``uv tool install -e``) or a
   workspace venv run against a developer's workspace checkout. Setup never
@@ -54,7 +54,7 @@ def resolve_dev_workspace_dir(explicit_dir: str | None) -> str:
         workspace = Path(explicit_dir).expanduser()
         if not _looks_like_workspace(workspace):
             raise click.ClickException(
-                f"{workspace} does not look like an Openbase Coder workspace "
+                f"{workspace} does not look like an Openbase workspace "
                 "checkout (expected a multi.json and a cli/ repo)."
             )
         return str(workspace)
@@ -70,7 +70,7 @@ def resolve_dev_workspace_dir(explicit_dir: str | None) -> str:
         return str(editable)
 
     raise click.ClickException(
-        "No Openbase Coder workspace found. Clone "
+        "No Openbase workspace found. Clone "
         "https://github.com/openbase-community/openbase-coder-workspace, run "
         "its scripts/setup, or pass --workspace-dir pointing at your checkout. "
         "End users should install the standalone package instead (see the "
@@ -142,7 +142,7 @@ def _ensure_thread_sync_exchange_dir() -> None:
     marker_path = marker_dir / THREAD_SYNC_MARKER_FILE_NAME
     if not marker_path.exists():
         marker_path.write_text(
-            "Openbase Coder cross-device Codex thread snapshot exchange.\n",
+            "Openbase cross-device Codex thread snapshot exchange.\n",
             encoding="utf-8",
         )
 
