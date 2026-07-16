@@ -87,6 +87,7 @@ def test_keep_awake_status_reflects_disabled_setting(monkeypatch) -> None:
     payload = keep_awake.keep_awake_status_payload()
 
     assert payload["enabled"] is False
+    assert payload["optional"] is True
     assert payload["running"] is False
     assert payload["command"] == "caffeinate -i -d"
 

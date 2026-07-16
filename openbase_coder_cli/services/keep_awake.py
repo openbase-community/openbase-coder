@@ -20,7 +20,7 @@ def keep_awake_status_payload() -> dict[str, object]:
         "name": "Keep Awake",
         "port": None,
         "running": enabled and bool(caffeinate),
-        "optional": False,
+        "optional": not enabled,
         "enabled": enabled,
         "command": " ".join(["caffeinate", *CAFFEINATE_ARGS]),
         "assertions": [
