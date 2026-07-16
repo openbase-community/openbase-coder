@@ -24,6 +24,21 @@ def test_service_status_includes_background_openbase_services(monkeypatch) -> No
     monkeypatch.setattr(services_views, "_check_web_backend", lambda: True)
     monkeypatch.setattr(
         services_views,
+        "keep_awake_status_payload",
+        lambda: {
+            "name": "Keep Awake",
+            "port": None,
+            "running": True,
+            "optional": False,
+            "command": "caffeinate -i -d",
+            "assertions": [
+                {"flag": "-i", "label": "Prevent idle sleep"},
+                {"flag": "-d", "label": "Prevent display sleep"},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        services_views,
         "tailscale_serve_health",
         lambda: SimpleNamespace(
             healthy=True,
@@ -103,7 +118,18 @@ def test_service_status_includes_background_openbase_services(monkeypatch) -> No
         "error": None,
         "optional": False,
     }
-    assert len(response.data["services"]) == 12
+    assert response.data["services"]["keep_awake"] == {
+        "name": "Keep Awake",
+        "port": None,
+        "running": True,
+        "optional": False,
+        "command": "caffeinate -i -d",
+        "assertions": [
+            {"flag": "-i", "label": "Prevent idle sleep"},
+            {"flag": "-d", "label": "Prevent display sleep"},
+        ],
+    }
+    assert len(response.data["services"]) == 13
 
 
 def test_service_status_omits_codex_app_server_on_claude_code_backend(
@@ -115,6 +141,18 @@ def test_service_status_omits_codex_app_server_on_claude_code_backend(
     monkeypatch.setattr(services_views, "_check_port", lambda port: True)
     monkeypatch.setattr(services_views, "_check_tailscale", lambda: True)
     monkeypatch.setattr(services_views, "_check_web_backend", lambda: True)
+    monkeypatch.setattr(
+        services_views,
+        "keep_awake_status_payload",
+        lambda: {
+            "name": "Keep Awake",
+            "port": None,
+            "running": True,
+            "optional": False,
+            "command": "caffeinate -i -d",
+            "assertions": [],
+        },
+    )
     monkeypatch.setattr(
         services_views,
         "tailscale_serve_health",
@@ -143,7 +181,7 @@ def test_service_status_omits_codex_app_server_on_claude_code_backend(
     assert "codex_app_server" not in response.data["services"]
     assert "claude_thread_sync" in response.data["services"]
     assert "claude_thread_device_sync" in response.data["services"]
-    assert len(response.data["services"]) == 11
+    assert len(response.data["services"]) == 12
 
 
 def test_thread_device_sync_status_returns_snapshot_payload(monkeypatch) -> None:

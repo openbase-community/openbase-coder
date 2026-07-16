@@ -11,6 +11,21 @@ from collections.abc import Callable, Iterator
 CAFFEINATE_ARGS = ("-i", "-d")
 
 
+def keep_awake_status_payload() -> dict[str, object]:
+    caffeinate = shutil.which("caffeinate") if sys.platform == "darwin" else None
+    return {
+        "name": "Keep Awake",
+        "port": None,
+        "running": bool(caffeinate),
+        "optional": False,
+        "command": " ".join(["caffeinate", *CAFFEINATE_ARGS]),
+        "assertions": [
+            {"flag": "-i", "label": "Prevent idle sleep"},
+            {"flag": "-d", "label": "Prevent display sleep"},
+        ],
+    }
+
+
 def start_keep_awake(
     *, warn: Callable[[str], None] | None = None
 ) -> subprocess.Popen[bytes] | None:

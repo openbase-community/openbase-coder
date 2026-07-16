@@ -42,6 +42,7 @@ from openbase_coder_cli.services.console_settings import (
     set_include_normal_codex_agents_in_openbase_agents,
 )
 from openbase_coder_cli.services.definitions import SERVICES
+from openbase_coder_cli.services.keep_awake import keep_awake_status_payload
 from openbase_coder_cli.services.launchctl_tools import (
     list_launchctl_services_payload,
     run_launchctl_service_action,
@@ -377,6 +378,7 @@ def service_status(request):
             "optional": False,
         },
         "tailscale": {"name": "Tailscale", "port": None, "optional": False},
+        "keep_awake": keep_awake_status_payload(),
     }
     # Backend-scoped services (e.g. the Codex App Server on the claude_code
     # backend) are intentionally not installed, so reporting them would raise
