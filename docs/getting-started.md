@@ -16,9 +16,9 @@ guide when you prefer the terminal or are setting up a headless machine.
 Openbase Coder has exactly two deployment modes:
 
 - **Standalone (production)**: a bundled runtime package, shipped inside the
-  desktop app or installed via `install.sh`, containing Python, the CLI,
-  LiveKit server, a prebuilt console, agent instructions, and skills. It is
-  detected automatically via `openbase-coder-package.json`.
+  desktop app, containing Python, the CLI, LiveKit server, a prebuilt
+  console, agent instructions, and skills. It is detected automatically via
+  `openbase-coder-package.json`.
 - **Development**: a cloned `openbase-coder-workspace` checkout set up with the
   workspace's `./scripts/setup` script, with the CLI installed editable
   (`uv tool install -e ./cli`) or run via `uv run`.

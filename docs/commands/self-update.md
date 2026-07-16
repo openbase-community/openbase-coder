@@ -25,6 +25,15 @@ openbase-coder self-update --force    # update even during a voice session
 openbase-coder self-update --json     # machine-readable result (UI-driven)
 ```
 
+Check the installed versions and update availability at any time:
+
+```bash
+openbase-coder version
+```
+
+It prints the CLI version, the active standalone package (target, channel,
+layout), and whether a newer release is available.
+
 ## Behavior
 
 1. Refuses in development-workspace installs (git-managed; no auto-update).

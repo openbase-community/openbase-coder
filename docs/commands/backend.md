@@ -14,6 +14,14 @@ openbase-coder backend list
 openbase-coder backend use codex
 ```
 
+## Options
+
+`status` and `use` accept:
+
+| Option | Default | Description |
+|---|---|---|
+| `--env-file PATH` | `~/.openbase/.env` | Openbase `.env` file to inspect or update |
+
 ## Supported Backends
 
 - `codex`: default native Codex app-server backend.

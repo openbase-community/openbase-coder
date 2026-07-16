@@ -10,7 +10,9 @@ The workflow builds a macOS standalone tarball that includes:
 - Console static assets
 - Agent instructions and bundled skills
 - A real `livekit-server` binary installed from Homebrew on the macOS runner
-- `install.sh` for one-line install and upgrade
+- `install.sh` — internal installer script supporting the desktop seed,
+  self-update, and manual desktop setup flows (not a separate install
+  pathway)
 - SHA-256 checksums
 
 Run it from GitHub Actions with a release version such as `0.4.0` or `v0.4.0`. The workflow creates a tag like `v0.4.0`.

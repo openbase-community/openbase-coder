@@ -23,10 +23,11 @@ the output in the app. The manual setup path is the same underlying operation,
 but you run each command yourself from a terminal so you can inspect what will
 happen and stop at any point.
 
-The default setup path is:
+Install and open the desktop app first ([Downloads](downloads.md)); its
+prerequisite check activates the bundled CLI runtime automatically. Then run
+setup yourself:
 
 ```bash
-curl -fsSL https://github.com/openbase-community/openbase-coder/releases/latest/download/install.sh | sh
 openbase-coder setup
 ```
 
@@ -41,9 +42,9 @@ Install Tailscale before continuing if you want iPhone-to-Mac voice networking:
 open https://tailscale.com/download/mac
 ```
 
-The standalone CLI installer bundles Python, Openbase Coder dependencies, the
-console build, and LiveKit server. Source-development setup still needs `uv`,
-Git, Node, and workspace tooling.
+The desktop app's bundled runtime package includes Python, Openbase Coder
+dependencies, the console build, and LiveKit server. Source-development setup
+still needs `uv`, Git, Node, and workspace tooling.
 
 If you want fully local Kokoro/MLX audio, run setup with
 `--audio-provider local`; setup installs the optional local-audio packages into

@@ -35,18 +35,10 @@ open it, and follow the guided setup. It installs the bundled CLI, walks you
 through choosing a coding backend and voice provider, signs you in, and pairs
 your iPhone over Tailscale.
 
-To set up from a terminal instead:
-
-```bash
-# Install the standalone macOS package
-curl -fsSL https://github.com/openbase-community/openbase-coder/releases/latest/download/install.sh | sh
-
-# Bootstrap Openbase locally
-openbase-coder setup
-
-# Run server in foreground
-openbase-coder server --host 0.0.0.0 --port 7999
-```
+Prefer to drive the terminal yourself? Install and open the desktop app —
+it activates the bundled CLI runtime automatically — then follow
+[Manual Setup for the Desktop App](manual-installation.md) to run the same
+setup, login, and service steps by hand.
 
 For source development, clone the workspace repo and run its setup script:
 

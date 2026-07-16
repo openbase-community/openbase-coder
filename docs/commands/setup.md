@@ -18,9 +18,9 @@ openbase-coder setup [OPTIONS]
 Setup supports exactly two deployment modes and picks one automatically:
 
 - **Standalone (production)**: a bundled runtime package — shipped inside the
-  desktop app or installed via `install.sh` — containing Python, the CLI,
-  LiveKit server, a prebuilt console, agent instructions, and skills. Detected
-  automatically via the package's `openbase-coder-package.json`.
+  desktop app — containing Python, the CLI, LiveKit server, a prebuilt
+  console, agent instructions, and skills. Detected automatically via the
+  package's `openbase-coder-package.json`.
 - **Development**: no runtime package is present, so setup runs against a
   developer's `openbase-coder-workspace` checkout. Setup **never clones or
   git-updates a workspace**. With `--workspace-dir` omitted it discovers the
@@ -34,12 +34,10 @@ Setup supports exactly two deployment modes and picks one automatically:
   `openbase-coder-workspace` (and run its `./scripts/setup`), pass
   `--workspace-dir`, or use the standalone install instead.
 
-For normal macOS installs, prefer the standalone path:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/openbase-community/openbase-coder/main/cli/scripts/install.sh | sh
-openbase-coder setup
-```
+For normal macOS installs, prefer the desktop app: it activates the bundled
+runtime automatically, and its guided flow runs `openbase-coder setup` for
+you. To run setup yourself from a terminal instead, follow
+[Manual Setup for the Desktop App](../manual-installation.md).
 
 For development, run the workspace script from your checkout root; it runs
 `multi sync --install-set default` and then
@@ -97,6 +95,8 @@ declares Python `<3.13`.
 | `--cartesia-api-key TEXT` | env `CARTESIA_API_KEY` | Optional TTS key |
 | `--skip-services` | `false` | Skip background service installation |
 | `--link-codex-config` | `false` | Symlink Openbase's service Codex config to `~/.codex/config.toml`. **Warning:** setup then writes Openbase's permission overrides (`sandbox_mode = "danger-full-access"` and a no-prompt approval policy) into that shared normal config |
+| `--link-claude-config` | `false` | Symlink Openbase's Claude settings to the normal `~/.claude/settings.json` |
+| `--fast-mode/--no-fast-mode` | `true` | Use the fast service tier for the voice dispatcher. Super Agents stay on the standard tier; both are adjustable in console settings |
 | `--backend NAME` | prompted for new env files | Default coding backend: `codex`, `claude-code`, or `openbase-cloud`. Existing env files are only changed when provided |
 | `--audio-provider NAME` | `openbase-cloud` for new dispatcher configs | Voice audio provider. Existing configs are only changed when provided |
 | `--json-progress` | `false` | Emit NDJSON step events on stdout for UI-driven setup; human-readable output moves to stderr |
