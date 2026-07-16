@@ -1,10 +1,10 @@
 """Auto-link personal agent skills into the Openbase-managed agent homes.
 
 When ``auto_link_personal_skills`` is enabled in the dispatcher config,
-every skill under ``~/.agents/skills`` is symlinked into both the Openbase
-Codex home and the Openbase Claude config dir. Claude Code fully overrides the
-user-level home when ``CLAUDE_CONFIG_DIR`` is set, so without these links
-voice sessions would not see personal skills at all.
+skills under the user's normal Codex and Claude Code skill homes are symlinked
+into both the Openbase Codex home and the Openbase Claude config dir. Claude
+Code fully overrides the user-level home when ``CLAUDE_CONFIG_DIR`` is set, so
+without these links voice sessions would not see personal skills at all.
 
 Standalone (no Django imports) so it can run from the Django app startup, the
 skills API, and the ``openbase-coder routines run-loop`` service, which
@@ -16,11 +16,26 @@ from __future__ import annotations
 from pathlib import Path
 
 from openbase_coder_cli import dispatcher_config
-from openbase_coder_cli.paths import CODEX_HOME_DIR, OPENBASE_CLAUDE_CONFIG_DIR
+from openbase_coder_cli.paths import (
+    CODEX_HOME_DIR,
+    NORMAL_CLAUDE_CONFIG_DIR,
+    OPENBASE_CLAUDE_CONFIG_DIR,
+)
 
 
 def home_skills_dir() -> Path:
     return Path.home() / ".agents" / "skills"
+
+
+def normal_claude_skills_dir() -> Path:
+    return NORMAL_CLAUDE_CONFIG_DIR / "skills"
+
+
+def personal_skill_source_dirs() -> dict[str, Path]:
+    return {
+        "home": home_skills_dir(),
+        "normal_claude": normal_claude_skills_dir(),
+    }
 
 
 def auto_link_target_dirs() -> dict[str, Path]:
@@ -70,35 +85,36 @@ def sync_auto_linked_skills() -> dict:
     errors = 0
 
     if enabled:
-        skill_dirs = list_skill_dirs(home_skills_dir())
-        for target_scope, target_root in auto_link_target_dirs().items():
-            for source_dir in skill_dirs:
-                target_dir = target_root / source_dir.name
-                entry = {
-                    "name": source_dir.name,
-                    "source_scope": "home",
-                    "target_scope": target_scope,
-                    "source_dir": str(source_dir),
-                    "target_dir": str(target_dir),
-                }
-                try:
-                    if link_skill_dir(source_dir, target_dir):
-                        created += 1
-                        entry["status"] = "linked"
-                        entry["created"] = True
-                    else:
-                        already_linked += 1
-                        entry["status"] = "already_linked"
-                        entry["created"] = False
-                except FileExistsError as exc:
-                    conflicts += 1
-                    entry["status"] = "conflict"
-                    entry["error"] = str(exc)
-                except OSError as exc:
-                    errors += 1
-                    entry["status"] = "error"
-                    entry["error"] = str(exc)
-                results.append(entry)
+        for source_scope, source_root in personal_skill_source_dirs().items():
+            skill_dirs = list_skill_dirs(source_root)
+            for target_scope, target_root in auto_link_target_dirs().items():
+                for source_dir in skill_dirs:
+                    target_dir = target_root / source_dir.name
+                    entry = {
+                        "name": source_dir.name,
+                        "source_scope": source_scope,
+                        "target_scope": target_scope,
+                        "source_dir": str(source_dir),
+                        "target_dir": str(target_dir),
+                    }
+                    try:
+                        if link_skill_dir(source_dir, target_dir):
+                            created += 1
+                            entry["status"] = "linked"
+                            entry["created"] = True
+                        else:
+                            already_linked += 1
+                            entry["status"] = "already_linked"
+                            entry["created"] = False
+                    except FileExistsError as exc:
+                        conflicts += 1
+                        entry["status"] = "conflict"
+                        entry["error"] = str(exc)
+                    except OSError as exc:
+                        errors += 1
+                        entry["status"] = "error"
+                        entry["error"] = str(exc)
+                    results.append(entry)
 
     return {
         "enabled": enabled,
