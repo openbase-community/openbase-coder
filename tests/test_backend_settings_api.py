@@ -22,6 +22,7 @@ def _authenticated_request(method: str, path: str, data: dict | None = None):
     factory = APIRequestFactory()
     request_factory = {
         "GET": factory.get,
+        "POST": factory.post,
         "PUT": factory.put,
     }[method]
     request = request_factory(path, data=data or {}, format="json")
@@ -187,6 +188,11 @@ def test_coding_backend_settings_persists_claude_code_selection(
 ) -> None:
     env_file = tmp_path / ".env"
     monkeypatch.setattr(backend_settings, "DEFAULT_ENV_FILE_PATH", env_file)
+    monkeypatch.setattr(
+        backend_settings,
+        "claude_auth_status",
+        lambda: SimpleNamespace(logged_in=True, raw_output='{"loggedIn": true}', returncode=0),
+    )
 
     response = backend_settings.coding_backend_settings(
         _authenticated_request(
@@ -198,6 +204,8 @@ def test_coding_backend_settings_persists_claude_code_selection(
 
     assert response.status_code == 200
     assert response.data["backend"] == "claude_code"
+    assert response.data["claude_auth"]["logged_in"] is True
+    assert response.data["claude_auth"]["command"] == "openbase-coder claude sync-state"
     assert response.data["changed"] is True
     assert "Claude Code" in response.data["restart_hint"]
     assert "OPENBASE_CODING_BACKEND=claude_code" in env_file.read_text(encoding="utf-8")
@@ -221,3 +229,51 @@ def test_coding_backend_settings_rejects_unsupported_backend(
     assert response.status_code == 400
     assert "backend" in response.data
     assert not env_file.exists()
+
+
+def test_claude_auth_settings_hidden_for_non_claude_backend(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENBASE_CODING_BACKEND=codex\n", encoding="utf-8")
+    monkeypatch.setattr(backend_settings, "DEFAULT_ENV_FILE_PATH", env_file)
+
+    response = backend_settings.claude_auth_settings(
+        _authenticated_request("GET", "/api/settings/coding-backend/claude-auth/")
+    )
+
+    assert response.status_code == 400
+    assert response.data["backend"] == "codex"
+
+
+def test_claude_auth_settings_syncs_state_and_reports_status(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENBASE_CODING_BACKEND=claude-code\n", encoding="utf-8")
+    monkeypatch.setattr(backend_settings, "DEFAULT_ENV_FILE_PATH", env_file)
+    monkeypatch.setattr(
+        backend_settings,
+        "sync_normal_claude_state",
+        lambda: SimpleNamespace(state_updated=True, message="Synced normal Claude Code state into Openbase."),
+    )
+    monkeypatch.setattr(backend_settings, "copy_normal_claude_keychain", lambda: True)
+    statuses = iter(
+        [
+            SimpleNamespace(logged_in=False, raw_output='{"loggedIn": false}', returncode=1),
+            SimpleNamespace(logged_in=True, raw_output='{"loggedIn": true}', returncode=0),
+        ]
+    )
+    monkeypatch.setattr(backend_settings, "claude_auth_status", lambda: next(statuses))
+
+    response = backend_settings.claude_auth_settings(
+        _authenticated_request("POST", "/api/settings/coding-backend/claude-auth/")
+    )
+
+    assert response.status_code == 200
+    assert response.data["command"] == "openbase-coder claude sync-state"
+    assert response.data["logged_in"] is True
+    assert response.data["state_updated"] is True
+    assert response.data["keychain_copied"] is True

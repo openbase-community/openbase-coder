@@ -37,6 +37,7 @@ from openbase_coder_cli.openbase_coder_cli_app.auth import (
     auth_session,
 )
 from openbase_coder_cli.openbase_coder_cli_app.backend_settings import (
+    claude_auth_settings,
     coding_backend_settings,
 )
 from openbase_coder_cli.openbase_coder_cli_app.brain_readiness import brain_readiness
@@ -291,6 +292,7 @@ __all__ = [
     "bootstrap_run",
     "brain_readiness",
     "cartesia_voice_settings",
+    "claude_auth_settings",
     "coding_backend_settings",
     "dangerous_confirmation_settings",
     "devices_list",

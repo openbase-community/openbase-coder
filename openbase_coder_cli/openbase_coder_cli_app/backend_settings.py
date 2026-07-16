@@ -13,6 +13,11 @@ from openbase_coder_cli.backend_config import (
     OPENBASE_CLOUD_BACKEND,
     normalize_backend,
 )
+from openbase_coder_cli.claude_auth import (
+    claude_auth_status,
+    copy_normal_claude_keychain,
+    sync_normal_claude_state,
+)
 from openbase_coder_cli.cli.backend import read_backend, write_backend
 from openbase_coder_cli.paths import DEFAULT_ENV_FILE_PATH
 
@@ -53,9 +58,34 @@ def _backend_note(backend: str) -> str | None:
     return None
 
 
+def _claude_auth_payload(*, sync: bool = False) -> dict:
+    state_updated = False
+    keychain_copied = False
+    message = None
+    if sync:
+        sync_result = sync_normal_claude_state()
+        state_updated = sync_result.state_updated
+        message = sync_result.message
+        keychain_copied = copy_normal_claude_keychain()
+
+    status_result = claude_auth_status()
+    if sync and not status_result.logged_in and keychain_copied:
+        status_result = claude_auth_status()
+
+    return {
+        "command": "openbase-coder claude sync-state",
+        "logged_in": status_result.logged_in,
+        "raw_output": status_result.raw_output,
+        "returncode": status_result.returncode,
+        "state_updated": state_updated,
+        "keychain_copied": keychain_copied,
+        "message": message,
+    }
+
+
 def _backend_payload(*, changed: bool = False) -> dict:
     configured_backend = read_backend(DEFAULT_ENV_FILE_PATH)
-    return {
+    payload = {
         "backend": configured_backend,
         "configured_backend": configured_backend,
         "codex_provider": "openbase_cloud"
@@ -75,6 +105,9 @@ def _backend_payload(*, changed: bool = False) -> dict:
         "restart_required": changed,
         "restart_hint": _restart_hint(configured_backend),
     }
+    if configured_backend == CLAUDE_CODE_BACKEND:
+        payload["claude_auth"] = _claude_auth_payload()
+    return payload
 
 
 @api_view(["GET", "PUT"])
@@ -95,3 +128,18 @@ def coding_backend_settings(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
     return Response(_backend_payload(changed=previous_backend != next_backend))
+
+
+@api_view(["GET", "POST"])
+def claude_auth_settings(request):
+    """Read or sync Openbase's managed Claude Code auth status."""
+    configured_backend = read_backend(DEFAULT_ENV_FILE_PATH)
+    if configured_backend != CLAUDE_CODE_BACKEND:
+        return Response(
+            {
+                "error": "Claude auth settings are available only when the coding backend is Claude Code.",
+                "backend": configured_backend,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return Response(_claude_auth_payload(sync=request.method == "POST"))
