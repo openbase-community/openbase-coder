@@ -750,7 +750,6 @@ def test_persist_thread_id_writes_dispatcher_route_state(tmp_path: Path):
         ws_url="ws://example.invalid",
         cwd="/tmp",
         state_path=str(state_path),
-        dispatcher_config_path=tmp_path / "dispatcher-config.json",
     )
 
     client._thread_id = "dispatcher-1"

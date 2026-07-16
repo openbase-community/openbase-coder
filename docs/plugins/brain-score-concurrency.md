@@ -29,7 +29,7 @@ the existing brain score token file:
 ```
 
 The token file is created with mode `600` and should stay outside tracked repos.
-At runtime, Openbase also accepts `OPENBASE_BRAIN_SCORE_TOKEN` for systems
+At runtime, Openbase Coder also accepts `OPENBASE_BRAIN_SCORE_TOKEN` for systems
 that prefer environment-based secret injection.
 
 Important: this integration targets an early version of the Vibes AI app. Use a

@@ -708,7 +708,7 @@ def test_livekit_companion_session_api_guides_missing_client_credentials(monkeyp
         "detail": (
             "Local LiveKit client token credentials are not configured. "
             "Run 'openbase-coder setup' to generate LIVEKIT_CLIENT_API_KEY and "
-            "LIVEKIT_CLIENT_API_SECRET, then restart the Openbase services."
+            "LIVEKIT_CLIENT_API_SECRET, then restart the Openbase Coder services."
         )
     }
 

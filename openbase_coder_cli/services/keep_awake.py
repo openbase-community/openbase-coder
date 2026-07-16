@@ -1,4 +1,4 @@
-"""Keep the local Mac awake while Openbase services are running."""
+"""Keep the local Mac awake while Openbase Coder services are running."""
 
 from __future__ import annotations
 

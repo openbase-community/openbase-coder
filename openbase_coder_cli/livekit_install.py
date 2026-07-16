@@ -4,7 +4,7 @@ Standalone packages bundle the pinned engine by construction; dev installs
 historically ran whatever Homebrew had. This downloads the exact pin from
 ``livekit_version.py`` into ``~/.openbase/bin`` so both pathways run the same
 engine: Linux from the official LiveKit release binaries, macOS by extracting
-the bundled binary from the latest Openbase standalone package
+the bundled binary from the latest Openbase Coder standalone package
 (upstream publishes no darwin builds). Homebrew/PATH remains a last-resort
 fallback and still trips the version-skew health warning when it diverges.
 """

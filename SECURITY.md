@@ -18,8 +18,8 @@ opportunity to investigate and coordinate a fix.
 
 ## Scope
 
-This policy covers vulnerabilities in the Openbase CLI and its local
+This policy covers vulnerabilities in the Openbase Coder CLI and its local
 runtime services in this repository.
 
 For issues in third-party dependencies, report to the dependency maintainer as
-well as to Openbase if the issue affects Openbase users.
+well as to Openbase if the issue affects Openbase Coder users.

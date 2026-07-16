@@ -100,7 +100,7 @@ images that have an older `openbase-coder` CLI installed.
 This avoids requiring local OpenAI, Anthropic, Cartesia, or AssemblyAI account
 setup for the basic voice-agent path.
 
-## Start Openbase Services
+## Start Openbase Coder Services
 
 Start the default services:
 
@@ -150,7 +150,7 @@ tailscale ip -4
 
 The iOS app builds these URLs from the host:
 
-- Openbase API: `http://<host>:18080`
+- Openbase Coder API: `http://<host>:18080`
 - LiveKit signaling: `ws://<host>:7880`
 
 ## Connect From the iOS App

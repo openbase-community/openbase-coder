@@ -6,7 +6,7 @@ Standalone CLI releases are built by the `Release Standalone CLI` GitHub Actions
 
 The workflow builds a macOS standalone tarball that includes:
 
-- Openbase CLI installed into a bundled standalone Python 3.12 runtime
+- Openbase Coder CLI installed into a bundled standalone Python 3.12 runtime
 - Console static assets
 - Agent instructions and bundled skills
 - A real `livekit-server` binary installed from Homebrew on the macOS runner

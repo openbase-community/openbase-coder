@@ -1,4 +1,4 @@
-"""LiveKit agent entrypoint: server wiring for the Openbase voice session.
+"""LiveKit agent entrypoint: server wiring for the Openbase Coder voice session.
 
 The per-concern implementations live in sibling modules (``config``,
 ``voices``, ``spoken_commands``, ``codex_llm``, ``audio_scoring``,
@@ -94,11 +94,7 @@ from openbase_coder_cli.livekit_agent.config import (  # noqa: F401
     CARTESIA_ANNOUNCER_VOICE_ID,
     CARTESIA_VOICE_ID,
     CODEX_APP_SERVER_URL,
-    DEFAULT_DIRECT_LIVEKIT_INSTRUCTIONS_PATH,
     DEFAULT_LIVEKIT_DISPATCHER_CONFIG_PATH,
-    DIRECT_LIVEKIT_BUILTIN_DEVELOPER_INSTRUCTIONS,
-    DIRECT_LIVEKIT_INSTRUCTIONS_PATH_ENV,
-    DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV,
     DISPATCHER_BUILTIN_DEVELOPER_INSTRUCTIONS,
     LIVEKIT_AGENT_HOST,
     LIVEKIT_AGENT_LOAD_THRESHOLD_ENV,
@@ -129,7 +125,6 @@ from openbase_coder_cli.livekit_agent.config import (  # noqa: F401
     _optional_float_env,
     _optional_int_env,
     _read_instruction_file,
-    load_direct_livekit_developer_instructions,
 )
 from openbase_coder_cli.livekit_agent.logging_utils import (  # noqa: F401
     _event_text_hash,
@@ -356,14 +351,14 @@ def _openbase_cloud_audio_token() -> str:
         token = MachineTokenManager(WEB_BACKEND_URL).get_machine_token()
     except (AuthLoginRequiredError, AuthTransientError, MachineTokenError) as exc:
         raise OpenbaseCloudAudioAuthenticationError(
-            "Openbase Cloud audio is selected, but Openbase could not get "
+            "Openbase Cloud audio is selected, but Openbase Coder could not get "
             "a valid Openbase machine token. Run `openbase-coder login` and "
             "restart the Openbase services, or choose direct provider keys or "
             "local audio in voice settings."
         ) from exc
     if not token:
         raise OpenbaseCloudAudioAuthenticationError(
-            "Openbase Cloud audio is selected, but Openbase received an "
+            "Openbase Cloud audio is selected, but Openbase Coder received an "
             "empty Openbase machine token. Run `openbase-coder login` and restart "
             "the Openbase services, or choose direct provider keys or local audio "
             "in voice settings."
@@ -417,7 +412,7 @@ def _agent_error_detail(exc: Exception) -> str:
         return (
             "Openbase Cloud audio authorization failed while starting this call. "
             "Sign in to Openbase Cloud again on your computer, then restart the "
-            "Openbase services or switch voice settings to direct provider "
+            "Openbase Coder services or switch voice settings to direct provider "
             "keys or local audio."
         )
     if _is_openbase_cloud_audio_provider_error(exc):

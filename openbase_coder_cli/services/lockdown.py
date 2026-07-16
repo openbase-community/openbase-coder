@@ -1,6 +1,6 @@
 """Locked-down mode: no permission bypasses until the safe phrase is heard.
 
-Locked-down mode is an Openbase setting (``console-settings.json``,
+Locked-down mode is an Openbase Coder setting (``console-settings.json``,
 default off; onboarding offers to enable it). While it is enabled and not
 unlocked, the machine-wide super-agents permission guard stays *restricted*,
 so no Super Agents launch — from the dispatcher's MCP tools or from the
@@ -33,7 +33,7 @@ from openbase_coder_cli.services.console_settings import (
 
 logger = logging.getLogger(__name__)
 
-LOCKDOWN_GUARD_REASON = "Openbase locked-down mode"
+LOCKDOWN_GUARD_REASON = "Openbase Coder locked-down mode"
 
 
 def lockdown_restricted() -> bool:

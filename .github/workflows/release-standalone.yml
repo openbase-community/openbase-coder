@@ -328,7 +328,7 @@ jobs:
         with:
           tag_name: ${{ steps.release.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: Openbase ${{ steps.release.outputs.tag }}
+          name: Openbase Coder ${{ steps.release.outputs.tag }}
           draft: true
           prerelease: ${{ steps.release.outputs.prerelease }}
           files: |

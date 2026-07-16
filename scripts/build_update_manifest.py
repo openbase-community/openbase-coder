@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build (and optionally sign) the Openbase update manifest.
+"""Build (and optionally sign) the Openbase Coder update manifest.
 
 The manifest schema (``manifest_schema`` 1) is the durable contract defined in
 the workspace-level AUTO_UPDATE.md. This script produces the

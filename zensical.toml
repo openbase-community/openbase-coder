@@ -1,6 +1,6 @@
 [project]
-site_name = "Openbase Documentation"
-site_description = "Use and operate Openbase: the desktop app, iOS app, web console, and local CLI runtime"
+site_name = "Openbase Coder Documentation"
+site_description = "Use and operate Openbase Coder: the desktop app, iOS app, web console, and local CLI runtime"
 site_url = "https://docs.openbase.cloud"
 site_author = "Openbase"
 repo_url = "https://github.com/openbase-community/openbase-coder"

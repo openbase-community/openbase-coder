@@ -1,6 +1,6 @@
 # Web Console & Openbase Cloud
 
-The Openbase console is the dashboard UI. The
+The Openbase Coder console is the dashboard UI. The
 [desktop app](desktop-app.md) embeds it, the local runtime serves it in any
 browser, and Openbase Cloud hosts your account at
 `https://app.openbase.cloud`.

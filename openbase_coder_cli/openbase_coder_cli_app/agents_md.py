@@ -52,7 +52,7 @@ def agents_md(request):
         "voice": {
             "id": "voice",
             "label": "Voice Codex home AGENTS.md",
-            "description": "Affects the Openbase voice Codex home environment and its general voice-coding behavior.",
+            "description": "Affects the Openbase Coder voice Codex home environment and its general voice-coding behavior.",
             "path": CODEX_AGENTS_MD_PATH,
             "codex_home": CODEX_HOME_DIR,
         },
@@ -73,7 +73,7 @@ def agents_md(request):
         "super_agent": {
             "id": "super_agent",
             "label": "Super Agent instructions",
-            "description": "Affects normal non-dispatch Super Agent threads started or resumed by Openbase.",
+            "description": "Affects normal non-dispatch Super Agent threads started or resumed by Openbase Coder.",
             "path": super_agent_path,
             "codex_home": CODEX_HOME_DIR,
         },

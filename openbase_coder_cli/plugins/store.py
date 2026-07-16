@@ -39,7 +39,7 @@ def load_registry() -> PluginRegistry:
     if found_version > PLUGIN_REGISTRY_SCHEMA_VERSION:
         raise click.ClickException(
             f"plugins.json schema {found_version} was written by a newer "
-            "Openbase; update the CLI."
+            "Openbase Coder; update the CLI."
         )
     return PluginRegistry.from_dict(data)
 

@@ -1,6 +1,6 @@
 """Skill approval requests, backed by the open-approvals package.
 
-Skills are the requesters in Openbase, so this module keeps the
+Skills are the requesters in Openbase Coder, so this module keeps the
 `skill_approval` naming as a stable surface for skills and the
 `openbase-coder user approval` CLI while delegating the lifecycle to
 open-approvals (where `skill` is the generic `requester`).
@@ -81,7 +81,7 @@ def request_approval(
     timeout_seconds: float = 300,
     poll_interval_seconds: float = 1,
 ) -> dict[str, Any]:
-    """Request user approval through the local Openbase server."""
+    """Request user approval through the local Openbase Coder server."""
     from openbase_coder_cli.cli.local_server import local_server_request
 
     return open_approvals.request_approval(

@@ -16,7 +16,7 @@ from openbase_coder_cli.skill_approvals import request_approval
 
 @click.group()
 def user() -> None:
-    """Commands for the active Openbase user session."""
+    """Commands for the active Openbase Coder user session."""
 
 
 @user.command()
@@ -178,7 +178,7 @@ def _parse_key_value(items: tuple[str, ...], *, option: str) -> dict[str, str]:
 @user.command("notify")
 @click.option("--body", "body_text", required=True, help="Notification body text.")
 @click.option(
-    "--title", default="Openbase", show_default=True, help="Notification title."
+    "--title", default="Openbase Coder", show_default=True, help="Notification title."
 )
 @click.option(
     "--destination",
@@ -228,7 +228,7 @@ def notify(
 )
 @click.option(
     "--caller-name",
-    default="Openbase",
+    default="Openbase Coder",
     show_default=True,
     help="Name shown on the incoming call screen.",
 )
@@ -250,7 +250,7 @@ def call(
     agent_name: str,
     params: tuple[str, ...],
 ) -> None:
-    """Ring the user's iPhone with an inbound Openbase call."""
+    """Ring the user's iPhone with an inbound Openbase Coder call."""
     parsed_params = _parse_key_value(params, option="--param")
     try:
         result = cloud_push.place_call(

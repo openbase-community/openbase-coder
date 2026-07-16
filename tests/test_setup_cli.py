@@ -158,7 +158,7 @@ def test_resolve_dev_workspace_dir_errors_without_any_workspace(
 
     monkeypatch.setattr(workspace_phase, "distribution", missing_dist)
 
-    with pytest.raises(Exception, match="No Openbase workspace found"):
+    with pytest.raises(Exception, match="No Openbase Coder workspace found"):
         setup_cli.resolve_dev_workspace_dir(None)
 
 
@@ -263,7 +263,7 @@ def test_ensure_codex_home_default_files_preserves_custom_existing_files(
     assert not existing_path.is_symlink()
     updated_agents = existing_path.read_text(encoding="utf-8")
     assert updated_agents == (
-        "## Openbase Instructions\n\n"
+        "## Openbase Coder Instructions\n\n"
         f"- These instructions are auto generated from {instructions / 'AGENTS.md'}."
         "\n\n"
         "default agents\n"
@@ -298,7 +298,7 @@ def test_ensure_codex_home_default_files_rewrites_matching_agents_file(
 
     assert not target_path.is_symlink()
     assert target_path.read_text(encoding="utf-8") == (
-        "## Openbase Instructions\n\n"
+        "## Openbase Coder Instructions\n\n"
         f"- These instructions are auto generated from {instructions / 'AGENTS.md'}."
         "\n\n"
         "default agents\n"
@@ -330,7 +330,7 @@ def test_ensure_codex_home_default_files_converts_stale_agents_symlink(
     assert not target_path.is_symlink()
     updated = target_path.read_text(encoding="utf-8")
     assert updated == (
-        "## Openbase Instructions\n\n"
+        "## Openbase Coder Instructions\n\n"
         f"- These instructions are auto generated from {instructions / 'AGENTS.md'}."
         "\n\n"
         "default agents\n"
@@ -359,7 +359,7 @@ def test_ensure_codex_home_default_files_converts_current_agents_symlink(
 
     assert not target_path.is_symlink()
     assert target_path.read_text(encoding="utf-8") == (
-        "## Openbase Instructions\n\n"
+        "## Openbase Coder Instructions\n\n"
         f"- These instructions are auto generated from {source_path}.\n\n"
         "default agents\n"
     )
@@ -391,7 +391,7 @@ def test_ensure_codex_home_default_files_honors_excluding_normal_agents(
 
     content = (codex_home / "AGENTS.md").read_text(encoding="utf-8")
     assert content == (
-        "## Openbase Instructions\n\n"
+        "## Openbase Coder Instructions\n\n"
         f"- These instructions are auto generated from {instructions / 'AGENTS.md'}."
         "\n\n"
         "- Openbase rule\n"

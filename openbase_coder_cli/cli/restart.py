@@ -66,7 +66,7 @@ def restart(service: str | None, delay: float, recreate_dispatcher: bool) -> Non
     help="Recreate the dispatcher thread during restart.",
 )
 def self_restart(delay: float, recreate_dispatcher: bool) -> None:
-    """Restart the full Openbase service stack."""
+    """Restart the full Openbase Coder service stack."""
     request = RestartRequest(
         recreate_dispatcher=recreate_dispatcher,
         delay_seconds=delay,

@@ -1,4 +1,4 @@
-"""Line-based TOML table editing for config files Openbase manages.
+"""Line-based TOML table editing for config files Openbase Coder manages.
 
 These helpers deliberately treat the file as text rather than parsing it:
 user config like the Codex ``config.toml`` may hold comments and formatting a

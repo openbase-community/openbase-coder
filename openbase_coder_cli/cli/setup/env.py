@@ -1,4 +1,4 @@
-"""Env phase: generate and update the Openbase .env file."""
+"""Env phase: generate and update the Openbase Coder .env file."""
 
 from __future__ import annotations
 

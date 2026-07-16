@@ -9,7 +9,7 @@ from pathlib import Path
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Code sign Mach-O files in an Openbase package."
+        description="Code sign Mach-O files in an Openbase Coder package."
     )
     parser.add_argument("--package-dir", type=Path, required=True)
     parser.add_argument("--identity", required=True)

@@ -16,7 +16,7 @@ class OpenbaseCoderCliAppConfig(AppConfig):
 
     default_auto_field = "django.db.models.BigAutoField"
     name = "openbase_coder_cli.openbase_coder_cli_app"
-    verbose_name = "Openbase CLI"
+    verbose_name = "Openbase Coder Cli"
 
     def ready(self):
         from openbase_coder_cli import skills_autolink

@@ -44,7 +44,7 @@ CARTESIA_ANNOUNCER_VOICE_ID = os.getenv(
 )
 
 DISPATCHER_BUILTIN_DEVELOPER_INSTRUCTIONS = """
-You are the Openbase LiveKit dispatcher for a private voice session.
+You are the Openbase Coder LiveKit dispatcher for a private voice session.
 Route voice sessions when the user asks to speak with an agent.
 When creating or referring to a Super Agent for a thread name, derive the
 agent's speaking name with:

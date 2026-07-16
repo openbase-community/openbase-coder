@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide sets up Openbase locally using the `openbase-coder` CLI.
+This guide sets up Openbase Coder locally using the `openbase-coder` CLI.
 
 Most users do not need this page: [download the desktop app](downloads.md)
 and its guided setup runs everything below for you, including iPhone pairing
@@ -13,7 +13,7 @@ guide when you prefer the terminal or are setting up a headless machine.
 - Tailscale, signed in and connected, for iOS app access to the local CLI
 - Codex CLI authenticated in your normal user account when using the `codex` backend
 
-Openbase has exactly two deployment modes:
+Openbase Coder has exactly two deployment modes:
 
 - **Standalone (production)**: a bundled runtime package, shipped inside the
   desktop app or installed via `install.sh`, containing Python, the CLI,
@@ -23,7 +23,7 @@ Openbase has exactly two deployment modes:
   workspace's `./scripts/setup` script, with the CLI installed editable
   (`uv tool install -e ./cli`) or run via `uv run`.
 
-Git, `uv`, and Node/npm are only needed for Openbase development.
+Git, `uv`, and Node/npm are only needed for Openbase Coder development.
 Plugins no longer need Node/npm: plugin console pages ship prebuilt static
 assets rendered in iframes.
 
@@ -40,7 +40,7 @@ Optional:
 
 ## Install
 
-There are exactly two ways to install Openbase:
+There are exactly two ways to install Openbase Coder:
 
 **Production: the Mac desktop app.** Download the Apple Silicon app from
 [Downloads](downloads.md) and open it. The app bundles the CLI runtime,

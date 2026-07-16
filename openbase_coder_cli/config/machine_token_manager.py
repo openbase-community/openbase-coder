@@ -88,7 +88,7 @@ class MachineTokenManager:
                 f"{self._web_backend_url}/api/openbase/auth/machine-tokens/",
                 headers={"Authorization": f"Bearer {access_token}"},
                 json={
-                    "name": socket.gethostname() or "Openbase",
+                    "name": socket.gethostname() or "Openbase Coder",
                     "install_id": install_id,
                     "scopes": list(scopes),
                 },

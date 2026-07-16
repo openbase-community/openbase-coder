@@ -1,4 +1,4 @@
-"""CLI helpers for linking Vibes AI to Openbase."""
+"""CLI helpers for linking Vibes AI to Openbase Coder."""
 
 from __future__ import annotations
 

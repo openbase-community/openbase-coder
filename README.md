@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://discord.gg/nYzsn3Vh6y"><img src="Images/github.svg" alt="Openbase" width="900"></a>
+  <a href="https://discord.gg/nYzsn3Vh6y"><img src="Images/github.svg" alt="Openbase Coder" width="900"></a>
 </p>
 
 <p align="center">
@@ -9,19 +9,19 @@
 </p>
 <br>
 
-Openbase is a **voice IDE for real engineering work**. Speak a task,
+Openbase Coder is a **voice IDE for real engineering work**. Speak a task,
 keep a live coding call open, steer long-running agent threads, approve
 sensitive actions, read reports, and review diffs from the same control
 surface.
 
-This repository is the main open-source entry point for Openbase. It
+This repository is the main open-source entry point for Openbase Coder. It
 contains the local `openbase-coder` runtime, the public product docs, the
 developer setup path, and the service layer used by the Mac app, iOS app, web
 console, and Openbase Cloud.
 
 ### ✏️ What You Can Do
 
-Openbase is built around the actual loop of AI-assisted engineering:
+Openbase Coder is built around the actual loop of AI-assisted engineering:
 describe the change, let agents work, keep the thread moving, approve the risky
 parts, and inspect the result before it lands.
 
@@ -44,7 +44,7 @@ Core workflows are:
 
 ### 📱 How It Fits Together
 
-Openbase has several user-facing surfaces backed by the local
+Openbase Coder has several user-facing surfaces backed by the local
 `openbase-coder` runtime:
 
 * **Mac app**: the recommended starting point. It bundles the CLI, runs guided
@@ -67,7 +67,7 @@ agent instructions, skills, and console assets.
 
 Most users should install the Mac app first:
 
-1. Download Openbase for macOS from
+1. Download Openbase Coder for macOS from
    [openbase.cloud/downloads](https://openbase.cloud/downloads).
 2. Open the app and follow guided setup. The app activates the bundled CLI,
    checks prerequisites, lets you choose a coding backend and voice provider,
@@ -77,7 +77,7 @@ Most users should install the Mac app first:
 
 ### 🛠️ Developer Setup
 
-Openbase is developed as a multi-repo workspace. Clone the workspace repo
+Openbase Coder is developed as a multi-repo workspace. Clone the workspace repo
 for source development, even if you are mainly changing the CLI:
 
 ```bash
@@ -130,11 +130,11 @@ The product docs live in this repository under `docs/` and are published at
 
 ### 🚀 Feedback and Contributing
 
-Openbase is in beta. Please help shape the product by opening a
+Openbase Coder is in beta. Please help shape the product by opening a
 [GitHub issue](https://github.com/openbase-community/openbase-coder/issues/new)
 or joining the community on [Discord](https://discord.gg/nYzsn3Vh6y).
 
 ### ⚖️ License
 
-The open-source Openbase CLI/runtime is licensed under
+The open-source Openbase Coder CLI/runtime is licensed under
 [AGPL-3.0-only](LICENSE).

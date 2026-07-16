@@ -1,1 +1,1 @@
-`openbase-coder` is the main Openbase runtime repository.
+`openbase-coder` is the main Openbase Coder runtime repository.
