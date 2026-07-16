@@ -398,6 +398,34 @@ async def test_super_agents_livekit_client_creates_thread_and_turn_through_backe
     assert "voice instructions" in backend.started_turns[0][1]["developerInstructions"]
     assert result["_livekit_turn_id"] == "turn-1"
     assert result["_livekit_speech_text"] == "The dispatcher answer is ready."
+    assert "fresh" not in backend.started_threads[0]
+
+
+@pytest.mark.asyncio
+async def test_super_agents_livekit_client_fresh_thread_requests_fresh_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = FakeSuperAgentsBackend()
+    state_path = tmp_path / "livekit-voice-route.json"
+    monkeypatch.setenv("OPENBASE_CODING_BACKEND", "claude_code")
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(state_path),
+        backend_client=backend,
+        fresh_thread=True,
+    )
+
+    await client.prepare()
+
+    assert backend.started_threads[0]["fresh"] is True
+    # The flag is consumed by the first start; later starts on the same
+    # client must not retire the thread they just created.
+    client._thread_id = None
+    client._thread_loaded = False
+    state_path.unlink()
+    await client.prepare()
+    assert "fresh" not in backend.started_threads[1]
 
 
 @pytest.mark.asyncio

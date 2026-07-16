@@ -90,6 +90,7 @@ class SuperAgentsLiveKitClient:
         service_tier: str = "standard",
         dispatcher_config_path: str | Path | None = None,
         persist_thread: bool = True,
+        fresh_thread: bool = False,
         initial_thread_id: str | None = None,
         super_agent_name: str | None = None,
         super_agent_agent_name: str | None = None,
@@ -126,6 +127,7 @@ class SuperAgentsLiveKitClient:
         )
         self._backend_client = backend_client or self._client_from_environment()
         self._register_backend_callback()
+        self._fresh_thread = fresh_thread
         self._thread_id = initial_thread_id or (
             self._load_thread_id() if persist_thread else None
         )
@@ -1025,6 +1027,11 @@ class SuperAgentsLiveKitClient:
             "approvalPolicy": self._approval_policy,
             "sandbox": self._sandbox,
         }
+        if self._fresh_thread:
+            # Backends that reuse sessions by name (claude_code) must retire
+            # the old dispatcher session so recreation yields a new
+            # conversation, not a refresh of the previous one.
+            params["fresh"] = True
         if self._backend_is_codex():
             params["model"] = self._model_name
         elif self._model_name:
@@ -1037,6 +1044,7 @@ class SuperAgentsLiveKitClient:
             raise RuntimeError("Super Agents did not return a thread id.")
         self._thread_id = thread_id
         self._thread_loaded = True
+        self._fresh_thread = False
         self._persist_thread_id(thread_id)
         logger.info("Started LiveKit Super Agents thread %s", thread_id)
         return thread_id

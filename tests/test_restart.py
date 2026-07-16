@@ -154,16 +154,20 @@ def test_recreate_dispatcher_adds_livekit_agent():
 def test_execute_recreate_dispatcher_warms_thread_after_services_start(monkeypatch):
     calls = []
 
-    async def fake_warm_dispatcher():
-        calls.append("warm")
+    async def fake_warm_dispatcher(*, fresh=False):
+        calls.append(f"warm:fresh={fresh}")
         return "dispatcher-1"
 
     monkeypatch.setattr(
         restart_module,
         "require_installation",
-        lambda: InstallationConfig(workspace_path="/tmp/workspace", env_file="/tmp/.env"),
+        lambda: InstallationConfig(
+            workspace_path="/tmp/workspace", env_file="/tmp/.env"
+        ),
     )
-    monkeypatch.setattr(restart_module, "launchctl_status", lambda _svc: {"installed": True})
+    monkeypatch.setattr(
+        restart_module, "launchctl_status", lambda _svc: {"installed": True}
+    )
     monkeypatch.setattr(
         restart_module,
         "launchctl_bootout",
@@ -198,4 +202,9 @@ def test_execute_recreate_dispatcher_warms_thread_after_services_start(monkeypat
         )
     )
 
-    assert calls == ["prepare", "stop:livekit-agent", "start:livekit-agent", "warm"]
+    assert calls == [
+        "prepare",
+        "stop:livekit-agent",
+        "start:livekit-agent",
+        "warm:fresh=True",
+    ]

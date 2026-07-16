@@ -131,7 +131,7 @@ def execute_restart_plan(plan: RestartPlan) -> None:
             warm_livekit_dispatcher_thread,
         )
 
-        asyncio.run(warm_livekit_dispatcher_thread())
+        asyncio.run(warm_livekit_dispatcher_thread(fresh=True))
 
 
 def execute_restart_payload(raw_payload: str) -> None:

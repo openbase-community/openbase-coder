@@ -395,8 +395,14 @@ async def warm_livekit_dispatcher_thread(
     *,
     timeout_seconds: float = 15.0,
     retry_interval_seconds: float = 0.5,
+    fresh: bool = False,
 ) -> str:
-    """Ensure the configured dispatcher backend thread exists and route state has its id."""
+    """Ensure the configured dispatcher backend thread exists and route state has its id.
+
+    With ``fresh=True`` (dispatcher recreation), backends that reuse sessions
+    by name are told to retire the existing dispatcher session so the warmed
+    thread starts a new conversation.
+    """
     from openbase_coder_cli.livekit_agent.super_agents_client import (
         SuperAgentsLiveKitClient,
     )
@@ -412,6 +418,7 @@ async def warm_livekit_dispatcher_thread(
             developer_instructions=_dispatcher_developer_instructions(),
             approval_policy=permissions["approvalPolicy"],
             sandbox=permissions["sandbox"],
+            fresh_thread=fresh,
         )
         try:
             return await client.prepare()
@@ -580,7 +587,11 @@ def _current_super_agent_voice_for_id(voice_id: str | None) -> CartesiaVoice | N
     if not voice_id:
         return None
     return next(
-        (voice for voice in _current_super_agent_voices() if voice.voice_id == voice_id),
+        (
+            voice
+            for voice in _current_super_agent_voices()
+            if voice.voice_id == voice_id
+        ),
         None,
     )
 

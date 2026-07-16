@@ -103,10 +103,14 @@ class FakeSessionManager:
             raise RuntimeError("resume failed")
 
 
-def test_warm_livekit_dispatcher_uses_configured_super_agents_client(tmp_path: Path, monkeypatch):
+def test_warm_livekit_dispatcher_uses_configured_super_agents_client(
+    tmp_path: Path, monkeypatch
+):
     calls = []
     instruction_path = tmp_path / "dispatcher.md"
-    instruction_path.write_text("dispatcher says random fruit is persimmon\n", encoding="utf-8")
+    instruction_path.write_text(
+        "dispatcher says random fruit is persimmon\n", encoding="utf-8"
+    )
 
     class FakeSuperAgentsLiveKitClient:
         def __init__(self, **kwargs):
@@ -121,7 +125,9 @@ def test_warm_livekit_dispatcher_uses_configured_super_agents_client(tmp_path: P
 
     monkeypatch.setenv("LIVEKIT_CODEX_THREAD_CWD", str(tmp_path))
     monkeypatch.setenv("LIVEKIT_CODEX_THREAD_STATE_PATH", str(tmp_path / "route.json"))
-    monkeypatch.setattr(voice_route, "CODEX_DISPATCHER_INSTRUCTIONS_PATH", instruction_path)
+    monkeypatch.setattr(
+        voice_route, "CODEX_DISPATCHER_INSTRUCTIONS_PATH", instruction_path
+    )
 
     from openbase_coder_cli.livekit_agent import super_agents_client
 
@@ -138,8 +144,16 @@ def test_warm_livekit_dispatcher_uses_configured_super_agents_client(tmp_path: P
     init_kwargs = calls[0][1]
     assert init_kwargs["cwd"] == str(tmp_path)
     assert init_kwargs["state_path"] == str(tmp_path / "route.json")
-    assert init_kwargs["developer_instructions"] == "dispatcher says random fruit is persimmon"
+    assert (
+        init_kwargs["developer_instructions"]
+        == "dispatcher says random fruit is persimmon"
+    )
+    assert init_kwargs["fresh_thread"] is False
     assert calls[1:] == [("prepare", {}), ("close", {})]
+
+    calls.clear()
+    asyncio.run(warm_livekit_dispatcher_thread(timeout_seconds=0, fresh=True))
+    assert calls[0][1]["fresh_thread"] is True
 
 
 def test_super_agent_voices_use_builtin_catalog_pool(monkeypatch):
@@ -171,8 +185,7 @@ def test_kokoro_super_agent_voices_are_english_only(monkeypatch):
     assert "jf_tebukuro" not in {voice.voice_id for voice in voices}
     assert "zm_yunjian" not in {voice.voice_id for voice in voices}
     assert (
-        super_agent_voice_id_for_context("thread-1", "Build", "Yunjian")
-        != "zm_yunjian"
+        super_agent_voice_id_for_context("thread-1", "Build", "Yunjian") != "zm_yunjian"
     )
 
 
@@ -194,16 +207,18 @@ def test_super_agent_voice_context_prefers_agent_name(monkeypatch):
         voice_route, "SUPER_AGENT_VOICE_IDS", ("voice-carl", "voice-dottie")
     )
 
-    assert super_agent_voice_id_for_context("thread-1", "Build", "Dottie") == "voice-dottie"
     assert (
-        super_agent_voice_id_for_context("thread-1", "Build", "Unknown")
-        == stable_super_agent_voice_id("thread-1", "Build")
-    )
-    assert super_agent_voice_id_for_context("thread-1", "Build", "dottie") == "voice-dottie"
-    assert (
-        super_agent_voice_id_for_context(None, None, "Dottie")
+        super_agent_voice_id_for_context("thread-1", "Build", "Dottie")
         == "voice-dottie"
     )
+    assert super_agent_voice_id_for_context(
+        "thread-1", "Build", "Unknown"
+    ) == stable_super_agent_voice_id("thread-1", "Build")
+    assert (
+        super_agent_voice_id_for_context("thread-1", "Build", "dottie")
+        == "voice-dottie"
+    )
+    assert super_agent_voice_id_for_context(None, None, "Dottie") == "voice-dottie"
 
 
 def test_super_agent_voice_context_can_use_catalog_name(monkeypatch):
