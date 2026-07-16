@@ -69,7 +69,7 @@ def health_check(request):
 
 @api_view(["POST"])
 def ios_logs_upload(request):
-    """Append uploaded iOS diagnostics to the Openbase Coder log directory."""
+    """Append uploaded iOS diagnostics to the Openbase log directory."""
     serializer = IOSLogUploadSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     entries = [_sanitize_mapping(entry) for entry in serializer.validated_data["entries"]]
@@ -154,5 +154,5 @@ def _sanitize_mapping(payload: dict) -> dict:
 
 @api_view(["GET"])
 def devices_list(request):
-    """Discover tailnet devices and identify Openbase Coder hosts."""
+    """Discover tailnet devices and identify Openbase hosts."""
     return Response(tailnet_devices_payload(), status=status.HTTP_200_OK)

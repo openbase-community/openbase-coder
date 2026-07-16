@@ -109,7 +109,7 @@ def read_sync_config(path: Path | None = None) -> dict[str, Any]:
     if found_version > SYNC_CONFIG_SCHEMA_VERSION:
         raise ValueError(
             f"{config_path.name} schema {found_version} was written by a "
-            "newer Openbase Coder; update the CLI."
+            "newer Openbase; update the CLI."
         )
     return payload
 

@@ -1,6 +1,6 @@
 # Downloads
 
-Download the Openbase Coder apps for your devices.
+Download the Openbase apps for your devices.
 
 | Platform | Download |
 |---|---|

@@ -41,7 +41,7 @@ class PushError(RuntimeError):
 def send_notification(
     *,
     body: str,
-    title: str = "Openbase Coder",
+    title: str = "Openbase",
     destination: str = "dispatch",
     params: dict[str, str] | None = None,
     thread_id: str = "",
@@ -70,7 +70,7 @@ def send_notification(
 def place_call(
     *,
     room_name: str = "",
-    caller_name: str = "Openbase Coder",
+    caller_name: str = "Openbase",
     caller_identity: str = "",
     livekit_dispatch_agent_name: str = "",
     params: dict[str, str] | None = None,

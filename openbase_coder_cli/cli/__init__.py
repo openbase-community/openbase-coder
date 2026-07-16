@@ -58,9 +58,9 @@ def print_version(ctx, param, value):
     help="Show the version and exit.",
 )
 def main():
-    """Openbase Coder Cli
+    """Openbase CLI
 
-    OpenBase Coder CLI with embedded server
+    Openbase CLI with embedded server
     """
     refresh_openbase_agents_md_from_installation()
 

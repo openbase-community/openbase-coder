@@ -40,7 +40,7 @@ def _oauth_success_html(*, desktop_url: str = DESKTOP_LOGIN_COMPLETE_URL) -> byt
 <html>
   <head>
     <meta charset="utf-8">
-    <title>Openbase Coder login complete</title>
+    <title>Openbase login complete</title>
     <style>
       body {{
         color: #18181b;
@@ -60,7 +60,7 @@ def _oauth_success_html(*, desktop_url: str = DESKTOP_LOGIN_COMPLETE_URL) -> byt
   <body>
     <main>
       <h1>Logged in successfully</h1>
-      <p>Openbase Coder has received your login. You can return to the terminal.</p>
+      <p>Openbase has received your login. You can return to the terminal.</p>
       <p>If you started from the Mac app, it should reopen automatically.</p>
       <p><a href="{escaped_desktop_url}">Open the Mac app</a></p>
     </main>
@@ -210,7 +210,7 @@ def _exchange_oauth_token_for_jwts(
 
 @click.command()
 def login() -> None:
-    """Log in to Openbase Coder using browser-based OAuth."""
+    """Log in to Openbase using browser-based OAuth."""
     web_backend_url = _get_web_backend_url()
     redirect_uri = _get_oauth_redirect_uri()
     state = os.urandom(24).hex()

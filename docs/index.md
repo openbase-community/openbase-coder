@@ -1,6 +1,6 @@
-# Openbase Coder
+# Openbase
 
-Openbase Coder is a voice-first AI coding product. You talk to coding agents
+Openbase is a voice-first AI coding product. You talk to coding agents
 from your iPhone or Mac while a local runtime on your computer runs the actual
 coding sessions against your repositories.
 

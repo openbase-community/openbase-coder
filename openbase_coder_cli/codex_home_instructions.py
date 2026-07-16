@@ -19,7 +19,7 @@ from openbase_coder_cli.runtime import packaged_instructions_dir
 from openbase_coder_cli.services.installation import InstallationConfig
 
 CODEX_HOME_DEFAULT_SOURCE_DIR = "instructions"
-MANAGED_AGENTS_HEADING = "## Openbase Coder Instructions"
+MANAGED_AGENTS_HEADING = "## Openbase Instructions"
 OPENBASE_DEFAULT_INSTRUCTION_FILES = (
     ("DISPATCHER_INSTRUCTIONS.md", CODEX_DISPATCHER_INSTRUCTIONS_PATH),
     ("SUPER_AGENT_INSTRUCTIONS.md", CODEX_SUPER_AGENT_INSTRUCTIONS_PATH),

@@ -19,7 +19,7 @@ LOCAL_MLX_WHISPER_STT_PROVIDER_ID = "local_mlx_whisper"
 DEFAULT_STT_PROVIDER_ID: STTProviderId = ASSEMBLYAI_STT_PROVIDER_ID
 LOCAL_MLX_WHISPER_MODEL_ID = "mlx-community/whisper-small.en-mlx"
 LOCAL_MLX_WHISPER_PROMPT = (
-    "Openbase Coder voice coding vocabulary: Gabe, Openbase, Kokoro, Cartesia, "
+    "Openbase voice coding vocabulary: Gabe, Openbase, Kokoro, Cartesia, "
     "Codex, LiveKit, TTS, STT, Python, React, TypeScript, Swift, Django, pytest, "
     "uv, pnpm, GitHub, pull request."
 )

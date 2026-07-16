@@ -1,10 +1,10 @@
-# Uninstall Openbase Coder
+# Uninstall Openbase
 
 Uninstall does not depend on the `openbase-coder` command. Use normal macOS,
 Linux, and Python tool cleanup commands so you can remove Openbase even if the
 CLI environment is broken.
 
-Openbase Coder state lives in four places, each removed in its own section
+Openbase state lives in four places, each removed in its own section
 below: the CLI runtime state in `~/.openbase`, the desktop app's Electron
 state and caches under `~/Library`, a managed Claude credential in the macOS
 Keychain (Claude Code backend only), and the iOS app's on-phone state
@@ -99,7 +99,7 @@ so deleting the app alone leaves it behind — and a later reinstall would
 silently pick up the old state:
 
 ```bash
-rm -rf "/Applications/Openbase Coder.app"
+rm -rf "/Applications/Openbase.app"
 
 # Electron user data — current and older app identities:
 rm -rf "$HOME/Library/Application Support/@openbase/coder-desktop"

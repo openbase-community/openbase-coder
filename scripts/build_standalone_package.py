@@ -23,7 +23,7 @@ METADATA_FILENAME = "openbase-coder-package.json"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build an Openbase Coder standalone package."
+        description="Build an Openbase standalone package."
     )
     parser.add_argument("--version", required=True)
     parser.add_argument("--target", default=default_target())

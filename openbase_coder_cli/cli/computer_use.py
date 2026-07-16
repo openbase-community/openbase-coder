@@ -378,6 +378,7 @@ def _find_companion_app() -> Path | None:
             / "Debug"
             / "LiveKitExample.app"
         ),
+        "/Applications/Openbase.app/Contents/Resources/app/companion/livekit-swift-example/.derivedData/Build/Products/Debug/OpenbaseScreenShareCompanion.app",
         "/Applications/Openbase Coder.app/Contents/Resources/app/companion/livekit-swift-example/.derivedData/Build/Products/Debug/OpenbaseScreenShareCompanion.app",
     ]
     for candidate in candidates:

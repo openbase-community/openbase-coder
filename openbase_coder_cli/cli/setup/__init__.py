@@ -1,4 +1,4 @@
-"""Setup command orchestrator for the Openbase Coder install flow.
+"""Setup command orchestrator for the Openbase install flow.
 
 Phase implementations live in sibling modules (workspace, env, codex,
 dispatcher, claude). Names are re-exported here so existing imports of
@@ -264,7 +264,7 @@ class _SetupProgress:
     type=click.Path(),
     default=None,
     help=(
-        "Path to your Openbase Coder workspace checkout (development mode). "
+        "Path to your Openbase workspace checkout (development mode). "
         "Discovered from the current installation or an editable CLI install "
         "when omitted."
     ),
@@ -356,7 +356,7 @@ def setup(
     audio_provider: str | None,
     json_progress: bool,
 ) -> None:
-    """Full install flow for Openbase Coder."""
+    """Full install flow for Openbase."""
     if platform.system() not in ("Darwin", "Linux"):
         raise click.ClickException("Setup is only supported on macOS and Linux.")
     if coding_backend is not None:

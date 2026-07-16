@@ -5,7 +5,7 @@ letting the Electron desktop app run setup commands on your behalf. The
 app-driven flow this replaces is described in
 [Desktop App](desktop-app.md#install-and-first-run-setup).
 
-You do not need to click the app's setup button for Openbase Coder to work. Run
+You do not need to click the app's setup button for Openbase to work. Run
 the commands below in your own terminal, then return to the desktop app after
 the health, voice key, and login checks pass.
 
@@ -41,7 +41,7 @@ Install Tailscale before continuing if you want iPhone-to-Mac voice networking:
 open https://tailscale.com/download/mac
 ```
 
-The standalone CLI installer bundles Python, Openbase Coder dependencies, the
+The standalone CLI installer bundles Python, Openbase dependencies, the
 console build, and LiveKit server. Source-development setup still needs `uv`,
 Git, Node, and workspace tooling.
 
@@ -120,5 +120,5 @@ tailscale serve --bg --tcp=7880 tcp://127.0.0.1:7880
 ## Open the Desktop App
 
 After the health endpoint, voice keys, and login checks pass, reopen or recheck
-the Electron app. It should skip the setup flow and load the main Openbase Coder
+the Electron app. It should skip the setup flow and load the main Openbase
 interface without the app having run any setup commands.

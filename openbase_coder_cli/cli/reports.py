@@ -63,7 +63,7 @@ def _summarize(content: str, *, max_lines: int = 24) -> str:
 
 @click.group()
 def reports() -> None:
-    """List, filter, show, and read Openbase Coder reports."""
+    """List, filter, show, and read Openbase reports."""
 
 
 @reports.command("list")

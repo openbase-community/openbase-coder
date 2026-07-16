@@ -32,7 +32,7 @@ def local_server_request(method: str, path: str, **kwargs) -> httpx.Response:
         )
     except httpx.HTTPError as exc:
         raise click.ClickException(
-            f"Unable to reach the local Openbase Coder server: {exc}"
+            f"Unable to reach the local Openbase server: {exc}"
         ) from None
 
     if response.status_code >= 400:

@@ -1,4 +1,4 @@
-"""Shared helpers for reading and updating the Openbase Coder .env file."""
+"""Shared helpers for reading and updating the Openbase .env file."""
 
 from __future__ import annotations
 
