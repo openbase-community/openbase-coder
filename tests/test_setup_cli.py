@@ -948,31 +948,6 @@ def test_selected_coding_backend_reads_existing_env(tmp_path) -> None:
     assert setup_cli._selected_coding_backend(env_file, None) == "claude_code"
 
 
-def test_symlink_codex_auth_links_before_codex_login(tmp_path, monkeypatch) -> None:
-    """The service auth symlink dangles until `codex login` writes auth.json."""
-    codex_module = importlib.import_module("openbase_coder_cli.cli.setup.codex")
-    codex_home = tmp_path / "openbase" / "codex_home"
-    monkeypatch.setattr(codex_module, "CODEX_HOME_DIR", codex_home)
-    monkeypatch.setattr(
-        codex_module.Path, "home", classmethod(lambda cls: tmp_path)
-    )
-
-    setup_cli._symlink_codex_auth()
-
-    service_auth = codex_home / "auth.json"
-    assert service_auth.is_symlink()
-    assert not service_auth.is_file()
-
-    normal_auth = tmp_path / ".codex" / "auth.json"
-    normal_auth.parent.mkdir(parents=True)
-    normal_auth.write_text('{"tokens": {}}', encoding="utf-8")
-    assert service_auth.is_file()
-
-    # Re-running keeps the existing link.
-    setup_cli._symlink_codex_auth()
-    assert service_auth.resolve() == normal_auth.resolve()
-
-
 def test_ensure_codex_home_config_can_link_normal_codex_config(
     tmp_path, monkeypatch
 ) -> None:
@@ -1384,59 +1359,3 @@ def test_build_console_does_not_sync_plugin_generated_files(
         (workspace, console_dir, ("run", "build")),
     ]
     assert not generated_registry.exists()
-
-
-def test_super_agents_mcp_command_routes_through_current_symlink(
-    tmp_path, monkeypatch
-) -> None:
-    from openbase_coder_cli import runtime as runtime_module
-
-    workspace = tmp_path / "workspace"
-    release = tmp_path / "packages" / "releases" / "1.0.0"
-    python_path = release / "python" / "bin" / "python"
-    command = python_path.parent / "super-agents-mcp"
-    command.parent.mkdir(parents=True)
-    command.write_text("#!/bin/sh\n", encoding="utf-8")
-    python_path.write_text("#!/bin/sh\n", encoding="utf-8")
-    current = tmp_path / "packages" / "current"
-    current.symlink_to(release)
-    monkeypatch.setattr(runtime_module, "STANDALONE_CURRENT_DIR", current)
-    _patch_setup(
-        monkeypatch,
-        "current_runtime_package",
-        lambda: SimpleNamespace(python_path=python_path),
-    )
-    _patch_setup(monkeypatch, "which", lambda _command: None)
-
-    command_path, args = setup_cli._super_agents_mcp_command(workspace)
-
-    assert command_path == current / "python" / "bin" / "super-agents-mcp"
-    assert args == []
-    assert command_path.is_file()
-
-
-def test_symlink_codex_home_skills_repoints_version_pinned_links(
-    tmp_path, monkeypatch
-) -> None:
-    """A link pinned to the versioned release resolves identically to the
-    stable current/ alias today, but must still be migrated."""
-    from openbase_coder_cli import runtime as runtime_module
-
-    release = tmp_path / "packages" / "releases" / "1.0.0"
-    skill = release / "skills" / "sample-skill"
-    skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text("# Sample\n", encoding="utf-8")
-    current = tmp_path / "packages" / "current"
-    current.symlink_to(release)
-    monkeypatch.setattr(runtime_module, "STANDALONE_CURRENT_DIR", current)
-    codex_home, claude_config = _patch_openbase_agent_paths(monkeypatch, tmp_path)
-    target = codex_home / "skills" / "sample-skill"
-    target.parent.mkdir(parents=True)
-    target.symlink_to(skill)
-    _patch_setup(monkeypatch, "packaged_skills_dir", lambda: release / "skills")
-
-    setup_cli._symlink_codex_home_skills("")
-
-    assert target.readlink() == current / "skills" / "sample-skill"
-    claude_target = claude_config / "skills" / "sample-skill"
-    assert claude_target.readlink() == current / "skills" / "sample-skill"

@@ -8,10 +8,7 @@ from openbase_coder_cli import sync_config
 from openbase_coder_cli.code_sync import lease
 
 
-def test_local_activity_recent_from_signal_file_mtimes(
-    monkeypatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(lease, "_local_file_edit_recent", lambda now: False)
+def test_local_activity_recent_from_signal_file_mtimes(tmp_path: Path) -> None:
     fresh = tmp_path / "livekit-voice-route.json"
     fresh.write_text("{}", encoding="utf-8")
     stale = tmp_path / "claude-thread-sync-ledger.json"

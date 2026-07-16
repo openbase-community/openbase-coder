@@ -2,8 +2,6 @@
 
 import hashlib
 import logging
-import time
-from collections.abc import Callable
 
 from livekit.agents import (
     tts as livekit_tts,
@@ -30,7 +28,6 @@ class VoiceSelectingTTS(livekit_tts.TTS):
         active_voice_id,
         active_voice_name=None,
         api_key: str | None = None,
-        api_key_provider: Callable[[], str | None] | None = None,
         provider=None,
         role: str = "direct",
         model: str = "sonic-3",
@@ -57,7 +54,6 @@ class VoiceSelectingTTS(livekit_tts.TTS):
         self._active_voice_id = active_voice_id
         self._active_voice_name = active_voice_name or (lambda: None)
         self._api_key = api_key
-        self._api_key_provider = api_key_provider
         self._role = role
         self._model = model
         self._volume = volume
@@ -164,42 +160,7 @@ class VoiceSelectingTTS(livekit_tts.TTS):
     def resolve_voice_name(self, voice_id: str | None) -> str | None:
         return self._voice_name_for_id(self.resolve_voice_id(voice_id))
 
-    def _refresh_api_key(self) -> None:
-        """Pull a current credential before synthesis begins.
-
-        Openbase Cloud audio authenticates each websocket connection with a
-        short-lived machine token; the token captured at session start goes
-        stale, and every later reconnect would then be rejected with a 403
-        and kill the speech. Refreshing per synthesis keeps new connections
-        authenticated.
-        """
-        if self._api_key_provider is None:
-            return
-        try:
-            refreshed = self._api_key_provider()
-        except Exception:
-            # Keep speaking with the previous token; it may still be valid.
-            logger.warning(
-                "dispatch_timing stage=tts_api_key_refresh_failed role=%s",
-                self._role,
-                exc_info=True,
-            )
-            return
-        if not refreshed or refreshed == self._api_key:
-            return
-        self._api_key = refreshed
-        for tts in self._tts_by_voice_id.values():
-            opts = getattr(tts, "_opts", None)
-            if opts is not None and hasattr(opts, "api_key"):
-                opts.api_key = refreshed
-        logger.info(
-            "dispatch_timing stage=tts_api_key_refreshed role=%s voice_clients=%d",
-            self._role,
-            len(self._tts_by_voice_id),
-        )
-
     def _tts_for_voice(self, voice_id: str | None) -> livekit_tts.TTS:
-        self._refresh_api_key()
         resolved_voice_id = self.resolve_voice_id(voice_id)
         tts = self._tts_by_voice_id.get(resolved_voice_id)
         if tts is None:
@@ -286,8 +247,6 @@ class SpeechFormattingSynthesizeStream:
         self._flush_count = 0
         self._audio_event_count = 0
         self._non_audio_event_count = 0
-        self._flushed_text_monotonic: float | None = None
-        self._audio_seconds = 0.0
 
     def push_text(self, token: str) -> None:
         self._buffer += token
@@ -325,8 +284,6 @@ class SpeechFormattingSynthesizeStream:
             )
             self._stream.push_text(final_text)
             self._buffer = ""
-            if self._flushed_text_monotonic is None:
-                self._flushed_text_monotonic = time.monotonic()
         elif LIVEKIT_VERBOSE_LOGGING:
             logger.info(
                 "dispatch_timing stage=tts_stream_flush_empty role=%s voice_id=%s "
@@ -362,22 +319,16 @@ class SpeechFormattingSynthesizeStream:
         self._stream.end_input()
 
     async def aclose(self) -> None:
-        # Terminal outcome for this spoken response: a close with flushed text
-        # but zero audio events means the reply was never synthesized (for
-        # example it was interrupted or errored before audio was produced).
-        logger.info(
-            "dispatch_timing stage=tts_stream_close role=%s voice_id=%s "
-            "voice_name=%s flush_count=%d audio_events=%d non_audio_events=%d "
-            "audio_seconds=%.2f had_flushed_text=%s",
-            self._role,
-            self._voice_id or "",
-            self._voice_name or "",
-            self._flush_count,
-            self._audio_event_count,
-            self._non_audio_event_count,
-            self._audio_seconds,
-            self._flushed_text_monotonic is not None,
-        )
+        if LIVEKIT_VERBOSE_LOGGING:
+            logger.info(
+                "dispatch_timing stage=tts_stream_close role=%s voice_id=%s "
+                "voice_name=%s audio_events=%d non_audio_events=%d",
+                self._role,
+                self._voice_id or "",
+                self._voice_name or "",
+                self._audio_event_count,
+                self._non_audio_event_count,
+            )
         await self._stream.aclose()
 
     def __aiter__(self):
@@ -387,39 +338,20 @@ class SpeechFormattingSynthesizeStream:
         try:
             event = await self._stream.__anext__()
         except StopAsyncIteration:
-            logger.info(
-                "dispatch_timing stage=tts_stream_iter_end role=%s voice_id=%s "
-                "voice_name=%s audio_events=%d non_audio_events=%d "
-                "audio_seconds=%.2f",
-                self._role,
-                self._voice_id or "",
-                self._voice_name or "",
-                self._audio_event_count,
-                self._non_audio_event_count,
-                self._audio_seconds,
-            )
+            if LIVEKIT_VERBOSE_LOGGING:
+                logger.info(
+                    "dispatch_timing stage=tts_stream_iter_end role=%s voice_id=%s "
+                    "voice_name=%s audio_events=%d non_audio_events=%d",
+                    self._role,
+                    self._voice_id or "",
+                    self._voice_name or "",
+                    self._audio_event_count,
+                    self._non_audio_event_count,
+                )
             raise
         frame = getattr(event, "frame", None)
         if frame is not None:
             self._audio_event_count += 1
-            sample_rate = getattr(frame, "sample_rate", 0)
-            samples_per_channel = getattr(frame, "samples_per_channel", 0)
-            if sample_rate:
-                self._audio_seconds += samples_per_channel / sample_rate
-            if self._audio_event_count == 1:
-                latency_ms = (
-                    int((time.monotonic() - self._flushed_text_monotonic) * 1000)
-                    if self._flushed_text_monotonic is not None
-                    else -1
-                )
-                logger.info(
-                    "dispatch_timing stage=tts_stream_first_audio role=%s "
-                    "voice_id=%s voice_name=%s flush_to_first_audio_ms=%d",
-                    self._role,
-                    self._voice_id or "",
-                    self._voice_name or "",
-                    latency_ms,
-                )
             if LIVEKIT_VERBOSE_LOGGING:
                 logger.info(
                     "dispatch_timing stage=tts_audio_frame role=%s voice_id=%s "

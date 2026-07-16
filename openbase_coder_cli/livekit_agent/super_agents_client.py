@@ -6,14 +6,9 @@ import os
 import re
 import time
 import uuid
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from openbase_coder_cli.codex_session_defaults import (
-    DEFAULT_CODEX_APPROVAL_POLICY,
-    DEFAULT_CODEX_SANDBOX,
-)
 from openbase_coder_cli.dispatcher_config import (
     dispatcher_model,
     dispatcher_reasoning_effort,
@@ -43,21 +38,6 @@ DISPATCH_TIMING_LOG = "dispatch_timing"
 DEFAULT_CODEX_MODEL = "gpt-5.5"
 DEFAULT_DISPATCHER_LABEL = "dispatcher"
 TURN_POLL_INTERVAL_SECONDS = 0.5
-# A busy app-server can miss individual progress polls (observed: thread/read
-# timing out after 30s while the backend churned on tool output). Keep polling
-# through transient failures instead of killing the voice generation that is
-# waiting to speak the answer; only give up after this many consecutive
-# failures.
-TURN_POLL_MAX_CONSECUTIVE_FAILURES = 10
-TURN_POLL_FAILURE_BACKOFF_MAX_SECONDS = 5.0
-# How long to wait after a turn finishes before treating its unclaimed answer
-# as orphaned (no voice dispatch consumed it) and handing it to the orphaned
-# result handler to be spoken directly.
-ORPHANED_RESULT_GRACE_SECONDS = 1.5
-# A repeat of content a just-spoken turn already covered (an STT twin of a
-# steered correction, or the user restating it) must not spawn a fresh
-# backend turn that answers with the same gist again.
-SPOKEN_TURN_DUPLICATE_SUPPRESSION_SECONDS = 10.0
 
 
 def _model_name_for_role(
@@ -84,8 +64,8 @@ class SuperAgentsLiveKitClient:
         cwd: str,
         state_path: str | None = None,
         developer_instructions: str | None = None,
-        approval_policy: str = DEFAULT_CODEX_APPROVAL_POLICY,
-        sandbox: str = DEFAULT_CODEX_SANDBOX,
+        approval_policy: str = "never",
+        sandbox: str = "danger-full-access",
         model_name: str | None = None,
         service_tier: str = "standard",
         dispatcher_config_path: str | Path | None = None,
@@ -138,15 +118,7 @@ class SuperAgentsLiveKitClient:
         self._active_turn_started_at: float | None = None
         self._active_turn_dispatch_id: str | None = None
         self._active_turn_prompt_hash: str | None = None
-        self._active_turn_wait_task: asyncio.Task[dict[str, Any]] | None = None
-        self._active_turn_wait_task_turn_id: str | None = None
-        self._active_turn_wait_waiters = 0
-        self._on_orphaned_result: (
-            Callable[[SuperAgentsLiveKitClient, str, str], None] | None
-        ) = None
         self._claimed_speech_turns: set[str] = set()
-        self._turn_prompt_hashes: dict[str, set[str]] = {}
-        self._turn_spoken_at: dict[str, float] = {}
         self._state_lock = asyncio.Lock()
         self._turn_start_lock = asyncio.Lock()
 
@@ -195,51 +167,8 @@ class SuperAgentsLiveKitClient:
                 int((time.monotonic() - dispatch_started) * 1000),
             )
 
-            if self._active_turn_id and self._active_turn_has_completed():
-                completed_turn_id = self._active_turn_id
-                if (
-                    completed_turn_id in self._claimed_speech_turns
-                    and self._is_duplicate_of_spoken_turn(
-                        completed_turn_id, prompt_debug["hash"]
-                    )
-                ):
-                    # The just-spoken answer already covered this content
-                    # (an STT twin or a restated correction); a fresh turn
-                    # would speak the same gist twice.
-                    logger.info(
-                        "%s stage=voice_request_suppressed_duplicate_of_spoken_turn "
-                        "dispatch_id=%s thread_id=%s turn_id=%s prompt_hash=%s",
-                        DISPATCH_TIMING_LOG,
-                        dispatch_id,
-                        thread_id,
-                        completed_turn_id,
-                        prompt_debug["hash"],
-                    )
-                    return {
-                        "id": completed_turn_id,
-                        "status": "completed",
-                        "_livekit_speech_text": "",
-                        "_livekit_turn_id": completed_turn_id,
-                        "progress": {},
-                    }
-                if prompt_debug["hash"] not in self._turn_prompt_hashes.get(
-                    completed_turn_id, set()
-                ):
-                    self._handoff_completed_active_turn()
-
             if self._active_turn_id:
-                if self._active_turn_has_completed():
-                    turn_id = self._active_turn_id
-                    logger.info(
-                        "%s stage=voice_request_joined_completed_active_turn "
-                        "dispatch_id=%s thread_id=%s turn_id=%s prompt_hash=%s",
-                        DISPATCH_TIMING_LOG,
-                        dispatch_id,
-                        thread_id,
-                        turn_id,
-                        prompt_debug["hash"],
-                    )
-                elif self._active_turn_prompt_hash == prompt_debug["hash"]:
+                if self._active_turn_prompt_hash == prompt_debug["hash"]:
                     turn_id = self._active_turn_id
                     logger.info(
                         "%s stage=voice_request_joined_active_turn dispatch_id=%s "
@@ -275,7 +204,6 @@ class SuperAgentsLiveKitClient:
                         self._active_turn_started_at = time.monotonic()
                         self._active_turn_dispatch_id = dispatch_id
                         self._active_turn_prompt_hash = prompt_debug["hash"]
-                        self._record_turn_prompt(turn_id, prompt_debug["hash"])
                         preserve_active_turn = True
                         logger.info(
                             "%s stage=turn_start_cancelled_after_backend_start "
@@ -291,7 +219,6 @@ class SuperAgentsLiveKitClient:
             self._active_turn_started_at = time.monotonic()
             self._active_turn_dispatch_id = dispatch_id
             self._active_turn_prompt_hash = prompt_debug["hash"]
-            self._record_turn_prompt(turn_id, prompt_debug["hash"])
 
         logger.info(
             "%s stage=turn_wait_start dispatch_id=%s thread_id=%s turn_id=%s "
@@ -335,57 +262,12 @@ class SuperAgentsLiveKitClient:
                 int((time.monotonic() - dispatch_started) * 1000),
             )
             raise
-        except Exception as exc:
-            # The backend turn is likely still running (for example the
-            # progress polling gave up during an app-server stall); keep it
-            # active so the user's next utterance can rejoin it and the
-            # finished answer still gets spoken.
-            preserve_active_turn = True
-            logger.error(
-                "%s stage=voice_turn_wait_failed dispatch_id=%s turn_id=%s "
-                "elapsed_ms=%d error=%s",
-                DISPATCH_TIMING_LOG,
-                dispatch_id,
-                turn_id,
-                int((time.monotonic() - dispatch_started) * 1000),
-                exc,
-            )
-            raise
         finally:
             if not preserve_active_turn and turn_id and self._active_turn_id == turn_id:
-                self._clear_active_turn_state()
-
-    def _clear_active_turn_state(self) -> None:
-        self._active_turn_id = None
-        self._active_turn_started_at = None
-        self._active_turn_dispatch_id = None
-        self._active_turn_prompt_hash = None
-        self._active_turn_wait_task = None
-        self._active_turn_wait_task_turn_id = None
-
-    def _handoff_completed_active_turn(self) -> None:
-        turn_id = self._active_turn_id
-        wait_task = self._active_turn_wait_task
-        handler = self._on_orphaned_result
-        if (
-            turn_id
-            and wait_task
-            and wait_task.done()
-            and not wait_task.cancelled()
-            and wait_task.exception() is None
-            and turn_id not in self._claimed_speech_turns
-            and handler is not None
-        ):
-            speech_text = _speech_text_from_progress(wait_task.result())
-            if speech_text:
-                logger.info(
-                    "%s stage=completed_turn_handoff turn_id=%s speech_chars=%d",
-                    DISPATCH_TIMING_LOG,
-                    turn_id,
-                    len(speech_text),
-                )
-                handler(self, turn_id, speech_text)
-        self._clear_active_turn_state()
+                self._active_turn_id = None
+                self._active_turn_started_at = None
+                self._active_turn_dispatch_id = None
+                self._active_turn_prompt_hash = None
 
     def has_active_prompt(self, prompt: str) -> bool:
         prompt_debug = _prompt_debug_fields(prompt)
@@ -403,28 +285,6 @@ class SuperAgentsLiveKitClient:
         async with self._turn_start_lock:
             thread_id = await self._ensure_thread()
             if self._active_turn_id:
-                if self._active_turn_has_completed():
-                    if prompt_debug["hash"] not in self._turn_prompt_hashes.get(
-                        self._active_turn_id, set()
-                    ):
-                        logger.info(
-                            "%s stage=proactive_steer_completed_active_turn "
-                            "thread_id=%s turn_id=%s prompt_hash=%s accepted=false",
-                            DISPATCH_TIMING_LOG,
-                            thread_id,
-                            self._active_turn_id,
-                            prompt_debug["hash"],
-                        )
-                        return None
-                    logger.info(
-                        "%s stage=proactive_steer_completed_active_turn "
-                        "thread_id=%s turn_id=%s prompt_hash=%s accepted=duplicate",
-                        DISPATCH_TIMING_LOG,
-                        thread_id,
-                        self._active_turn_id,
-                        prompt_debug["hash"],
-                    )
-                    return self._active_turn_id
                 if self._active_turn_prompt_hash == prompt_debug["hash"]:
                     logger.info(
                         "%s stage=proactive_steer_joined_active_turn thread_id=%s "
@@ -469,11 +329,28 @@ class SuperAgentsLiveKitClient:
         developer_instructions: str | None,
         dispatch_id: str,
     ) -> str:
-        turn_input = self._turn_input(
-            prompt,
-            developer_instructions=developer_instructions,
-            dispatch_id=dispatch_id,
-        )
+        reasoning_effort = self._configured_reasoning_effort()
+        turn_input: dict[str, Any] = {
+            "prompt": prompt,
+            "cwd": self._cwd,
+            "label": self._super_agent_name,
+            "agentName": self._super_agent_agent_name,
+            "approvalPolicy": self._approval_policy,
+            "sandbox": self._sandbox,
+            "serviceTier": self._service_tier,
+            "_mcpCallId": dispatch_id,
+        }
+        if self._backend_is_codex():
+            turn_input["model"] = self._model_name
+        elif self._model_name:
+            turn_input["model"] = self._model_name
+        if reasoning_effort:
+            turn_input["reasoningEffort"] = reasoning_effort
+        if effective_developer_instructions := self._turn_developer_instructions(
+            developer_instructions
+        ):
+            turn_input["developerInstructions"] = effective_developer_instructions
+        turn_input = self._guarded_permissions(turn_input)
 
         previous_turn_id = None
         if not (
@@ -530,64 +407,6 @@ class SuperAgentsLiveKitClient:
             turn_id,
         )
         return turn_id
-
-    def _turn_input(
-        self,
-        prompt: str,
-        *,
-        developer_instructions: str | None,
-        dispatch_id: str,
-    ) -> dict[str, Any]:
-        reasoning_effort = self._configured_reasoning_effort()
-        turn_input: dict[str, Any] = {
-            "prompt": prompt,
-            "cwd": self._cwd,
-            "label": self._super_agent_name,
-            "agentName": self._super_agent_agent_name,
-            "approvalPolicy": self._approval_policy,
-            "sandbox": self._sandbox,
-            "serviceTier": self._service_tier,
-            "_mcpCallId": dispatch_id,
-        }
-        if self._backend_is_codex():
-            turn_input["model"] = self._model_name
-        elif self._model_name:
-            turn_input["model"] = self._model_name
-        if reasoning_effort:
-            turn_input["reasoningEffort"] = reasoning_effort
-        if effective_developer_instructions := self._turn_developer_instructions(
-            developer_instructions
-        ):
-            turn_input["developerInstructions"] = effective_developer_instructions
-        return self._guarded_permissions(turn_input)
-
-    async def _queue_rejected_steer(
-        self,
-        thread_id: str,
-        prompt: str,
-        *,
-        blocked_by_turn_id: str,
-    ) -> str:
-        dispatch_id = f"voice-{uuid.uuid4().hex[:12]}"
-        result = await self._backend_client.queue_turn_by_label(
-            self._query(thread_id=thread_id),
-            self._turn_input(
-                prompt,
-                developer_instructions=None,
-                dispatch_id=dispatch_id,
-            ),
-        )
-        if not _response_is_queued(result):
-            turn_id = _extract_turn_id(result)
-            if not turn_id:
-                raise RuntimeError("Super Agents did not accept the follow-up turn.")
-            return turn_id
-        return await self._wait_for_queued_turn_to_start(
-            thread_id,
-            queued_id=_extract_queued_id(result),
-            blocked_by_turn_id=blocked_by_turn_id,
-            dispatch_id=dispatch_id,
-        )
 
     async def _resolve_active_turn_id(self, thread_id: str) -> str | None:
         resolve_label = getattr(self._backend_client, "resolve_label", None)
@@ -758,18 +577,14 @@ class SuperAgentsLiveKitClient:
                 )
             elif _is_turn_cannot_accept_steering_error(exc):
                 logger.warning(
-                    "Super Agents turn %s could not accept steering; queueing follow-up "
+                    "Super Agents turn %s could not accept steering; leaving active turn running "
                     "prompt_hash=%s",
                     self._active_turn_id,
                     prompt_debug["hash"],
                 )
                 if not start_when_inactive:
                     return None
-                return await self._queue_rejected_steer(
-                    thread_id,
-                    prompt,
-                    blocked_by_turn_id=self._active_turn_id,
-                )
+                return self._active_turn_id
             elif _is_no_active_turn_error(exc):
                 logger.info(
                     "Super Agents turn %s was already inactive during steering prompt_hash=%s",
@@ -789,14 +604,12 @@ class SuperAgentsLiveKitClient:
                 self._active_turn_id = turn_id
                 self._active_turn_started_at = time.monotonic()
                 self._active_turn_prompt_hash = prompt_debug["hash"]
-                self._record_turn_prompt(turn_id, prompt_debug["hash"])
                 return turn_id
             else:
                 raise
         turn_id = _extract_turn_id(result) or self._active_turn_id
         self._active_turn_id = turn_id
         self._active_turn_prompt_hash = prompt_debug["hash"]
-        self._record_turn_prompt(turn_id, prompt_debug["hash"])
         logger.info(
             "Submitted Super Agents turn steering turn_id=%s prompt_hash=%s prompt_len=%s",
             turn_id,
@@ -806,145 +619,18 @@ class SuperAgentsLiveKitClient:
         return turn_id
 
     async def _wait_for_turn(self, thread_id: str, turn_id: str) -> dict[str, Any]:
-        wait_task = self._active_turn_wait_task
-        if (
-            wait_task is None
-            or self._active_turn_wait_task_turn_id != turn_id
-            or (wait_task.done() and (wait_task.cancelled() or wait_task.exception()))
-        ):
-            wait_task = asyncio.create_task(
-                self._poll_turn_until_ready(thread_id, turn_id),
-                name=f"openbase-super-agents-turn-wait-{turn_id}",
-            )
-            self._active_turn_wait_task = wait_task
-            self._active_turn_wait_task_turn_id = turn_id
-            wait_task.add_done_callback(self._schedule_orphaned_result_check)
-        self._active_turn_wait_waiters += 1
-        try:
-            return await asyncio.shield(wait_task)
-        finally:
-            self._active_turn_wait_waiters -= 1
-
-    def set_orphaned_result_handler(
-        self,
-        handler: Callable[["SuperAgentsLiveKitClient", str, str], None] | None,
-    ) -> None:
-        self._on_orphaned_result = handler
-
-    @property
-    def orphaned_result_handler(
-        self,
-    ) -> Callable[["SuperAgentsLiveKitClient", str, str], None] | None:
-        return self._on_orphaned_result
-
-    def has_pending_voice_answer(self) -> bool:
-        """Whether a backend turn still owes the user a spoken answer.
-
-        True while the shared wait task is polling for a response, or when it
-        finished with speech text nobody has claimed.
-        """
-        wait_task = self._active_turn_wait_task
-        turn_id = self._active_turn_id
-        if (
-            not wait_task
-            or not turn_id
-            or self._active_turn_wait_task_turn_id != turn_id
-        ):
-            return False
-        if not wait_task.done():
-            return True
-        if wait_task.cancelled() or wait_task.exception():
-            return False
-        if turn_id in self._claimed_speech_turns:
-            return False
-        return bool(_speech_text_from_progress(wait_task.result()))
-
-    def _schedule_orphaned_result_check(
-        self, wait_task: asyncio.Task[dict[str, Any]]
-    ) -> None:
-        if (
-            wait_task.cancelled()
-            or wait_task.exception()
-            or self._on_orphaned_result is None
-        ):
-            return
-        asyncio.create_task(
-            self._deliver_orphaned_result_after_grace(wait_task),
-            name="openbase-super-agents-orphaned-result-check",
-        )
-
-    async def _deliver_orphaned_result_after_grace(
-        self, wait_task: asyncio.Task[dict[str, Any]]
-    ) -> None:
-        await asyncio.sleep(ORPHANED_RESULT_GRACE_SECONDS)
-        if self._active_turn_wait_task is not wait_task:
-            return
-        if self._active_turn_wait_waiters > 0:
-            return
-        turn_id = self._active_turn_wait_task_turn_id
-        handler = self._on_orphaned_result
-        if not turn_id or handler is None or turn_id in self._claimed_speech_turns:
-            return
-        speech_text = _speech_text_from_progress(wait_task.result())
-        if not speech_text:
-            return
-        logger.info(
-            "%s stage=orphaned_turn_result_detected turn_id=%s speech_chars=%d",
-            DISPATCH_TIMING_LOG,
-            turn_id,
-            len(speech_text),
-        )
-        handler(self, turn_id, speech_text)
-
-    async def _poll_turn_until_ready(
-        self,
-        thread_id: str,
-        turn_id: str,
-    ) -> dict[str, Any]:
-        consecutive_failures = 0
         while True:
-            try:
-                progress = await self._backend_client.progress_by_label(
-                    self._query(
-                        thread_id=thread_id,
-                        turn_id=turn_id,
-                        include_items=True,
-                        final_only=True,
-                        max_items=5,
-                        max_output_chars=4000,
-                        include_turn=True,
-                    )
+            progress = await self._backend_client.progress_by_label(
+                self._query(
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                    include_items=True,
+                    final_only=True,
+                    max_items=5,
+                    max_output_chars=4000,
+                    include_turn=True,
                 )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                consecutive_failures += 1
-                if consecutive_failures >= TURN_POLL_MAX_CONSECUTIVE_FAILURES:
-                    logger.error(
-                        "%s stage=turn_wait_poll_gave_up turn_id=%s "
-                        "consecutive_failures=%d error=%s",
-                        DISPATCH_TIMING_LOG,
-                        turn_id,
-                        consecutive_failures,
-                        exc,
-                    )
-                    raise
-                backoff = min(
-                    TURN_POLL_INTERVAL_SECONDS * (2**consecutive_failures),
-                    TURN_POLL_FAILURE_BACKOFF_MAX_SECONDS,
-                )
-                logger.warning(
-                    "%s stage=turn_wait_poll_error turn_id=%s "
-                    "consecutive_failures=%d retry_in_s=%.1f error=%s",
-                    DISPATCH_TIMING_LOG,
-                    turn_id,
-                    consecutive_failures,
-                    backoff,
-                    exc,
-                )
-                await asyncio.sleep(backoff)
-                continue
-            consecutive_failures = 0
+            )
             status = str(
                 progress.get("status")
                 or progress.get("summary", {}).get("status")
@@ -961,17 +647,6 @@ class SuperAgentsLiveKitClient:
             }:
                 return progress
             await asyncio.sleep(TURN_POLL_INTERVAL_SECONDS)
-
-    def _active_turn_has_completed(self) -> bool:
-        wait_task = self._active_turn_wait_task
-        if (
-            not wait_task
-            or self._active_turn_wait_task_turn_id != self._active_turn_id
-            or not wait_task.done()
-            or wait_task.cancelled()
-        ):
-            return False
-        return wait_task.exception() is None
 
     async def _ensure_thread(self) -> str:
         async with self._state_lock:
@@ -1215,35 +890,7 @@ class SuperAgentsLiveKitClient:
         if turn_id in self._claimed_speech_turns:
             return False
         self._claimed_speech_turns.add(turn_id)
-        self._turn_spoken_at[turn_id] = time.monotonic()
-        self._prune_turn_prompt_records()
         return True
-
-    def _record_turn_prompt(self, turn_id: str | None, prompt_hash: str) -> None:
-        if not turn_id or not prompt_hash:
-            return
-        self._turn_prompt_hashes.setdefault(turn_id, set()).add(prompt_hash)
-        self._prune_turn_prompt_records()
-
-    def _prune_turn_prompt_records(self) -> None:
-        cutoff = time.monotonic() - 4 * SPOKEN_TURN_DUPLICATE_SUPPRESSION_SECONDS
-        for turn_id, spoken_at in list(self._turn_spoken_at.items()):
-            if spoken_at < cutoff and turn_id != self._active_turn_id:
-                self._turn_spoken_at.pop(turn_id, None)
-                self._turn_prompt_hashes.pop(turn_id, None)
-        while len(self._turn_prompt_hashes) > 16:
-            oldest = next(iter(self._turn_prompt_hashes))
-            if oldest == self._active_turn_id:
-                break
-            self._turn_prompt_hashes.pop(oldest, None)
-
-    def _is_duplicate_of_spoken_turn(self, turn_id: str, prompt_hash: str) -> bool:
-        spoken_at = self._turn_spoken_at.get(turn_id)
-        if spoken_at is None:
-            return False
-        if time.monotonic() - spoken_at > SPOKEN_TURN_DUPLICATE_SUPPRESSION_SECONDS:
-            return False
-        return prompt_hash in self._turn_prompt_hashes.get(turn_id, set())
 
     def release_speech_claim(self, turn_id: str) -> None:
         self._claimed_speech_turns.discard(turn_id)

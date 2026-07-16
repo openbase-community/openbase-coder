@@ -129,23 +129,5 @@ def current_eligibility() -> EligibilityResult:
 
 
 def syncable_peers(result: EligibilityResult) -> tuple[SyncPeer, ...]:
-    """Peers that can appear in the Syncthing config (advertised device ID).
-
-    The cloud registry can hold stale records — a reinstalled machine's old
-    device entry, or duplicates of a peer. Deduplicate by Syncthing device
-    ID and never treat our own engine identity as a peer: a phantom
-    self-peer triples reconcile passes and reconciles repos against
-    themselves.
-    """
-    from openbase_coder_cli.code_sync.syncthing import stored_device_id
-
-    own_engine_id = stored_device_id() or ""
-    seen: set[str] = set()
-    peers: list[SyncPeer] = []
-    for peer in result.peers:
-        engine_id = peer.syncthing_device_id
-        if not engine_id or engine_id == own_engine_id or engine_id in seen:
-            continue
-        seen.add(engine_id)
-        peers.append(peer)
-    return tuple(peers)
+    """Peers that can appear in the Syncthing config (advertised device ID)."""
+    return tuple(peer for peer in result.peers if peer.syncthing_device_id)

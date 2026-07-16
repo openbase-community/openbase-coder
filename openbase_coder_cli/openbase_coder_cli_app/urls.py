@@ -11,10 +11,8 @@ from openbase_coder_cli.openbase_coder_cli_app.git_http import git_http_backend
 from openbase_coder_cli.openbase_coder_cli_app.provenance_hooks_settings import (
     openbase_hooks_settings,
 )
-from openbase_coder_cli.openbase_coder_cli_app.health_warnings import health_warnings
 from openbase_coder_cli.openbase_coder_cli_app.sync_settings import (
     sync_conflicts,
-    sync_conflicts_ignore_containing_folder,
     sync_conflicts_resolve,
     sync_settings,
     sync_status,
@@ -126,7 +124,6 @@ urlpatterns = [
     path("auth/logout/", auth_logout, name="auth-logout"),
     path("agents-md/", agents_md, name="agents-md"),
     path("health/", health_check, name="health-check"),
-    path("health/warnings/", health_warnings, name="health-warnings"),
     path("brain-readiness/", brain_readiness, name="brain-readiness"),
     path(
         "features/apple-music-playback/",
@@ -408,11 +405,6 @@ urlpatterns = [
         "sync/conflicts/resolve/",
         sync_conflicts_resolve,
         name="sync-conflicts-resolve",
-    ),
-    path(
-        "sync/conflicts/ignore-containing-folder/",
-        sync_conflicts_ignore_containing_folder,
-        name="sync-conflicts-ignore-containing-folder",
     ),
     path(
         "sync/versions/purge/",

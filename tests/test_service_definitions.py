@@ -192,7 +192,7 @@ def test_claude_thread_device_sync_service_is_optional_service():
         in command
     )
     assert (
-        'CLAUDE_THREAD_DEVICE_SYNC_EXCHANGE_DIR="${CLAUDE_THREAD_DEVICE_SYNC_EXCHANGE_DIR:-/tmp/openbase/thread-sync}"'
+        'CLAUDE_THREAD_DEVICE_SYNC_EXCHANGE_DIR="${CLAUDE_THREAD_DEVICE_SYNC_EXCHANGE_DIR:-/tmp/openbase/claude-thread-sync}"'
         in command
     )
     assert (

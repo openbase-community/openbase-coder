@@ -115,16 +115,6 @@ def _code_sync_capabilities() -> dict[str, Any]:
     return capabilities
 
 
-def _is_standalone_install() -> bool:
-    """Install mode for the report; never raises (registration must not fail)."""
-    from openbase_coder_cli.runtime import is_standalone_runtime
-
-    try:
-        return is_standalone_runtime()
-    except OSError:
-        return False
-
-
 def _with_capabilities(
     payload: dict[str, Any], capabilities: dict[str, Any]
 ) -> dict[str, Any]:
@@ -159,12 +149,6 @@ def report_cli_state(
         {
             "cli_configured": cli_configured,
             "cli_version": __version__,
-            # Dev installs report scm-derived versions (e.g. 0.3.dev12+g...)
-            # that must never be compared against release version policy
-            # (minimum_cli_version); the mode lets the cloud exempt them.
-            "cli_install_mode": (
-                "standalone" if _is_standalone_install() else "dev-workspace"
-            ),
             "tailscale_serve_healthy": serve_healthy,
             **_code_sync_capabilities(),
         },

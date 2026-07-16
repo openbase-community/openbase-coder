@@ -1,47 +1,9 @@
 from __future__ import annotations
 
-import importlib.resources as importlib_resources
-import json
-import subprocess
 from pathlib import Path
 
 from openbase_coder_cli.cli.setup import hooks
 from openbase_coder_cli.paths import INJECT_SESSION_ID_HOOK_PATH
-
-
-def test_hook_script_injects_session_id_with_usage_instructions() -> None:
-    # The hook carries its own usage instructions so they ship, update, and
-    # uninstall with it — no AGENTS.md edit is needed for the normal case.
-    script = importlib_resources.files(hooks.BUNDLED_HOOKS_PACKAGE).joinpath(
-        hooks.SESSION_ID_HOOK_FILENAME
-    )
-    with importlib_resources.as_file(script) as script_path:
-        result = subprocess.run(
-            ["bash", str(script_path)],
-            input=json.dumps({"session_id": "abc-123"}),
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-    assert "abc-123" in context
-    assert "Agent-Thread-Id" in context
-    assert "do not query Super Agents" in context
-
-
-def test_hook_script_stays_silent_without_session_id() -> None:
-    script = importlib_resources.files(hooks.BUNDLED_HOOKS_PACKAGE).joinpath(
-        hooks.SESSION_ID_HOOK_FILENAME
-    )
-    with importlib_resources.as_file(script) as script_path:
-        result = subprocess.run(
-            ["bash", str(script_path)],
-            input="{}",
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    assert result.stdout == ""
 
 
 def test_trusted_hash_matches_codex_fingerprint() -> None:

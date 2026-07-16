@@ -15,10 +15,7 @@ from openbase_coder_cli.paths import (
     NORMAL_CODEX_AGENTS_MD_PATH,
     OPENBASE_CLAUDE_MD_PATH,
 )
-from openbase_coder_cli.runtime import (
-    is_standalone_runtime,
-    packaged_instructions_dir,
-)
+from openbase_coder_cli.runtime import packaged_instructions_dir
 from openbase_coder_cli.services.installation import InstallationConfig
 
 CODEX_HOME_DEFAULT_SOURCE_DIR = "instructions"
@@ -236,14 +233,6 @@ def ensure_rendered_instruction_file(
         _report(report, f"{document_label} source not found at {source_path}")
         return False
 
-    standalone = is_standalone_runtime()
-    if standalone:
-        # Standalone installs have no editable instruction source: the
-        # packaged templates are the only authority, so rendered files are
-        # always regenerated (local edits never stick) and kept read-only so
-        # they don't invite editing.
-        force = True
-
     source_text = source_path.read_text(encoding="utf-8")
     rendered = _rendered_instruction_file(source_text, source_path)
     existing = ""
@@ -278,26 +267,13 @@ def ensure_rendered_instruction_file(
             return False
 
     if existing == rendered and target_path.exists():
-        if standalone:
-            _mark_read_only(target_path)
         _report(report, f"{document_label} already configured at {target_path}")
         return False
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    if target_path.is_file() and not os.access(target_path, os.W_OK):
-        target_path.chmod(0o644)
     target_path.write_text(rendered, encoding="utf-8")
-    if standalone:
-        _mark_read_only(target_path)
     _report(report, f"Updated {document_label} at {target_path}")
     return True
-
-
-def _mark_read_only(target_path: Path) -> None:
-    try:
-        target_path.chmod(0o444)
-    except OSError:
-        pass
 
 
 def _rendered_instruction_file(

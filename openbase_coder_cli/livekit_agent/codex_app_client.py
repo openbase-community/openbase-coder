@@ -10,10 +10,6 @@ from typing import Any
 
 import websockets  # noqa: F401
 
-from openbase_coder_cli.codex_session_defaults import (
-    DEFAULT_CODEX_APPROVAL_POLICY,
-    DEFAULT_CODEX_SANDBOX,
-)
 from openbase_coder_cli.dispatcher_config import (
     dispatcher_model,
     dispatcher_reasoning_effort,
@@ -82,8 +78,8 @@ class CodexAppServerClient(CodexTransportMixin):
         cwd: str,
         state_path: str | None = None,
         developer_instructions: str | None = None,
-        approval_policy: str = DEFAULT_CODEX_APPROVAL_POLICY,
-        sandbox: str = DEFAULT_CODEX_SANDBOX,
+        approval_policy: str = "never",
+        sandbox: str = "danger-full-access",
         model_name: str | None = None,
         service_tier: str = "standard",
         dispatcher_config_path: str | Path | None = None,
@@ -252,7 +248,6 @@ class CodexAppServerClient(CodexTransportMixin):
                 turn_params = {
                     "threadId": thread_id,
                     "cwd": self._cwd,
-                    "model": self._model_name,
                     "approvalPolicy": self._approval_policy,
                     "sandboxPolicy": self._sandbox_policy(),
                     "serviceTier": self._service_tier,
@@ -589,7 +584,6 @@ class CodexAppServerClient(CodexTransportMixin):
     def _thread_params(self, *, thread_id: str | None = None) -> dict[str, Any]:
         params: dict[str, Any] = {
             "cwd": self._cwd,
-            "model": self._model_name,
             "approvalPolicy": self._approval_policy,
             "sandbox": self._sandbox,
         }

@@ -6,8 +6,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from openbase_coder_cli.paths import STANDALONE_CURRENT_DIR
-
 PACKAGE_METADATA_FILENAME = "openbase-coder-package.json"
 
 
@@ -89,47 +87,6 @@ def packaged_skills_dir() -> Path | None:
 
 def is_standalone_runtime() -> bool:
     return current_runtime_package() is not None
-
-
-def stable_runtime_package() -> RuntimePackage | None:
-    """current_runtime_package() with its root routed through ``current``.
-
-    Anything that persists a package path (service wrappers, plists) must use
-    this instead of the raw detection: detection can land on the versioned
-    release directory (which is pruned on updates) depending on how the
-    process was launched, while the ``packages/standalone/current`` alias
-    survives every flip.
-    """
-    package = current_runtime_package()
-    if package is None:
-        return None
-    stable_root = stable_package_path(package.root)
-    if stable_root == package.root:
-        return package
-    return RuntimePackage(
-        root=stable_root, version=package.version, target=package.target
-    )
-
-
-def stable_package_path(path: Path) -> Path:
-    """Return the version-independent alias for a standalone package path.
-
-    Release directories rotate on every self-update and the old version is
-    deleted, so persisted references — MCP command paths, skill symlinks —
-    must route through the stable ``packages/standalone/current`` symlink or
-    they dangle after the next release (and break when synced to a machine on
-    a different release). Paths outside the release that ``current`` points
-    to are returned unchanged.
-    """
-    try:
-        current_target = STANDALONE_CURRENT_DIR.resolve(strict=True)
-    except OSError:
-        return path
-    try:
-        relative = path.resolve().relative_to(current_target)
-    except (OSError, ValueError):
-        return path
-    return STANDALONE_CURRENT_DIR / relative
 
 
 def _candidate_roots_from_executable() -> list[Path]:

@@ -70,7 +70,9 @@ else:
 
     if InstallationConfig.exists():
         _install_config = InstallationConfig.load()
-        if _install_config.workspace_path:
+        if _install_config.console_build_dir:
+            CONSOLE_BUILD_DIR = Path(_install_config.console_build_dir)
+        elif _install_config.workspace_path:
             CONSOLE_BUILD_DIR = (
                 Path(_install_config.workspace_path) / "console" / "dist"
             )

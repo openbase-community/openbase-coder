@@ -1,9 +1,8 @@
 """Conflict records for code-sync (repo divergence and file conflicts).
 
 Records live in ``~/.openbase/code-sync/conflicts.json`` and are surfaced in
-the console/iOS alongside thread sync conflicts. Branch records clear when
-the repository manifest brings both heads back together; explicit resolution
-remains available when safe automatic convergence is blocked.
+the console/iOS alongside thread sync conflicts. Nothing is ever resolved
+automatically; resolution is an explicit user action.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
 from openbase_coder_cli.code_sync import CodeSyncError
@@ -88,40 +87,6 @@ def record_branch_conflict(
     return record
 
 
-def mark_branch_conflicts_resolved(
-    *,
-    folder_id: str,
-    repo_relpath: str,
-    branch: str,
-    resolution: str = "converged",
-    path: Path | None = None,
-) -> int:
-    """Resolve stale branch-conflict records after both refs converge."""
-    conflicts = read_conflicts(path)
-    resolved_count = 0
-    now = _timestamp()
-    for conflict in conflicts:
-        if (
-            conflict.get("resolved")
-            or conflict.get("kind") != BRANCH_CONFLICT_KIND
-            or conflict.get("folder_id") != folder_id
-            or conflict.get("repo_relpath") != repo_relpath
-            or conflict.get("branch") != branch
-        ):
-            continue
-        conflict.update(
-            {
-                "resolved": True,
-                "resolution": resolution,
-                "resolved_at": now,
-            }
-        )
-        resolved_count += 1
-    if resolved_count:
-        _write_conflicts(conflicts, path)
-    return resolved_count
-
-
 def record_file_conflict(
     *, folder_id: str, file_relpath: str, path: Path | None = None
 ) -> dict[str, Any]:
@@ -153,85 +118,6 @@ def find_conflict(conflict_id: str, path: Path | None = None) -> dict[str, Any] 
         if conflict.get("id") == conflict_id:
             return conflict
     return None
-
-
-def containing_folder_for_conflict_path(file_relpath: str) -> str | None:
-    """Containing folder for a home-relative Syncthing conflict copy."""
-    conflict_path = PurePosixPath(file_relpath)
-    if (
-        not file_relpath
-        or conflict_path.is_absolute()
-        or any(part == ".." for part in conflict_path.parts)
-    ):
-        raise CodeSyncError("Conflict record has an invalid file path.")
-    containing_folder = conflict_path.parent
-    if str(containing_folder) in ("", "."):
-        return None
-    return containing_folder.as_posix()
-
-
-def original_relpath_for_conflict_path(file_relpath: str) -> str:
-    """Original file relpath for a Syncthing conflict-copy relpath."""
-    conflict_path = PurePosixPath(file_relpath)
-    original_name = _original_name(conflict_path.name)
-    if str(conflict_path.parent) in ("", "."):
-        return original_name
-    return str(conflict_path.with_name(original_name))
-
-
-def conflict_device_hint(file_relpath: str) -> str:
-    """Best-effort device token parsed from Syncthing's conflict filename."""
-    conflict_name = PurePosixPath(file_relpath).name
-    _stem, marker, remainder = conflict_name.partition(".sync-conflict-")
-    if not marker:
-        return ""
-    marker_payload = remainder.split(".", 1)[0]
-    parts = marker_payload.split("-")
-    return "-".join(parts[2:]) if len(parts) >= 3 else ""
-
-
-def ignore_pattern_for_containing_folder(conflict: dict[str, Any]) -> str:
-    """Return the anchored Syncthing ignore pattern for a file conflict folder."""
-    if conflict.get("kind") != FILE_CONFLICT_KIND:
-        raise CodeSyncError("Only file conflicts have a containing folder to ignore.")
-    file_relpath = str(conflict.get("path") or "")
-    containing_folder = containing_folder_for_conflict_path(file_relpath)
-    if containing_folder is None:
-        raise CodeSyncError(
-            "This conflict is at the sync folder root, so there is no containing "
-            "folder to ignore."
-        )
-    return f"/{containing_folder}"
-
-
-def mark_file_conflicts_resolved_under(
-    *, folder_id: str, folder_relpath: str, resolution: str, path: Path | None = None
-) -> int:
-    """Mark unresolved file conflicts under a folder path as resolved."""
-    normalized = folder_relpath.strip("/")
-    conflicts = read_conflicts(path)
-    resolved_count = 0
-    now = _timestamp()
-    for conflict in conflicts:
-        if (
-            conflict.get("resolved")
-            or conflict.get("kind") != FILE_CONFLICT_KIND
-            or conflict.get("folder_id") != folder_id
-        ):
-            continue
-        file_relpath = str(conflict.get("path") or "")
-        if file_relpath == normalized or file_relpath.startswith(f"{normalized}/"):
-            conflict.update(
-                {
-                    "resolved": True,
-                    "resolution": resolution,
-                    "resolved_at": now,
-                }
-            )
-            resolved_count += 1
-    if resolved_count:
-        _write_conflicts(conflicts, path)
-    return resolved_count
 
 
 def resolve_conflict(

@@ -127,9 +127,6 @@ auth token automatically.
   backends by Tailscale DNS name or IP, or use **Discover Tailnet Hosts**.
   Each backend row shows its computed URLs (`http://<host>:18080` for the
   API, `ws://<host>:7880` for LiveKit).
-  Once a DevSpace has positively identified itself as an Openbase Cloud
-  Workspace, starting a call automatically resumes it after idle shutdown;
-  real machines never trigger Cloud startup.
 - **Dispatcher Voice** — choose the dispatcher's voice and recreate the
   dispatcher thread to apply it.
 - **Call Audio** — custom mute sounds and volume; optional music while muted

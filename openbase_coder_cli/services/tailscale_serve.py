@@ -56,9 +56,7 @@ class TailscaleServeHealth:
 def configure_tailscale_serve() -> None:
     tailscale_bin = _tailscale_bin()
     if not tailscale_bin:
-        raise RuntimeError(
-            "tailscale was not found (checked PATH and /Applications/Tailscale.app)."
-        )
+        raise RuntimeError("tailscale was not found (checked PATH and /Applications/Tailscale.app).")
 
     _run_tailscale(
         tailscale_bin,
@@ -135,15 +133,6 @@ def tailscale_serve_health() -> TailscaleServeHealth:
 
 
 TAILSCALE_APP_BUNDLE_CLI = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
-# launchd services run with a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin),
-# so PATH lookup alone silently fails in exactly the contexts that register
-# the device — and a registration without a tailscale identity makes peers
-# drop this device from their sync configs.
-TAILSCALE_FALLBACK_PATHS = (
-    "/usr/local/bin/tailscale",
-    "/opt/homebrew/bin/tailscale",
-    TAILSCALE_APP_BUNDLE_CLI,
-)
 
 
 def _tailscale_bin() -> str | None:
@@ -152,9 +141,8 @@ def _tailscale_bin() -> str | None:
         return found
     # Direct-download and App Store installs don't put the CLI on PATH; the
     # binary inside the app bundle speaks the same CLI.
-    for candidate in TAILSCALE_FALLBACK_PATHS:
-        if os.access(candidate, os.X_OK):
-            return candidate
+    if os.access(TAILSCALE_APP_BUNDLE_CLI, os.X_OK):
+        return TAILSCALE_APP_BUNDLE_CLI
     return None
 
 

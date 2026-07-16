@@ -123,16 +123,13 @@ def rebuild_site() -> None:
     """Rebuild the standalone plugin site dir from the plugin registry.
 
     Used after runtime-package upgrades that change the bundled Python (see
-    the workspace AUTO_UPDATE.md guide), and available to dev installs, which
-    share the same plugin site dir.
+    the workspace AUTO_UPDATE.md guide); a no-op for development installs.
     """
     from openbase_coder_cli.plugins.site import rebuild_plugin_site, use_plugin_site
     from openbase_coder_cli.plugins.store import load_registry
 
     if not use_plugin_site():
-        click.echo(
-            "Development install: plugins live in the workspace venv; nothing to rebuild."
-        )
+        click.echo("Development install: plugins live in the workspace venv; nothing to rebuild.")
         return
     registry = load_registry()
     requirements = [plugin.requirement for plugin in registry.plugins]

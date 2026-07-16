@@ -483,56 +483,6 @@ def test_exit_to_dispatch_command_rejects_embedded_variants():
     assert not _is_exit_to_dispatch_command("please dispatch me")
 
 
-@pytest.mark.parametrize(
-    "spoken",
-    [
-        "Why do you keep saying back to dispatch every time I talk?",
-        "Point my recent question to dispatch and make sure it gets answered.",
-        "I want you to dispatch a new agent to review the PR.",
-        "Can you send my question to dispatch for me please?",
-    ],
-)
-def test_exit_to_dispatch_command_rejects_sentences_mentioning_dispatch(spoken):
-    assert not _is_exit_to_dispatch_command(spoken)
-
-
-def test_direct_livekit_instruction_loader_priority(tmp_path):
-    explicit = tmp_path / "explicit.md"
-    default = tmp_path / "default.md"
-    explicit.write_text("explicit file instructions\n", encoding="utf-8")
-    default.write_text("default file instructions\n", encoding="utf-8")
-
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={
-                DIRECT_LIVEKIT_INSTRUCTIONS_PATH_ENV: str(explicit),
-                DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV: "env text instructions",
-            },
-            default_path=default,
-        )
-        == "explicit file instructions"
-    )
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV: "env text instructions"},
-            default_path=default,
-        )
-        == "default file instructions"
-    )
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={DIRECT_LIVEKIT_INSTRUCTIONS_TEXT_ENV: "env text instructions"},
-            default_path=tmp_path / "missing.md",
-        )
-        == "env text instructions"
-    )
-    assert (
-        load_direct_livekit_developer_instructions(
-            env={},
-            default_path=tmp_path / "missing.md",
-        )
-        == DIRECT_LIVEKIT_BUILTIN_DEVELOPER_INSTRUCTIONS
-    )
 def test_super_agent_voices_use_builtin_catalog_pool(monkeypatch):
     monkeypatch.setattr(
         voices,
@@ -983,11 +933,10 @@ async def test_session_final_transcript_proactively_steers_when_logging_disabled
     class FakeClient:
         def __init__(self):
             self.steered_prompts = []
-            self.steer_result = "turn-1"
 
         async def steer_active_turn(self, prompt):
             self.steered_prompts.append(prompt)
-            return self.steer_result
+            return "turn-1"
 
         def has_active_prompt(self, prompt):
             return False
@@ -1014,39 +963,6 @@ async def test_session_final_transcript_proactively_steers_when_logging_disabled
         await asyncio.sleep(0.01)
     assert client.steered_prompts == ["stop now"]
     assert router.should_skip_proactively_steered_prompt("stop now") is True
-
-    client.steer_result = None
-    session.handlers["user_input_transcribed"](
-        SimpleNamespace(is_final=True, transcript="start something new")
-    )
-    for _ in range(20):
-        if len(client.steered_prompts) == 2:
-            break
-        await asyncio.sleep(0.01)
-    assert router.should_skip_proactively_steered_prompt("start something new") is False
-
-
-def test_proactive_steer_dedup_matches_formatted_twin_transcripts():
-    class FakeClient:
-        def has_active_prompt(self, prompt):
-            return False
-
-    router = LiveKitVoiceRouter(FakeClient())
-
-    # STT can deliver one utterance as an unformatted final followed by a
-    # formatted one; the steered version must dedupe both variants.
-    router.mark_proactive_steer("im not like what did fable do")
-    assert (
-        router.should_skip_proactively_steered_prompt(
-            "I'm not, like, what did Fable do?"
-        )
-        is True
-    )
-
-    router.mark_proactive_steer("what is 22")
-    assert (
-        router.should_skip_proactively_steered_prompt("what is two plus two") is False
-    )
 
 
 @pytest.mark.asyncio

@@ -1,14 +1,11 @@
-"""Stable plugin site directory for every install mode.
+"""Stable plugin site directory for standalone installs.
 
 Standalone runtime packages are replaced wholesale on upgrade, so plugin
 Python packages must not live inside them. They are installed into
 ``~/.openbase/plugins/site`` instead, which every Openbase Coder process adds
 to ``sys.path`` at import time (see the package ``__init__``).
 
-Dev installs use the same site dir: installing plugins into the workspace
-venv would let ``uv sync`` silently wipe them, and would leave the site-dir
-import mechanics — the only path production exercises — untested in
-development.
+Dev installs keep using the workspace venv directly; it persists on its own.
 """
 
 from __future__ import annotations
@@ -19,6 +16,7 @@ import subprocess
 import sys
 
 from openbase_coder_cli.paths import PLUGIN_SITE_DIR
+from openbase_coder_cli.runtime import is_standalone_runtime
 
 
 def activate_plugin_site() -> None:
@@ -27,12 +25,8 @@ def activate_plugin_site() -> None:
 
 
 def use_plugin_site() -> bool:
-    """Whether plugin packages should install into the stable site dir.
-
-    Always true: dev and standalone share the site dir so both pathways run
-    the same plugin import mechanics and ``uv sync`` cannot wipe plugins.
-    """
-    return True
+    """Whether plugin packages should install into the stable site dir."""
+    return is_standalone_runtime()
 
 
 def install_into_plugin_site(requirement: str) -> None:

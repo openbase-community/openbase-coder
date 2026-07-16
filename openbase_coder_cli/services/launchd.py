@@ -23,10 +23,9 @@ from openbase_coder_cli.paths import (
     LAUNCHD_DOMAIN,
     LAUNCHD_WRAPPER_DIR,
     OPENBASE_BASE_DIR,
-    OPENBASE_BIN_DIR,
     PLIST_DIR,
 )
-from openbase_coder_cli.runtime import stable_runtime_package
+from openbase_coder_cli.runtime import current_runtime_package
 from openbase_coder_cli.services.definitions import (
     SERVICES,
     ServiceDefinition,
@@ -84,23 +83,13 @@ def _resolve_syncthing() -> str:
 
 
 def _runtime_workdir(config: InstallationConfig) -> str:
-    runtime_package = stable_runtime_package()
+    runtime_package = current_runtime_package()
     if runtime_package is not None:
         return str(runtime_package.root)
     return config.workspace_path or str(OPENBASE_BASE_DIR)
 
 
-def _resolve_service_python(package) -> str:
-    if package is not None and package.python_path.is_file():
-        return str(package.python_path)
-    return sys.executable
-
-
 def _binary_resolvers(config: InstallationConfig) -> dict[str, Callable[[], str]]:
-    # Standalone binaries are derived from the runtime package at generation
-    # time (routed through the stable current/ alias) — never persisted, so a
-    # self-update flip can't leave services pointing at a pruned release.
-    package = stable_runtime_package()
     return {
         "uv": lambda: _resolve_binary_with_preferred_paths(
             "uv",
@@ -117,17 +106,19 @@ def _binary_resolvers(config: InstallationConfig) -> dict[str, Callable[[], str]
         ),
         "livekit": lambda: _resolve_binary_with_preferred_paths(
             "livekit-server",
-            [package.livekit_server_path]
-            if package is not None
-            else [OPENBASE_BIN_DIR / "livekit-server"],
+            [Path(config.livekit_server_path)] if config.livekit_server_path else [],
             "/opt/homebrew/bin/livekit-server",
         ),
-        "python": lambda: _resolve_service_python(package),
+        "python": lambda: config.python_path or sys.executable,
         "syncthing": _resolve_syncthing,
         "openbase_coder": lambda: _resolve_binary_with_preferred_paths(
             "openbase-coder",
             [
-                *([package.openbase_coder_path] if package is not None else []),
+                *(
+                    [Path(config.package_path) / "bin" / "openbase-coder"]
+                    if config.package_path
+                    else []
+                ),
                 *_workspace_binary_candidates(config, "openbase-coder"),
             ],
         ),
@@ -372,7 +363,9 @@ def generate_plist(svc: ServiceDefinition, config: InstallationConfig) -> Path:
     workdir = svc.workdir_template.format(
         workspace=config.workspace_path or _runtime_workdir(config),
         data_dir=str(OPENBASE_BASE_DIR),
-        runtime_workdir=_runtime_workdir(config),
+        runtime_workdir=config.package_path
+        or config.workspace_path
+        or str(OPENBASE_BASE_DIR),
     )
     log_dir = DEFAULT_LOG_DIR
 
@@ -437,12 +430,6 @@ def launchctl_bootstrap(svc: ServiceDefinition) -> None:
         time.sleep(0.5 * (attempt + 1))
         result = _launchctl("bootstrap", domain, str(plist), check=False)
         if result.returncode == 0:
-            # An intermittent macOS state has been observed where bootstrap
-            # succeeds but the job stays loaded without a PID, despite
-            # RunAtLoad and KeepAlive (mechanism unconfirmed). Kickstart
-            # without -k is a no-op for a running job and safely ensures the
-            # newly registered job is asked to run.
-            _launchctl("kickstart", f"{domain}/{label}", check=False)
             return
     raise click.ClickException(f"Failed to bootstrap {label}: {result.stderr.strip()}")
 

@@ -9,21 +9,13 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from typing import Any
 
-from openbase_coder_cli.backend_config import (
-    CLAUDE_CODE_BACKEND,
-    OPENBASE_CLOUD_BACKEND,
-)
-from openbase_coder_cli.claude_auth import claude_auth_status
 from openbase_coder_cli.config.token_manager import (
     DEFAULT_WEB_BACKEND_URL,
     TokenManager,
 )
-from openbase_coder_cli.env_file import selected_backend_from_env_file
 from openbase_coder_cli.paths import (
-    CODEX_HOME_DIR,
     DEFAULT_ENV_FILE_PATH,
     ONBOARDING_JSON_PATH,
 )
@@ -79,49 +71,6 @@ def write_onboarding_cache(updates: dict[str, Any]) -> None:
     )
 
 
-def selected_coding_backend() -> str:
-    """The coding backend configured for this install (env file wins)."""
-    env_path = DEFAULT_ENV_FILE_PATH
-    if InstallationConfig.exists():
-        try:
-            config = InstallationConfig.load()
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            pass
-        else:
-            if config.env_file:
-                env_path = os.path.expanduser(config.env_file)
-    return selected_backend_from_env_file(Path(env_path))
-
-
-def codex_auth_present() -> bool:
-    """Whether the service Codex home has a usable auth.json."""
-    auth_path = CODEX_HOME_DIR / "auth.json"
-    try:
-        payload = json.loads(auth_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
-        return False
-    return isinstance(payload, dict) and bool(payload)
-
-
-def backend_auth_status(*, authenticated: bool | None = None) -> dict[str, Any]:
-    """Auth readiness for the selected coding backend.
-
-    ``ready`` means the backend can start coding sessions without an
-    interactive login. Openbase Cloud rides on the CLI's own cloud login,
-    so its readiness equals ``authenticated``.
-    """
-    backend = selected_coding_backend()
-    if backend == CLAUDE_CODE_BACKEND:
-        ready = claude_auth_status().logged_in
-    elif backend == OPENBASE_CLOUD_BACKEND:
-        if authenticated is None:
-            authenticated = TokenManager(web_backend_url()).has_refresh_token
-        ready = authenticated
-    else:
-        ready = codex_auth_present()
-    return {"backend": backend, "ready": ready}
-
-
 def web_backend_url() -> str:
     return os.environ.get(
         "OPENBASE_CODER_CLI_WEB_BACKEND_URL", DEFAULT_WEB_BACKEND_URL
@@ -133,13 +82,11 @@ def onboarding_status_payload() -> dict[str, Any]:
     checks = cli_configured_checks()
     from openbase_coder_cli.self_update import version_info
 
-    authenticated = TokenManager(web_backend_url()).has_refresh_token
     return {
         "cli_configured": all(checks.values()),
         "checks": checks,
         "versions": version_info(),
-        "authenticated": authenticated,
-        "backend_auth": backend_auth_status(authenticated=authenticated),
+        "authenticated": TokenManager(web_backend_url()).has_refresh_token,
         "tailscale_self": tailscale_self_identity(),
         "tailscale_serve": tailscale_serve_health().to_dict(),
         "cloud": read_onboarding_cache(),

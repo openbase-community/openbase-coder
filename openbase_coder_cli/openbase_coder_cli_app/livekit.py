@@ -10,7 +10,6 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 import livekit.api as livekit_api
 from asgiref.sync import async_to_sync
@@ -65,7 +64,6 @@ from openbase_coder_cli.livekit_voice_route import (
 )
 from openbase_coder_cli.mcp.session_manager import get_session_manager
 from openbase_coder_cli.openbase_coder_cli_app.common import _request_identity
-from openbase_coder_cli.services.cloud_workspace import cloud_workspace_id
 from openbase_coder_cli.stt_providers import (
     LOCAL_MLX_WHISPER_STT_PROVIDER_ID,
     download_local_mlx_whisper,
@@ -837,14 +835,7 @@ def livekit_room_token(request):
         .to_jwt()
     )
 
-    payload: dict[str, Any] = {"token": token, "room_name": room_name}
-    workspace_id = cloud_workspace_id()
-    if workspace_id:
-        payload["workspace"] = {
-            "kind": "openbase_cloud",
-            "id": workspace_id,
-        }
-    return Response(payload)
+    return Response({"token": token, "room_name": room_name})
 
 
 @api_view(["GET"])

@@ -118,31 +118,6 @@ def test_removed_thread_derived_project_stays_hidden_after_refresh(
     assert projects.get_recent_projects() == []
 
 
-def test_recent_projects_translate_foreign_home_paths(
-    tmp_path: Path, monkeypatch
-) -> None:
-    projects_file = tmp_path / "coder-projects.json"
-    projects_file.write_text(
-        json.dumps(
-            [
-                {
-                    "path": "/Users/source-user/Projects/openbase",
-                    "source": "thread",
-                },
-                {"path": "/tmp/remembered-project", "source": "thread"},
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(projects, "PROJECTS_FILE", projects_file)
-    monkeypatch.setattr(projects, "IGNORED_PROJECT_ROOTS", ())
-
-    assert projects.get_recent_projects() == [
-        {"path": str(Path.home() / "Projects" / "openbase")},
-        {"path": "/tmp/remembered-project"},
-    ]
-
-
 def test_remove_project_untracks_path_without_deleting_directory(
     tmp_path: Path, monkeypatch
 ) -> None:

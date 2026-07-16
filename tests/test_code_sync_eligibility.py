@@ -80,35 +80,3 @@ def test_syncable_peers_require_syncthing_identity() -> None:
 def test_missing_devices_payload_is_not_eligible() -> None:
     result = eligibility.evaluate_state({}, "desktop-self")
     assert result.eligible is False
-
-
-def test_syncable_peers_dedupes_and_excludes_self(monkeypatch) -> None:
-    from openbase_coder_cli.code_sync import eligibility
-
-    monkeypatch.setattr(
-        "openbase_coder_cli.code_sync.syncthing.stored_device_id",
-        lambda *a, **k: "SELF-ENGINE-ID",
-    )
-    peers = (
-        eligibility.SyncPeer(
-            device_id="d1", name="mini", kind="desktop", tailscale_magic_dns="mini.ts.net",
-            syncthing_device_id="MINI-ENGINE-ID",
-        ),
-        eligibility.SyncPeer(
-            device_id="d2", name="mini-stale", kind="desktop", tailscale_magic_dns="mini.ts.net",
-            syncthing_device_id="MINI-ENGINE-ID",
-        ),
-        eligibility.SyncPeer(
-            device_id="d3", name="old-self", kind="desktop", tailscale_magic_dns="self.ts.net",
-            syncthing_device_id="SELF-ENGINE-ID",
-        ),
-        eligibility.SyncPeer(
-            device_id="d4", name="no-engine", kind="desktop", tailscale_magic_dns="x.ts.net",
-            syncthing_device_id="",
-        ),
-    )
-    result = eligibility.EligibilityResult(eligible=True, reason="", peers=peers)
-
-    kept = eligibility.syncable_peers(result)
-
-    assert [p.device_id for p in kept] == ["d1"]

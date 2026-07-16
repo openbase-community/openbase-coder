@@ -7,12 +7,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from openbase_coder_cli.brain_score import brain_score_token_file
-from openbase_coder_cli.codex_session_defaults import (
-    CODEX_APPROVAL_POLICY_ENV,
-    CODEX_SANDBOX_ENV,
-    DEFAULT_CODEX_APPROVAL_POLICY,
-    DEFAULT_CODEX_SANDBOX,
-)
 from openbase_coder_cli.config.token_manager import DEFAULT_WEB_BACKEND_URL
 from openbase_coder_cli.paths import (
     CODEX_DISPATCHER_CONFIG_PATH,
@@ -115,11 +109,8 @@ LIVEKIT_CODEX_THREAD_STATE_PATH = os.getenv("LIVEKIT_CODEX_THREAD_STATE_PATH")
 LIVEKIT_CODEX_FRESH_THREAD_PER_SESSION = os.getenv(
     "LIVEKIT_CODEX_FRESH_THREAD_PER_SESSION", ""
 ).strip().lower() in {"1", "true", "yes", "on"}
-LIVEKIT_CODEX_APPROVAL_POLICY = os.getenv(
-    CODEX_APPROVAL_POLICY_ENV,
-    DEFAULT_CODEX_APPROVAL_POLICY,
-)
-LIVEKIT_CODEX_SANDBOX = os.getenv(CODEX_SANDBOX_ENV, DEFAULT_CODEX_SANDBOX)
+LIVEKIT_CODEX_APPROVAL_POLICY = os.getenv("LIVEKIT_CODEX_APPROVAL_POLICY", "never")
+LIVEKIT_CODEX_SANDBOX = os.getenv("LIVEKIT_CODEX_SANDBOX", "danger-full-access")
 LIVEKIT_STT_PROVIDER = os.getenv("LIVEKIT_STT_PROVIDER", "assemblyai").lower()
 LIVEKIT_VERBOSE_LOGGING = os.getenv("LIVEKIT_VERBOSE_LOGGING", "").strip().lower() in {
     "1",

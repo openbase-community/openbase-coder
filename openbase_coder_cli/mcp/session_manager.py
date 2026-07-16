@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from super_agents.app_models import LabelQueryInput
 from super_agents.app_permissions import permission_response_for_request
@@ -31,13 +31,6 @@ from super_agents.backend_clients import (
     client_from_environment,
 )
 
-from openbase_coder_cli.codex_session_defaults import codex_permission_defaults
-from openbase_coder_cli.dispatcher_config import (
-    DISPATCHER_MODEL_ROLE,
-    SUPER_AGENTS_MODEL_ROLE,
-    dispatcher_model,
-    super_agents_model,
-)
 from openbase_coder_cli.livekit_voice_history import record_voice_assignment
 from openbase_coder_cli.livekit_voice_route import (
     get_livekit_voice_route_state,
@@ -307,14 +300,12 @@ class CodexAppServerSessionManager:
         self,
         ws_url: str | None = None,
         client: _SuperAgentsClient | None = None,
-        model_for_role: Callable[[str], str | None] | None = None,
     ) -> None:
         self._ws_url = ws_url or os.environ.get(
             "CODEX_APP_SERVER_URL", "ws://127.0.0.1:4500"
         )
         self._uses_external_client = client is not None
         self._client: _SuperAgentsClient = client or self._default_client()
-        self._model_for_role = model_for_role or _configured_model_for_role
         self._turn_to_session: dict[str, str] = {}
         self._delivered_text: dict[str, str] = {}
         self._turn_current_item: dict[str, str] = {}
@@ -330,19 +321,6 @@ class CodexAppServerSessionManager:
 
     def _uses_backend_session_api(self) -> bool:
         return not callable(getattr(self._client, "read_thread", None))
-
-    def _codex_permission_defaults(self) -> dict[str, str]:
-        if self._uses_backend_session_api():
-            return {}
-        return codex_permission_defaults()
-
-    def _model_for_thread(self, thread: SessionInfo) -> str | None:
-        role = (
-            DISPATCHER_MODEL_ROLE
-            if thread.name and thread.name.casefold() == "dispatcher"
-            else SUPER_AGENTS_MODEL_ROLE
-        )
-        return self._model_for_role(role)
 
     async def create_thread(
         self,
@@ -370,17 +348,12 @@ class CodexAppServerSessionManager:
 
         prompt = _with_dispatcher_onboarding_reminder(thread_id, prompt)
 
-        turn_input = {
-            "prompt": prompt,
-            "cwd": thread.directory,
-            **self._codex_permission_defaults(),
-        }
-        if model := self._model_for_thread(thread):
-            turn_input["model"] = model
-
         result = await self._client.queue_turn_by_label(
             LabelQueryInput(thread_id=thread_id, cwd=thread.directory),
-            turn_input,
+            {
+                "prompt": prompt,
+                "cwd": thread.directory,
+            },
         )
         if not result.get("queued"):
             turn_id = extract_turn_id(result)
@@ -578,7 +551,8 @@ class CodexAppServerSessionManager:
         params: dict[str, Any] = {
             "threadId": thread_id,
             "cwd": directory,
-            **self._codex_permission_defaults(),
+            "approvalPolicy": "never",
+            "sandbox": "danger-full-access",
             "config": await login_shell_config_override(),
         }
         if effective_developer_instructions is not None:
@@ -598,13 +572,6 @@ class CodexAppServerSessionManager:
         """List stored Codex threads through Super Agents."""
         return await self.list_sessions()
 
-    # The Codex app-server returns thread/list pages in thread-creation
-    # order, so recency ranking has to fetch the whole recent window and
-    # re-sort by update time; sorting single pages would leave an
-    # old-but-recently-active thread buried at its creation position.
-    RECENCY_WINDOW_THREADS = 500
-    RECENCY_FETCH_PAGE_SIZE = 100
-
     async def list_thread_page(
         self,
         *,
@@ -615,36 +582,15 @@ class CodexAppServerSessionManager:
         if self._uses_backend_session_api():
             return await self._backend_thread_page(limit=limit, cursor=cursor)
 
-        sessions = await self._recency_ranked_threads()
-        try:
-            start = int(cursor or 0)
-        except ValueError:
-            start = 0
-        end = start + limit
-        return ThreadListPage(
-            threads=sessions[start:end],
-            next_cursor=str(end) if end < len(sessions) else None,
-        )
-
-    async def _recency_ranked_threads(self) -> list[SessionInfo]:
-        raw_threads: list[dict[str, Any]] = []
-        fetch_cursor: str | None = None
-        while len(raw_threads) < self.RECENCY_WINDOW_THREADS:
-            result = await self._list_thread_page_result(
-                limit=self.RECENCY_FETCH_PAGE_SIZE,
-                cursor=fetch_cursor,
-            )
-            page_threads = extract_threads(result)
-            if not page_threads:
-                break
-            raw_threads.extend(page_threads)
-            fetch_cursor = _next_cursor(result)
-            if not fetch_cursor:
-                break
+        result = await self._list_thread_page_result(limit=limit, cursor=cursor)
+        raw_threads = extract_threads(result)
         sessions = [
             _session_from_thread(thread, include_turns=False) for thread in raw_threads
         ]
-        return sorted(sessions, key=_session_sort_key, reverse=True)
+        return ThreadListPage(
+            threads=sorted(sessions, key=_session_sort_key, reverse=True),
+            next_cursor=_next_cursor(result),
+        )
 
     async def _backend_thread_page(
         self,
@@ -693,7 +639,6 @@ class CodexAppServerSessionManager:
                         "useStateDbOnly": True,
                         "limit": limit,
                         "cursor": cursor,
-                        "modelProviders": [],
                     },
                 )
             return await self._client.list_threads(
@@ -704,13 +649,9 @@ class CodexAppServerSessionManager:
         client = _OpenbaseSuperAgentsClient(self, self._ws_url)
         try:
             await client.ensure_connected()
-            # The empty modelProviders list disables the app server's
-            # active-provider filter: switching coding backends must not
-            # hide threads created under the other provider.
             params: dict[str, Any] = {
                 "useStateDbOnly": True,
                 "limit": limit,
-                "modelProviders": [],
             }
             if cursor:
                 params["cursor"] = cursor
@@ -749,10 +690,7 @@ class CodexAppServerSessionManager:
             thread_input = {
                 "name": name,
                 "cwd": expanded_dir,
-                **self._codex_permission_defaults(),
             }
-            if model := self._model_for_role(SUPER_AGENTS_MODEL_ROLE):
-                thread_input["model"] = model
             developer_instructions = load_super_agent_developer_instructions()
             if developer_instructions is not None:
                 thread_input["developerInstructions"] = developer_instructions
@@ -771,9 +709,7 @@ class CodexAppServerSessionManager:
         if existing:
             return _session_from_thread(existing[0], include_turns=False)
 
-        thread_input = {"cwd": expanded_dir, **self._codex_permission_defaults()}
-        if model := self._model_for_role(SUPER_AGENTS_MODEL_ROLE):
-            thread_input["model"] = model
+        thread_input = {"cwd": expanded_dir}
         developer_instructions = load_super_agent_developer_instructions()
         if developer_instructions is not None:
             thread_input["developerInstructions"] = developer_instructions
@@ -823,19 +759,10 @@ class CodexAppServerSessionManager:
 
         message = _with_dispatcher_onboarding_reminder(session_id, message)
 
-        model = self._model_for_thread(thread)
-        role_turn_input = {
-            "prompt": message,
-            "cwd": thread.directory,
-            **self._codex_permission_defaults(),
-        }
-        if model:
-            role_turn_input["model"] = model
-
         if self._uses_backend_session_api():
             started = await self._client.start_turn_by_label(
                 LabelQueryInput(thread_id=session_id, cwd=thread.directory),
-                role_turn_input,
+                {"prompt": message, "cwd": thread.directory},
             )
             turn_id = extract_turn_id(started)
             if not turn_id:
@@ -846,7 +773,8 @@ class CodexAppServerSessionManager:
 
         turn_input = {
             "threadId": session_id,
-            **role_turn_input,
+            "cwd": thread.directory,
+            "prompt": message,
         }
         try:
             started = await self._client.start_turn(turn_input)
@@ -1036,7 +964,6 @@ class CodexAppServerSessionManager:
                     "useStateDbOnly": True,
                     "limit": 100,
                     "cursor": cursor,
-                    "modelProviders": [],
                 },
             )
             raw_threads.extend(extract_threads(result))
@@ -1358,14 +1285,6 @@ def get_session_manager() -> CodexAppServerSessionManager:
     if _session_manager is None:
         _session_manager = CodexAppServerSessionManager()
     return _session_manager
-
-
-def _configured_model_for_role(role: str) -> str | None:
-    if role == DISPATCHER_MODEL_ROLE:
-        return dispatcher_model()
-    if role == SUPER_AGENTS_MODEL_ROLE:
-        return super_agents_model()
-    raise ValueError(f"Unsupported model role: {role}")
 
 
 def _with_dispatcher_onboarding_reminder(thread_id: str, prompt: str) -> str:

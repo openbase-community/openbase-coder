@@ -31,17 +31,6 @@ DEFAULT_LEASE_MODE = "auto"
 FOLDER_ID_PREFIX = "cs-"
 FOLDER_ID_HEX_DIGITS = 16
 
-# Product state that syncs between a user's devices as a first-class part
-# of code sync: the thread-sync transport and the Openbase-managed agent
-# homes' skills for BOTH backends (codex/claude parity). These are the only
-# paths allowed inside ~/.openbase — everything else there is machine-local
-# (auth, device identity, databases, logs, packages) and must never sync.
-PRODUCT_STATE_RELPATHS = (
-    ".openbase/thread-sync",
-    ".openbase/codex_home/skills",
-    ".openbase/claude_config/skills",
-)
-
 
 @dataclass(frozen=True)
 class SyncFolder:
@@ -85,12 +74,11 @@ def validate_relpath(relpath: str) -> str:
     parts = PurePosixPath(normalized).parts
     if any(part == ".." for part in parts):
         raise ValueError("Sync folder paths cannot contain '..'.")
-    canonical = str(PurePosixPath(*parts))
-    if parts[0] == ".openbase" and canonical not in PRODUCT_STATE_RELPATHS:
+    if parts[0] == ".openbase":
         raise ValueError(
             "Folders inside ~/.openbase cannot be synced (machine-local state)."
         )
-    return canonical
+    return str(PurePosixPath(*parts))
 
 
 def relpath_for_path(path: Path | str) -> str:

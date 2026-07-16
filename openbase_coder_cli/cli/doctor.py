@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import tomllib
 from pathlib import Path
 
 import click
@@ -28,17 +27,10 @@ from openbase_coder_cli.paths import (
     AUTH_JSON_PATH,
     CODEX_HOME_DIR,
     DEFAULT_ENV_FILE_PATH,
-    NORMAL_CLAUDE_STATE_PATH,
-    NORMAL_CODEX_CONFIG_PATH,
-    OPENBASE_CLAUDE_CONFIG_DIR,
-    OPENBASE_CLAUDE_JSON_PATH,
-    STANDALONE_RELEASES_DIR,
 )
-from openbase_coder_cli.runtime import stable_runtime_package
 from openbase_coder_cli.services.definitions import SERVICES
 from openbase_coder_cli.services.installation import InstallationConfig
 from openbase_coder_cli.services.launchd import launchctl_status
-from openbase_coder_cli.services.selection import configured_coding_backend
 from openbase_coder_cli.services.tailscale_serve import tailscale_serve_health
 from openbase_coder_cli.stt_providers import (
     LOCAL_MLX_WHISPER_STT_PROVIDER_ID,
@@ -188,21 +180,11 @@ def _check_installation_config(ok, warn, fail) -> None:
 
     if config.standalone:
         ok("standalone runtime mode enabled")
-        package = stable_runtime_package()
-        if package is None:
-            fail(
-                "standalone install, but this CLI is not running from a "
-                "runtime package — reinstall or run the packaged "
-                "openbase-coder"
-            )
-            return
-        _check_path(str(package.root), "standalone package", ok, fail, directory=True)
-        _check_path(str(package.python_path), "bundled Python", ok, fail)
+        _check_path(config.package_path, "standalone package", ok, fail, directory=True)
+        _check_path(config.python_path, "bundled Python", ok, fail)
+        _check_path(config.livekit_server_path, "bundled LiveKit server", ok, fail)
         _check_path(
-            str(package.livekit_server_path), "bundled LiveKit server", ok, fail
-        )
-        _check_path(
-            str(package.console_build_dir),
+            config.console_build_dir,
             "bundled console build",
             ok,
             fail,
@@ -220,65 +202,8 @@ def _check_installation_config(ok, warn, fail) -> None:
 
     if config.workspace_path:
         ok("development workspace runtime mode enabled")
-        workspace = Path(config.workspace_path)
-        _check_workspace_asset_roots(workspace, ok, warn)
-        _check_console_build_freshness(workspace, ok, warn)
     else:
         warn("non-standalone install has no workspace_path configured")
-
-
-def _check_workspace_asset_roots(workspace: Path, ok, warn) -> None:
-    missing = [
-        name
-        for name in ("instructions", "skills", "console")
-        if not (workspace / name).is_dir()
-    ]
-    if missing:
-        warn(
-            f"workspace is missing asset roots ({', '.join(missing)}) — "
-            "instruction/skill symlinks and console serving depend on them; "
-            "restore the checkout or re-run setup with --workspace-dir"
-        )
-    else:
-        ok("workspace asset roots present (instructions, skills, console)")
-
-
-def _check_console_build_freshness(workspace: Path, ok, warn) -> None:
-    """Dev serves console/dist directly; a stale build silently misrepresents
-    current frontend code, so surface staleness as a diagnosis."""
-    dist = workspace / "console" / "dist"
-    if not (dist / "index.html").is_file():
-        warn("console/dist has no build — run 'pnpm run build' in console/")
-        return
-    built = _newest_mtime(dist)
-    sources = [workspace / "console" / "src", workspace / "coder-react" / "src"]
-    newest_source = max(
-        (_newest_mtime(source) for source in sources if source.is_dir()),
-        default=0.0,
-    )
-    if newest_source > built:
-        warn(
-            "console/dist is older than the console sources — run "
-            "'pnpm run build' in console/ (the server serves dist directly)"
-        )
-    else:
-        ok("console build is up to date with console sources")
-
-
-def _newest_mtime(root: Path) -> float:
-    import os
-
-    newest = 0.0
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [
-            name for name in dirnames if name not in {"node_modules", ".git"}
-        ]
-        for filename in filenames:
-            try:
-                newest = max(newest, (Path(dirpath) / filename).stat().st_mtime)
-            except OSError:
-                continue
-    return newest
 
 
 def _check_path(
@@ -338,127 +263,6 @@ def _check_agent_auth(env: dict[str, str], ok, warn, fail, action=None) -> None:
         else:
             detail = f" ({status.raw_output})" if status.raw_output else ""
             action(f"Claude Code auth missing: run 'claude auth login'{detail}")
-
-
-def _read_super_agents_command_codex(path: Path) -> str | None:
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
-    entry = data.get("mcp_servers", {}).get("super-agents")
-    if isinstance(entry, dict):
-        return entry.get("command")
-    return None
-
-
-def _read_super_agents_command_claude(path: Path) -> str | None:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    entry = data.get("mcpServers", {}).get("super-agents")
-    if isinstance(entry, dict):
-        return entry.get("command")
-    return None
-
-
-def _check_super_agents_mcp_registrations(ok, warn, fail) -> None:
-    """Verify the super-agents MCP command resolves in every agent home.
-
-    Release rotation deletes old versioned package dirs, so a command path
-    pinned under releases/ is one update away from dangling even when it
-    still exists today.
-    """
-    configs = (
-        (
-            "normal Codex config",
-            NORMAL_CODEX_CONFIG_PATH,
-            _read_super_agents_command_codex,
-        ),
-        (
-            "Openbase Codex home config",
-            CODEX_HOME_DIR / "config.toml",
-            _read_super_agents_command_codex,
-        ),
-        (
-            "normal Claude config",
-            NORMAL_CLAUDE_STATE_PATH,
-            _read_super_agents_command_claude,
-        ),
-        (
-            "Openbase Claude config",
-            OPENBASE_CLAUDE_JSON_PATH,
-            _read_super_agents_command_claude,
-        ),
-    )
-    seen: dict[Path, str] = {}
-    for label, path, reader in configs:
-        if not path.is_file():
-            warn(f"{label}: missing at {path}; run 'openbase-coder setup'")
-            continue
-        resolved = path.resolve()
-        if resolved in seen:
-            ok(f"{label}: linked to {seen[resolved]}")
-            continue
-        seen[resolved] = label
-        try:
-            command = reader(path)
-        except (OSError, ValueError) as exc:
-            warn(f"{label}: unreadable at {path}: {exc}")
-            continue
-        if not command:
-            warn(
-                f"{label}: super-agents MCP not registered; run 'openbase-coder setup'"
-            )
-            continue
-        command_path = Path(command)
-        if not command_path.is_file():
-            fail(
-                f"{label}: super-agents MCP command missing at {command_path}; "
-                "run 'openbase-coder setup'"
-            )
-        elif command_path.is_relative_to(STANDALONE_RELEASES_DIR):
-            warn(
-                f"{label}: super-agents MCP command pinned to versioned release "
-                f"{command_path}; it dangles after the next update — "
-                "run 'openbase-coder setup'"
-            )
-        else:
-            ok(f"{label}: super-agents MCP command at {command_path}")
-
-
-def _check_agent_home_skills(ok, warn, fail) -> None:
-    for label, skills_dir in (
-        ("Openbase Codex home skills", CODEX_HOME_DIR / "skills"),
-        ("Openbase Claude config skills", OPENBASE_CLAUDE_CONFIG_DIR / "skills"),
-    ):
-        if not skills_dir.is_dir():
-            warn(f"{label}: missing at {skills_dir}; run 'openbase-coder setup'")
-            continue
-        entries = [
-            entry
-            for entry in sorted(skills_dir.iterdir())
-            if not entry.name.startswith(".")
-        ]
-        if not entries:
-            warn(f"{label}: no skills linked; run 'openbase-coder setup'")
-            continue
-        dangling = [
-            entry.name for entry in entries if entry.is_symlink() and not entry.exists()
-        ]
-        pinned = [
-            entry.name
-            for entry in entries
-            if entry.is_symlink()
-            and entry.exists()
-            and entry.readlink().is_relative_to(STANDALONE_RELEASES_DIR)
-        ]
-        if dangling:
-            fail(
-                f"{label}: dangling symlinks ({', '.join(dangling)}); "
-                "run 'openbase-coder setup'"
-            )
-        if pinned:
-            warn(
-                f"{label}: pinned to versioned release ({', '.join(pinned)}); "
-                "they dangle after the next update — run 'openbase-coder setup'"
-            )
-        if not dangling and not pinned:
-            ok(f"{label}: {len(entries)} entries resolve")
 
 
 def _check_audio_readiness(ok, warn) -> None:
@@ -629,11 +433,7 @@ def doctor() -> None:
     # --- Service health ---
     click.echo()
     click.echo(click.style("Service Health", bold=True))
-    coding_backend = configured_coding_backend()
     for svc in SERVICES:
-        if not svc.supports_backend(coding_backend):
-            ok(f"{svc.name}: not used ({coding_backend} backend)")
-            continue
         info = launchctl_status(svc)
         required = getattr(svc, "install_by_default", True)
         if not info["installed"]:
@@ -724,12 +524,6 @@ def doctor() -> None:
     click.echo()
     click.echo(click.style("Agent Auth", bold=True))
     _check_agent_auth(env, ok, warn, fail, action)
-
-    # --- Agent homes ---
-    click.echo()
-    click.echo(click.style("Agent Homes", bold=True))
-    _check_super_agents_mcp_registrations(ok, warn, fail)
-    _check_agent_home_skills(ok, warn, fail)
 
     # --- Audio ---
     click.echo()

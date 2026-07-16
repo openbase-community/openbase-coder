@@ -58,10 +58,6 @@ file_sha256() {
   exit 1
 }
 
-package_metadata_version() {
-  sed -n 's/.*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -n 1
-}
-
 normalize_version() {
   case "$1" in
     "" | latest) printf 'latest\n' ;;
@@ -149,72 +145,44 @@ parse_args() {
 
 parse_args "$@"
 target="$(detect_target)"
-tarball="${OPENBASE_CODER_INSTALL_TARBALL:-}"
+version="$(resolve_version)"
+asset="openbase-coder-package-$target.tar.gz"
+manifest="openbase-coder-package_SHA256SUMS"
+download_base="https://github.com/$REPO/releases/download/v$version"
 tmp_dir="$(mktemp -d)"
+release_dir="$RELEASES_DIR/$version-$target"
 
 cleanup() {
   rm -rf "$tmp_dir"
 }
 trap cleanup EXIT INT TERM
 
+step "Installing Openbase Coder $version for $target"
 mkdir -p "$RELEASES_DIR" "$BIN_DIR"
 
-if [ -n "$tarball" ]; then
-  # Local-source mode: install from a pre-built tarball (used by CI to verify
-  # install.sh against the just-built package before publishing).
-  if [ ! -f "$tarball" ]; then
-    echo "Local tarball not found: $tarball" >&2
-    exit 1
-  fi
-  version="${OPENBASE_CODER_INSTALL_VERSION:-}"
-  step "Installing Openbase Coder from local tarball $tarball"
-else
-  version="$(resolve_version)"
-  asset="openbase-coder-package-$target.tar.gz"
-  manifest="openbase-coder-package_SHA256SUMS"
-  download_base="https://github.com/$REPO/releases/download/v$version"
-
-  step "Installing Openbase Coder $version for $target"
-
-  download_file "$download_base/$manifest" "$tmp_dir/$manifest"
-  expected="$(awk -v asset="$asset" '$2 == asset { print $1 }' "$tmp_dir/$manifest" | head -n 1)"
-  if [ -z "$expected" ]; then
-    echo "Could not find checksum for $asset." >&2
-    exit 1
-  fi
-
-  download_file "$download_base/$asset" "$tmp_dir/$asset"
-  actual="$(file_sha256 "$tmp_dir/$asset")"
-  if [ "$actual" != "$expected" ]; then
-    echo "Checksum mismatch for $asset." >&2
-    exit 1
-  fi
-  tarball="$tmp_dir/$asset"
+download_file "$download_base/$manifest" "$tmp_dir/$manifest"
+expected="$(awk -v asset="$asset" '$2 == asset { print $1 }' "$tmp_dir/$manifest" | head -n 1)"
+if [ -z "$expected" ]; then
+  echo "Could not find checksum for $asset." >&2
+  exit 1
 fi
 
-stage="$RELEASES_DIR/.staging.$$"
+download_file "$download_base/$asset" "$tmp_dir/$asset"
+actual="$(file_sha256 "$tmp_dir/$asset")"
+if [ "$actual" != "$expected" ]; then
+  echo "Checksum mismatch for $asset." >&2
+  exit 1
+fi
+
+stage="$RELEASES_DIR/.staging.$version-$target.$$"
 rm -rf "$stage"
 mkdir -p "$stage"
-tar -xzf "$tarball" -C "$stage"
+tar -xzf "$tmp_dir/$asset" -C "$stage"
 chmod 0755 "$stage/bin/openbase-coder" "$stage/bin/livekit-server"
-
-if [ -z "$version" ]; then
-  version="$(package_metadata_version "$stage/openbase-coder-package.json")"
-  if [ -z "$version" ]; then
-    echo "Could not determine version from openbase-coder-package.json." >&2
-    exit 1
-  fi
-fi
-
-release_dir="$RELEASES_DIR/$version-$target"
 rm -rf "$release_dir"
 mv "$stage" "$release_dir"
 ln -sfn "$release_dir" "$CURRENT_LINK"
-# A wrapper script, not a symlink: the packaged launcher locates its package
-# root from $0, which a symlink would resolve to $BIN_DIR instead.
-rm -f "$BIN_PATH"
-printf '#!/bin/sh\nexec "%s" "$@"\n' "$CURRENT_LINK/bin/openbase-coder" >"$BIN_PATH"
-chmod 0755 "$BIN_PATH"
+ln -sfn "$CURRENT_LINK/bin/openbase-coder" "$BIN_PATH"
 add_to_path
 
 "$BIN_PATH" --version >/dev/null

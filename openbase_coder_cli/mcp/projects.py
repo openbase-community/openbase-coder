@@ -6,7 +6,6 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from openbase_coder_cli.mcp.thread_sync_common import translate_home_path
 from openbase_coder_cli.multi_config import multi_repo_name_set
 
 PROJECTS_FILE = Path.home() / ".openbase" / "coder-projects.json"
@@ -20,18 +19,7 @@ def _load_projects() -> list[dict]:
         return []
     with open(PROJECTS_FILE, encoding="utf-8") as f:
         raw = json.load(f)
-    if not isinstance(raw, list):
-        return []
-    projects: list[dict] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        project = dict(item)
-        path = project.get("path")
-        if isinstance(path, str):
-            project["path"] = translate_home_path(path) or path
-        projects.append(project)
-    return projects
+    return raw if isinstance(raw, list) else []
 
 
 def _save_projects(projects: list[dict]) -> None:

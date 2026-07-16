@@ -1,8 +1,8 @@
 """Openbase Cloud workspace integration commands.
 
 Currently just the idle heartbeat: a workspace launched by openbase-cloud reports
-whether agent runs (Super Agents / Codex / Claude Code threads) made recent
-progress during the beat window, so the cloud API can defer idle auto-stop.
+whether agent runs (Super Agents / Codex / Claude Code threads) are running or
+were launched during the beat window, so the cloud API can defer idle auto-stop.
 Desktop (DCV) connections and console browsing intentionally do not count as
 activity: a workspace with no run activity is stopped for later.
 """
@@ -42,7 +42,7 @@ def _web_backend_url() -> str:
 
 
 def _agent_runs_active(local_url: str, manager: TokenManager) -> bool:
-    """True when any coder thread reports recent productive run activity.
+    """True when any coder thread has a running or queued agent run.
 
     The local coder server is the source of truth for Super Agents / Codex /
     Claude Code runs. Any failure here (server down, auth hiccup) just means

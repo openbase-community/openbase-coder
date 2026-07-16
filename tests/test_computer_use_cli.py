@@ -206,11 +206,7 @@ def test_interrupt_calls_companion(monkeypatch):
     result = CliRunner().invoke(computer_use_cli.computer_use, ["interrupt"])
 
     assert result.exit_code == 0
-    assert FakeCompanionClient.instances[0].calls == [
-        ("interrupt_computer_use", None),
-        ("stop_screen_share", None),
-    ]
-    assert "Computer use interrupted (off)." in result.output
+    assert FakeCompanionClient.instances[0].calls == [("interrupt_computer_use", None)]
 
 
 def test_computer_use_refuses_macos(monkeypatch):

@@ -80,7 +80,9 @@ def test_coding_backend_settings_persists_openbase_cloud_selection(
     assert "KEEP_ME=1" in content
     assert "OPENBASE_CODEX_BACKEND=codex" in content
     assert "OPENBASE_CODING_BACKEND=openbase_cloud" in content
-    config = (tmp_path / "codex_home" / "config.toml").read_text(encoding="utf-8")
+    config = (tmp_path / "codex_home" / "config.toml").read_text(
+        encoding="utf-8"
+    )
     assert 'model = "openbase-codex"' in config
     assert 'model_provider = "openbase_cloud"' in config
     assert "[model_providers.openbase_cloud]" in config
@@ -149,38 +151,6 @@ def test_backend_model_settings_accepts_fable(
     assert response.data["models"]["super_agents"] == "fable"
 
 
-def test_backend_model_settings_updates_dispatcher_role(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    env_file = tmp_path / ".env"
-    config_path = tmp_path / "dispatcher-config.json"
-    env_file.write_text("OPENBASE_CODING_BACKEND=codex\n", encoding="utf-8")
-    monkeypatch.setattr(model_settings, "DEFAULT_ENV_FILE_PATH", env_file)
-    monkeypatch.setattr(
-        model_settings.dispatcher_config,
-        "DEFAULT_ENV_FILE_PATH",
-        env_file,
-    )
-    monkeypatch.setattr(
-        model_settings.dispatcher_config,
-        "CODEX_DISPATCHER_CONFIG_PATH",
-        config_path,
-    )
-
-    response = model_settings.backend_model_settings(
-        _authenticated_request(
-            "PUT",
-            "/api/settings/backend-model/",
-            {"role": "dispatcher", "model": "gpt-dispatcher"},
-        )
-    )
-
-    assert response.status_code == 200
-    assert response.data["models"]["dispatcher"] == "gpt-dispatcher"
-    assert response.data["restart_required"] is True
-
-
 def test_coding_backend_settings_persists_claude_code_selection(
     monkeypatch,
     tmp_path: Path,
@@ -200,7 +170,9 @@ def test_coding_backend_settings_persists_claude_code_selection(
     assert response.data["backend"] == "claude_code"
     assert response.data["changed"] is True
     assert "Claude Code" in response.data["restart_hint"]
-    assert "OPENBASE_CODING_BACKEND=claude_code" in env_file.read_text(encoding="utf-8")
+    assert "OPENBASE_CODING_BACKEND=claude_code" in env_file.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_coding_backend_settings_rejects_unsupported_backend(
