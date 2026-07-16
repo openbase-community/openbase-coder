@@ -383,7 +383,12 @@ def run_loop(interval: float, verbose: bool) -> None:
     """Poll forever and run due routines."""
     from openbase_coder_cli import skills_autolink
     from openbase_coder_cli.runtime import is_standalone_runtime
-    from openbase_coder_cli.self_update import SelfUpdateError, check_for_update
+    from openbase_coder_cli.self_update import (
+        SelfUpdateError,
+        auto_update_enabled,
+        check_for_update,
+        spawn_detached_self_update,
+    )
 
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
@@ -395,6 +400,7 @@ def run_loop(interval: float, verbose: bool) -> None:
     next_skills_sync = time.monotonic()
     next_update_check = time.monotonic()
     next_code_sync_tick = time.monotonic()
+    last_auto_update_attempt: str | None = None
     while True:
         started = time.monotonic()
         try:
@@ -450,7 +456,8 @@ def run_loop(interval: float, verbose: bool) -> None:
                     )
 
         # Periodically refresh the update-check cache (standalone installs)
-        # so update_available surfaces in status APIs without manual checks.
+        # so update_available surfaces in status APIs without manual checks,
+        # and auto-apply available updates unless opted out.
         if is_standalone_runtime() and time.monotonic() >= next_update_check:
             next_update_check = time.monotonic() + UPDATE_CHECK_SECONDS
             try:
@@ -464,6 +471,25 @@ def run_loop(interval: float, verbose: bool) -> None:
                         check.current_version,
                         check.latest_version,
                     )
+                    # Retry a given version only for required updates so a
+                    # release that health-check-rolled-back does not churn
+                    # service restarts every check cycle.
+                    should_apply = auto_update_enabled() and (
+                        check.update_required
+                        or check.latest_version != last_auto_update_attempt
+                    )
+                    if should_apply:
+                        last_auto_update_attempt = check.latest_version
+                        try:
+                            spawn_detached_self_update(force=check.update_required)
+                        except SelfUpdateError as exc:
+                            logger.warning("auto_update spawn failed: %s", exc)
+                        else:
+                            logger.info(
+                                "auto_update spawned target=%s forced=%s",
+                                check.latest_version,
+                                check.update_required,
+                            )
 
         elapsed = time.monotonic() - started
         time.sleep(max(poll_interval - elapsed, 1.0))

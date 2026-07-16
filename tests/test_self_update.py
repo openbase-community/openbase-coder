@@ -361,3 +361,47 @@ def test_manifest_signature_enforced_when_key_embedded(monkeypatch) -> None:
     responses["sig"] = base64.b64encode(b"0" * 64)
     with pytest.raises(self_update.SelfUpdateError, match="signature"):
         self_update._fetch_manifest("stable")
+
+
+def test_auto_update_enabled_env_opt_out(monkeypatch) -> None:
+    monkeypatch.delenv(self_update.AUTO_UPDATE_ENV_KEY, raising=False)
+    assert self_update.auto_update_enabled() is True
+    monkeypatch.setenv(self_update.AUTO_UPDATE_ENV_KEY, "0")
+    assert self_update.auto_update_enabled() is False
+    monkeypatch.setenv(self_update.AUTO_UPDATE_ENV_KEY, "false")
+    assert self_update.auto_update_enabled() is False
+    monkeypatch.setenv(self_update.AUTO_UPDATE_ENV_KEY, "1")
+    assert self_update.auto_update_enabled() is True
+
+
+def test_spawn_detached_self_update_launches_current_launcher(
+    monkeypatch, tmp_path
+) -> None:
+    _patch_standalone_layout(monkeypatch, tmp_path)
+    release = _make_fake_package(tmp_path / "release-old", version="1.0.0")
+    current = tmp_path / "standalone" / "current"
+    current.parent.mkdir(parents=True, exist_ok=True)
+    current.symlink_to(release)
+    monkeypatch.setattr(
+        self_update, "SELF_UPDATE_LOG_PATH", tmp_path / "logs" / "self-update.log"
+    )
+
+    spawned = []
+    monkeypatch.setattr(
+        self_update.subprocess,
+        "Popen",
+        lambda args, **kwargs: spawned.append((args, kwargs)),
+    )
+
+    self_update.spawn_detached_self_update()
+    self_update.spawn_detached_self_update(force=True)
+
+    assert spawned[0][0] == [str(current / "bin" / "openbase-coder"), "self-update"]
+    assert spawned[0][1]["start_new_session"] is True
+    assert spawned[1][0][-1] == "--force"
+
+
+def test_spawn_detached_self_update_requires_launcher(monkeypatch, tmp_path) -> None:
+    _patch_standalone_layout(monkeypatch, tmp_path)
+    with pytest.raises(self_update.SelfUpdateError, match="launcher"):
+        self_update.spawn_detached_self_update()

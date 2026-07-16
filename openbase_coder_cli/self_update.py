@@ -27,6 +27,7 @@ from packaging.version import InvalidVersion, Version
 from openbase_coder_cli._version import __version__
 from openbase_coder_cli.backend_binaries import refresh_openbase_bin_codex
 from openbase_coder_cli.paths import (
+    DEFAULT_LOG_DIR,
     OPENBASE_BASE_DIR,
     STANDALONE_CURRENT_DIR,
     STANDALONE_PACKAGES_DIR,
@@ -56,6 +57,8 @@ UPDATE_MANIFEST_PUBLIC_KEY_B64 = "5Si9SNGu++/mq0OOy3LAO1jdSRRPfBuy6D1i0MCJ+n4="
 STANDALONE_PREVIOUS_DIR = STANDALONE_PACKAGES_DIR / "previous"
 UPDATE_CHECK_CACHE_PATH = OPENBASE_BASE_DIR / "update-check.json"
 DOWNLOAD_TIMEOUT_SECONDS = 30
+AUTO_UPDATE_ENV_KEY = "OPENBASE_CODER_AUTO_UPDATE"
+SELF_UPDATE_LOG_PATH = DEFAULT_LOG_DIR / "self-update.log"
 
 
 class SelfUpdateError(RuntimeError):
@@ -137,6 +140,38 @@ def check_for_update() -> UpdateCheck:
     )
     _write_update_check_cache(check)
     return check
+
+
+def auto_update_enabled() -> bool:
+    """Automatic updates apply by default on standalone installs; opt out with
+    OPENBASE_CODER_AUTO_UPDATE=0 (in the environment or ~/.openbase/.env)."""
+    value = os.environ.get(AUTO_UPDATE_ENV_KEY, "").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def spawn_detached_self_update(*, force: bool = False) -> None:
+    """Launch `openbase-coder self-update` as a detached process.
+
+    Detaching matters because applying an update reinstalls the launchd/systemd
+    services — including whichever service invoked this — and an in-process
+    update would be killed by its own service restart mid-flip. Output goes to
+    the self-update log so failures stay diagnosable.
+    """
+    launcher = STANDALONE_CURRENT_DIR / "bin" / "openbase-coder"
+    if not launcher.is_file():
+        raise SelfUpdateError(f"No standalone launcher at {launcher}.")
+    SELF_UPDATE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    args = [str(launcher), "self-update"]
+    if force:
+        args.append("--force")
+    with SELF_UPDATE_LOG_PATH.open("ab") as log_handle:
+        subprocess.Popen(
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=log_handle,
+            start_new_session=True,
+        )
 
 
 def run_self_update(*, force: bool = False, report=print) -> SelfUpdateResult:

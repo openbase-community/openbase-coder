@@ -133,6 +133,8 @@ def _ensure_env_file(
             "# Override JWT key/session endpoints if your backend routes differ:",
             "# OPENBASE_CODER_CLI_JWT_JWKS_URL=https://app.openbase.cloud/.well-known/jwks.json",
             "# OPENBASE_CODER_CLI_JWT_AUTH_SESSION_URL=https://app.openbase.cloud/_allauth/app/v1/auth/session",
+            "# Standalone installs auto-apply updates; set to 0 to opt out.",
+            "# OPENBASE_CODER_AUTO_UPDATE=1",
         ]
     )
 
