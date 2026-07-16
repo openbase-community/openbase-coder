@@ -8,16 +8,20 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterator
 
+from openbase_coder_cli.services.console_settings import get_keep_system_awake_enabled
+
 CAFFEINATE_ARGS = ("-i", "-d")
 
 
 def keep_awake_status_payload() -> dict[str, object]:
+    enabled = get_keep_system_awake_enabled()
     caffeinate = shutil.which("caffeinate") if sys.platform == "darwin" else None
     return {
         "name": "Keep Awake",
         "port": None,
-        "running": bool(caffeinate),
+        "running": enabled and bool(caffeinate),
         "optional": False,
+        "enabled": enabled,
         "command": " ".join(["caffeinate", *CAFFEINATE_ARGS]),
         "assertions": [
             {"flag": "-i", "label": "Prevent idle sleep"},
@@ -30,6 +34,8 @@ def start_keep_awake(
     *, warn: Callable[[str], None] | None = None
 ) -> subprocess.Popen[bytes] | None:
     """Start macOS caffeinate for idle and display sleep prevention."""
+    if not get_keep_system_awake_enabled():
+        return None
     if sys.platform != "darwin":
         return None
 

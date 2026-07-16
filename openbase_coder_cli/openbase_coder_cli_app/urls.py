@@ -46,6 +46,7 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     health_check,
     ios_app_control,
     ios_logs_upload,
+    keep_awake_settings,
     kokoro_tts_download,
     launchctl_ignored_settings,
     launchctl_service_action,
@@ -267,6 +268,11 @@ urlpatterns = [
         "settings/dangerous-confirmation/",
         dangerous_confirmation_settings,
         name="dangerous-confirmation-settings",
+    ),
+    path(
+        "settings/keep-awake/",
+        keep_awake_settings,
+        name="keep-awake-settings",
     ),
     path(
         "settings/openbase-services/",

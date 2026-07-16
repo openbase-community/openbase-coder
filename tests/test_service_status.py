@@ -30,6 +30,7 @@ def test_service_status_includes_background_openbase_services(monkeypatch) -> No
             "port": None,
             "running": True,
             "optional": False,
+            "enabled": True,
             "command": "caffeinate -i -d",
             "assertions": [
                 {"flag": "-i", "label": "Prevent idle sleep"},
@@ -123,6 +124,7 @@ def test_service_status_includes_background_openbase_services(monkeypatch) -> No
         "port": None,
         "running": True,
         "optional": False,
+        "enabled": True,
         "command": "caffeinate -i -d",
         "assertions": [
             {"flag": "-i", "label": "Prevent idle sleep"},
@@ -149,6 +151,7 @@ def test_service_status_omits_codex_app_server_on_claude_code_backend(
             "port": None,
             "running": True,
             "optional": False,
+            "enabled": True,
             "command": "caffeinate -i -d",
             "assertions": [],
         },

@@ -7,6 +7,7 @@ from openbase_coder_cli.paths import CONSOLE_SETTINGS_JSON_PATH
 
 DEFAULT_DANGEROUS_CONFIRMATION_PHRASE = "yes, proceed"
 DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS = True
+DEFAULT_KEEP_SYSTEM_AWAKE = True
 
 
 def get_ignored_launchctl_labels() -> list[str]:
@@ -58,6 +59,21 @@ def include_normal_codex_agents_in_openbase_agents() -> bool:
 def set_include_normal_codex_agents_in_openbase_agents(value: bool) -> bool:
     data = _read_settings()
     data["include_normal_codex_agents_in_openbase_agents"] = bool(value)
+    _write_settings(data)
+    return bool(value)
+
+
+def get_keep_system_awake_enabled() -> bool:
+    data = _read_settings()
+    value = data.get("keep_system_awake")
+    if isinstance(value, bool):
+        return value
+    return DEFAULT_KEEP_SYSTEM_AWAKE
+
+
+def set_keep_system_awake_enabled(value: bool) -> bool:
+    data = _read_settings()
+    data["keep_system_awake"] = bool(value)
     _write_settings(data)
     return bool(value)
 

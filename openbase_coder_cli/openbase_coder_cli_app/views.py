@@ -95,6 +95,7 @@ from openbase_coder_cli.openbase_coder_cli_app.service_tier_settings import (
 from openbase_coder_cli.openbase_coder_cli_app.services_views import (
     agents_generation_settings,
     dangerous_confirmation_settings,
+    keep_awake_settings,
     launchctl_ignored_settings,
     launchctl_service_action,
     launchctl_services_list,
@@ -303,6 +304,7 @@ __all__ = [
     "ios_logs_upload",
     "ios_app_control",
     "kokoro_tts_download",
+    "keep_awake_settings",
     "launchctl_ignored_settings",
     "launchctl_service_action",
     "launchctl_services_list",

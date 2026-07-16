@@ -178,3 +178,52 @@ def test_agents_generation_settings_can_restore_including_normal_agents(
     assert response.data["refreshed"] is True
     assert refreshed == ["refresh"]
     assert console_settings.include_normal_codex_agents_in_openbase_agents() is True
+
+
+def test_keep_awake_settings_defaults_to_enabled(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_django()
+
+    from openbase_coder_cli.openbase_coder_cli_app import services_views
+    from openbase_coder_cli.services import console_settings
+
+    monkeypatch.setattr(
+        console_settings,
+        "CONSOLE_SETTINGS_JSON_PATH",
+        tmp_path / "console-settings.json",
+    )
+
+    response = services_views.keep_awake_settings(
+        _authenticated_request("GET", "/api/settings/keep-awake/")
+    )
+
+    assert response.status_code == 200
+    assert response.data["keep_system_awake"] is True
+    assert response.data["default_keep_system_awake"] is True
+    assert response.data["restart_required"] is True
+
+
+def test_keep_awake_settings_saves_flag(tmp_path: Path, monkeypatch) -> None:
+    _setup_django()
+
+    from openbase_coder_cli.openbase_coder_cli_app import services_views
+    from openbase_coder_cli.services import console_settings
+
+    monkeypatch.setattr(
+        console_settings,
+        "CONSOLE_SETTINGS_JSON_PATH",
+        tmp_path / "console-settings.json",
+    )
+
+    response = services_views.keep_awake_settings(
+        _authenticated_request(
+            "PATCH",
+            "/api/settings/keep-awake/",
+            {"keep_system_awake": False},
+        )
+    )
+
+    assert response.status_code == 200
+    assert response.data["keep_system_awake"] is False
+    assert console_settings.get_keep_system_awake_enabled() is False

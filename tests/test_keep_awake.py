@@ -45,6 +45,22 @@ def test_start_keep_awake_runs_caffeinate_idle_and_display(monkeypatch) -> None:
     assert popen_calls[0][1]["stderr"] == subprocess.DEVNULL
 
 
+def test_start_keep_awake_noops_when_disabled(monkeypatch) -> None:
+    popen_calls = []
+
+    monkeypatch.setattr(keep_awake, "get_keep_system_awake_enabled", lambda: False)
+    monkeypatch.setattr(keep_awake.sys, "platform", "darwin")
+    monkeypatch.setattr(keep_awake.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        keep_awake.subprocess,
+        "Popen",
+        lambda *args, **kwargs: popen_calls.append((args, kwargs)),
+    )
+
+    assert keep_awake.start_keep_awake() is None
+    assert popen_calls == []
+
+
 def test_start_keep_awake_noops_off_macos(monkeypatch) -> None:
     monkeypatch.setattr(keep_awake.sys, "platform", "linux")
 
@@ -59,6 +75,18 @@ def test_start_keep_awake_warns_when_caffeinate_missing(monkeypatch) -> None:
 
     assert keep_awake.start_keep_awake(warn=warnings.append) is None
     assert warnings == ["Keep-awake unavailable: caffeinate was not found."]
+
+
+def test_keep_awake_status_reflects_disabled_setting(monkeypatch) -> None:
+    monkeypatch.setattr(keep_awake, "get_keep_system_awake_enabled", lambda: False)
+    monkeypatch.setattr(keep_awake.sys, "platform", "darwin")
+    monkeypatch.setattr(keep_awake.shutil, "which", lambda _name: "/usr/bin/caffeinate")
+
+    payload = keep_awake.keep_awake_status_payload()
+
+    assert payload["enabled"] is False
+    assert payload["running"] is False
+    assert payload["command"] == "caffeinate -i -d"
 
 
 def test_stop_keep_awake_terminates_process() -> None:

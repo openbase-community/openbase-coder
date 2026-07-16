@@ -34,12 +34,15 @@ from openbase_coder_cli.openbase_coder_cli_app.common import _auth_debug_value
 from openbase_coder_cli.services.console_settings import (
     DEFAULT_DANGEROUS_CONFIRMATION_PHRASE,
     DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS,
+    DEFAULT_KEEP_SYSTEM_AWAKE,
     get_dangerous_confirmation_phrase,
     get_ignored_launchctl_labels,
+    get_keep_system_awake_enabled,
     include_normal_codex_agents_in_openbase_agents,
     set_dangerous_confirmation_phrase,
     set_ignored_launchctl_labels,
     set_include_normal_codex_agents_in_openbase_agents,
+    set_keep_system_awake_enabled,
 )
 from openbase_coder_cli.services.definitions import SERVICES
 from openbase_coder_cli.services.keep_awake import keep_awake_status_payload
@@ -106,6 +109,10 @@ class AgentsGenerationSettingsSerializer(serializers.Serializer):
     include_normal_codex_agents_in_openbase_agents = serializers.BooleanField()
 
 
+class KeepAwakeSettingsSerializer(serializers.Serializer):
+    keep_system_awake = serializers.BooleanField()
+
+
 def _dangerous_confirmation_settings_payload(*, refreshed: bool = False) -> dict:
     return {
         "dangerous_confirmation_phrase": get_dangerous_confirmation_phrase(),
@@ -123,6 +130,18 @@ def _agents_generation_settings_payload(*, refreshed: bool = False) -> dict:
             DEFAULT_INCLUDE_NORMAL_CODEX_AGENTS
         ),
         "refreshed": refreshed,
+    }
+
+
+def _keep_awake_settings_payload() -> dict:
+    return {
+        "keep_system_awake": get_keep_system_awake_enabled(),
+        "default_keep_system_awake": DEFAULT_KEEP_SYSTEM_AWAKE,
+        "restart_required": True,
+        "restart_hint": (
+            "Restart Openbase services for keep-awake changes to affect the "
+            "running server process."
+        ),
     }
 
 
@@ -182,6 +201,25 @@ def agents_generation_settings(request):
         {
             **_agents_generation_settings_payload(refreshed=refreshed),
             "include_normal_codex_agents_in_openbase_agents": include_normal,
+        }
+    )
+
+
+@api_view(["GET", "PATCH"])
+def keep_awake_settings(request):
+    """Read or update whether the server starts caffeinate."""
+    if request.method == "GET":
+        return Response(_keep_awake_settings_payload())
+
+    serializer = KeepAwakeSettingsSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    keep_awake = set_keep_system_awake_enabled(
+        serializer.validated_data["keep_system_awake"]
+    )
+    return Response(
+        {
+            **_keep_awake_settings_payload(),
+            "keep_system_awake": keep_awake,
         }
     )
 
