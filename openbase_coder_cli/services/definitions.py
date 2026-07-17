@@ -17,6 +17,8 @@ class ServiceDefinition:
     cleanup_command_substrings: tuple[str, ...] = ()
     # Coding backends this service applies to; None means all backends.
     backends: tuple[str, ...] | None = None
+    # Services that must be restarted after this service restarts.
+    restart_dependents: tuple[str, ...] = ()
 
     def supports_backend(self, coding_backend: str) -> bool:
         return self.backends is None or coding_backend in self.backends
@@ -100,6 +102,7 @@ SERVICES: list[ServiceDefinition] = [
         port=7880,
         cleanup_ports=(7880, 7881),
         cleanup_command_substrings=("livekit-server",),
+        restart_dependents=("livekit-agent",),
     ),
     ServiceDefinition(
         name="codex-app-server",
