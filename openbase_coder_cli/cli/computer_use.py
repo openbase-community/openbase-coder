@@ -35,6 +35,42 @@ def computer_use() -> None:
         )
 
 
+@computer_use.group("screen-share")
+def screen_share() -> None:
+    """Manually share the Linux desktop to the active LiveKit room."""
+
+
+@screen_share.command("start")
+@click.option("--room", "room_name", default="", help="Explicit LiveKit room name.")
+@click.option(
+    "--no-launch",
+    is_flag=True,
+    help="Do not launch the companion app if its IPC server is not reachable.",
+)
+def screen_share_start(room_name: str, no_launch: bool) -> None:
+    """Start sharing this desktop's screen without an AI computer-use run."""
+    client = CompanionClient()
+    if not no_launch:
+        client.ensure_running()
+
+    session = _load_companion_session(room_name)
+    try:
+        response = client.start_screen_share(session)
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        raise click.ClickException(f"Unable to start screen sharing: {exc}") from None
+
+    click.echo(f"Linux screen share started ({response.get('state') or 'sharing'}).")
+
+
+@screen_share.command("stop")
+def screen_share_stop() -> None:
+    """Stop sharing this desktop's screen."""
+    response = CompanionClient().stop_screen_share()
+    click.echo(f"Linux screen share stopped ({response.get('state') or 'off'}).")
+
+
 @computer_use.command("start")
 @click.argument("instructions", nargs=-1, required=True)
 @click.option("--room", "room_name", default="", help="Explicit LiveKit room name.")
@@ -152,7 +188,9 @@ def status() -> None:
 @computer_use.command("companion", hidden=True)
 def companion() -> None:
     """Run the Linux computer-use companion IPC server in the foreground."""
-    port = int(os.environ.get("OPENBASE_LIVEKIT_COMPANION_IPC_PORT", DEFAULT_COMPANION_PORT))
+    port = int(
+        os.environ.get("OPENBASE_LIVEKIT_COMPANION_IPC_PORT", DEFAULT_COMPANION_PORT)
+    )
     secret = os.environ.get(
         "OPENBASE_LIVEKIT_COMPANION_IPC_SECRET",
         DEFAULT_COMPANION_SECRET,

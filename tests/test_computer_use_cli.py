@@ -173,6 +173,44 @@ def test_start_stops_screen_share_if_computer_use_start_fails(monkeypatch):
     ] == "stop_screen_share"
 
 
+def test_screen_share_start_shares_without_computer_use(monkeypatch):
+    FakeCompanionClient.instances = []
+
+    def fake_request(method, url, **kwargs):
+        assert method == "GET"
+        assert url == "http://127.0.0.1:7999/api/livekit-companion-session/"
+        return httpx.Response(
+            200, json={"roomUrl": "ws://localhost:7880", "companionToken": "token"}
+        )
+
+    patch_local_server_request(monkeypatch, fake_request)
+    monkeypatch.setattr(computer_use_cli, "CompanionClient", FakeCompanionClient)
+
+    result = CliRunner().invoke(
+        computer_use_cli.computer_use, ["screen-share", "start"]
+    )
+
+    assert result.exit_code == 0
+    client = FakeCompanionClient.instances[0]
+    assert [name for name, _ in client.calls] == [
+        "ensure_running",
+        "start_screen_share",
+    ]
+    assert client.calls[1][1]["roomUrl"] == "ws://localhost:7880"
+    assert "Linux screen share started (sharing)." in result.output
+
+
+def test_screen_share_stop_stops_sharing(monkeypatch):
+    FakeCompanionClient.instances = []
+    monkeypatch.setattr(computer_use_cli, "CompanionClient", FakeCompanionClient)
+
+    result = CliRunner().invoke(computer_use_cli.computer_use, ["screen-share", "stop"])
+
+    assert result.exit_code == 0
+    assert FakeCompanionClient.instances[0].calls == [("stop_screen_share", None)]
+    assert "Linux screen share stopped (off)." in result.output
+
+
 def test_steer_replaces_active_instructions(monkeypatch):
     FakeCompanionClient.instances = []
     monkeypatch.setattr(computer_use_cli, "CompanionClient", FakeCompanionClient)

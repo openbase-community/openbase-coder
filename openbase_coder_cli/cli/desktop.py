@@ -92,7 +92,7 @@ def _require_macos() -> None:
     if platform.system() != "Darwin":
         raise click.ClickException(
             "The desktop screen-share command controls the macOS Electron app. "
-            "On Linux, use `openbase-coder computer-use` companion commands."
+            "On Linux, use `openbase-coder computer-use screen-share start`."
         )
 
 
@@ -163,13 +163,22 @@ def _read_control_file() -> dict[str, Any]:
     try:
         payload = json.loads(DESKTOP_CONTROL_JSON_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise click.ClickException("Openbase Coder desktop control file was not found.") from None
+        raise click.ClickException(
+            "Openbase Coder desktop control file was not found."
+        ) from None
     except (OSError, json.JSONDecodeError) as exc:
-        raise click.ClickException(f"Openbase Coder desktop control file is invalid: {exc}") from None
+        raise click.ClickException(
+            f"Openbase Coder desktop control file is invalid: {exc}"
+        ) from None
 
     port = payload.get("port")
     secret = payload.get("secret")
-    if not isinstance(port, int) or port <= 0 or not isinstance(secret, str) or not secret:
+    if (
+        not isinstance(port, int)
+        or port <= 0
+        or not isinstance(secret, str)
+        or not secret
+    ):
         raise click.ClickException("Openbase Coder desktop control file is incomplete.")
     return {"port": port, "secret": secret}
 

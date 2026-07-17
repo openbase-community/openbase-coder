@@ -20,6 +20,51 @@ import httpx
 DEFAULT_DISPLAY = ":0"
 DEFAULT_STATE = "off"
 REMOTE_CONTROL_PREFIX = "openbase.remote_control."
+X11_SOCKET_DIR = Path("/tmp/.X11-unix")
+DCV_XAUTH_DIR_TEMPLATE = "/run/user/{uid}/dcv"
+
+
+def detect_display() -> str:
+    for name in ("OPENBASE_COMPUTER_USE_DISPLAY", "DISPLAY"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return _user_owned_display() or DEFAULT_DISPLAY
+
+
+def _user_owned_display() -> str | None:
+    # Boot-started services have no DISPLAY, and :0 may belong to another
+    # user's X server (on DevSpaces GDM's greeter can hold :0 while the DCV
+    # virtual session lands on :1). The user's desktop is the X socket owned
+    # by the current uid.
+    numbers: list[int] = []
+    try:
+        sockets = list(X11_SOCKET_DIR.iterdir())
+    except OSError:
+        return None
+    for socket_path in sockets:
+        suffix = socket_path.name.removeprefix("X")
+        if socket_path.name == suffix or not suffix.isdigit():
+            continue
+        try:
+            if socket_path.stat().st_uid == os.getuid():
+                numbers.append(int(suffix))
+        except OSError:
+            continue
+    return f":{min(numbers)}" if numbers else None
+
+
+def detect_xauthority() -> str | None:
+    value = os.environ.get("XAUTHORITY", "").strip()
+    if value:
+        return value
+    # DCV virtual sessions keep their cookie under /run/user/<uid>/dcv/.
+    dcv_dir = Path(DCV_XAUTH_DIR_TEMPLATE.format(uid=os.getuid()))
+    try:
+        candidates = sorted(dcv_dir.glob("*.xauth"))
+    except OSError:
+        return None
+    return str(candidates[0]) if candidates else None
 
 
 class LinuxComputerUseError(RuntimeError):
@@ -66,17 +111,14 @@ class Screenshot:
 
 @dataclass
 class LinuxDesktop:
-    display: str = field(
-        default_factory=lambda: os.environ.get(
-            "OPENBASE_COMPUTER_USE_DISPLAY",
-            os.environ.get("DISPLAY", DEFAULT_DISPLAY),
-        )
-    )
+    display: str = field(default_factory=detect_display)
+    xauthority: str | None = field(default_factory=detect_xauthority)
     runner: Callable[..., subprocess.CompletedProcess] = subprocess.run
 
     def readiness(self) -> dict[str, Any]:
         return {
             "display": self.display,
+            "xauthority": self.xauthority,
             "x11": bool(self.display),
             "xdotool": bool(shutil.which("xdotool")),
             "screenshot": self._screenshot_tool() is not None,
@@ -136,7 +178,12 @@ class LinuxDesktop:
         action_type = str(action.get("type") or "")
         keys = _string_list(action.get("keys"))
         if action_type == "click":
-            self.click(_number(action.get("x")), _number(action.get("y")), action.get("button"), keys)
+            self.click(
+                _number(action.get("x")),
+                _number(action.get("y")),
+                action.get("button"),
+                keys,
+            )
         elif action_type == "double_click":
             self.click(
                 _number(action.get("x")),
@@ -151,7 +198,9 @@ class LinuxDesktop:
             self.drag(_drag_path(action.get("path")), keys)
         elif action_type == "scroll":
             self.move_to(_number(action.get("x")), _number(action.get("y")), keys)
-            self.scroll(_number(action.get("scrollX")), _number(action.get("scrollY")), keys)
+            self.scroll(
+                _number(action.get("scrollX")), _number(action.get("scrollY")), keys
+            )
         elif action_type == "type":
             self.type_text(str(action.get("text") or ""))
         elif action_type == "keypress":
@@ -167,11 +216,16 @@ class LinuxDesktop:
     def handle_remote_control_message(self, message: dict[str, Any]) -> None:
         action = str(message.get("action") or "")
         if action == "move":
-            self.move_relative(_number(message.get("deltaX")) * 1.35, _number(message.get("deltaY")) * 1.35)
+            self.move_relative(
+                _number(message.get("deltaX")) * 1.35,
+                _number(message.get("deltaY")) * 1.35,
+            )
         elif action == "click":
             self.click_current(message.get("button"))
         elif action == "scroll":
-            self.scroll(_number(message.get("deltaX")), _number(message.get("deltaY")), [])
+            self.scroll(
+                _number(message.get("deltaX")), _number(message.get("deltaY")), []
+            )
         elif action == "type":
             self.type_text(str(message.get("text") or "")[:1000])
         elif action == "keypress":
@@ -189,18 +243,33 @@ class LinuxDesktop:
         click_count: int = 1,
     ) -> None:
         self.move_to(x, y, keys or [])
-        self._with_keys(keys or [], ["xdotool", "click", "--repeat", str(max(1, click_count)), _mouse_button(button)])
+        self._with_keys(
+            keys or [],
+            [
+                "xdotool",
+                "click",
+                "--repeat",
+                str(max(1, click_count)),
+                _mouse_button(button),
+            ],
+        )
 
     def click_current(self, button: Any = None) -> None:
         self._run(["xdotool", "click", _mouse_button(button)])
 
     def move_to(self, x: float, y: float, keys: list[str] | None = None) -> None:
-        self._with_keys(keys or [], ["xdotool", "mousemove", str(round(x)), str(round(y))])
+        self._with_keys(
+            keys or [], ["xdotool", "mousemove", str(round(x)), str(round(y))]
+        )
 
     def move_relative(self, dx: float, dy: float) -> None:
-        self._run(["xdotool", "mousemove_relative", "--", str(round(dx)), str(round(dy))])
+        self._run(
+            ["xdotool", "mousemove_relative", "--", str(round(dx)), str(round(dy))]
+        )
 
-    def drag(self, points: list[tuple[float, float]], keys: list[str] | None = None) -> None:
+    def drag(
+        self, points: list[tuple[float, float]], keys: list[str] | None = None
+    ) -> None:
         if not points:
             return
         self.move_to(points[0][0], points[0][1], keys or [])
@@ -214,7 +283,9 @@ class LinuxDesktop:
         button = "4" if dy < 0 else "5"
         if abs(dx) > abs(dy):
             button = "6" if dx < 0 else "7"
-        self._with_keys(keys or [], ["xdotool", "click", "--repeat", str(clicks), button])
+        self._with_keys(
+            keys or [], ["xdotool", "click", "--repeat", str(clicks), button]
+        )
 
     def type_text(self, text: str) -> None:
         if text:
@@ -250,6 +321,8 @@ class LinuxDesktop:
         text: bool = True,
     ) -> subprocess.CompletedProcess:
         env = {**os.environ, "DISPLAY": self.display}
+        if self.xauthority:
+            env["XAUTHORITY"] = self.xauthority
         result = self.runner(
             command,
             env=env,
@@ -265,7 +338,8 @@ class LinuxDesktop:
             elif stderr:
                 detail = str(stderr).strip()
             raise LinuxComputerUseError(
-                f"Command failed: {shlex.join(command)}" + (f": {detail}" if detail else "")
+                f"Command failed: {shlex.join(command)}"
+                + (f": {detail}" if detail else "")
             )
         return result
 
@@ -287,7 +361,9 @@ class OpenAIComputerUseRunner:
         self._queued: list[str] = []
         self._cancelled = threading.Event()
         if not self.api_key:
-            raise LinuxComputerUseError("OPENAI_API_KEY was not found in the environment or ~/.openbase/.env.")
+            raise LinuxComputerUseError(
+                "OPENAI_API_KEY was not found in the environment or ~/.openbase/.env."
+            )
 
     def steer(self, instructions: str) -> None:
         self._latest_steering = instructions
@@ -368,7 +444,8 @@ class OpenAIComputerUseRunner:
                     "content": [
                         {
                             "type": "input_text",
-                            "text": "Steering update for the active computer-use run:\n" + steering,
+                            "text": "Steering update for the active computer-use run:\n"
+                            + steering,
                         }
                     ],
                 }
@@ -393,10 +470,14 @@ class OpenAIComputerUseRunner:
             timeout=60,
         )
         if response.status_code >= 400:
-            raise LinuxComputerUseError(f"OpenAI API error {response.status_code}: {response.text}")
+            raise LinuxComputerUseError(
+                f"OpenAI API error {response.status_code}: {response.text}"
+            )
         payload = response.json()
         if not isinstance(payload, dict) or not payload.get("id"):
-            raise LinuxComputerUseError("OpenAI returned an invalid computer-use response.")
+            raise LinuxComputerUseError(
+                "OpenAI returned an invalid computer-use response."
+            )
         return payload
 
 
@@ -451,7 +532,9 @@ class LinuxCompanion:
         if self._runner_thread and self._runner_thread.is_alive():
             raise LinuxComputerUseError("Computer use is already running.")
         if self.state not in {"sharing", "controlling"}:
-            raise LinuxComputerUseError("Screen sharing must be active before computer use starts.")
+            raise LinuxComputerUseError(
+                "Screen sharing must be active before computer use starts."
+            )
 
         self.state = "starting-control"
         self._runner = OpenAIComputerUseRunner(
@@ -470,13 +553,17 @@ class LinuxCompanion:
 
     def steer_computer_use(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self._runner:
-            raise LinuxComputerUseError("No active computer-use run is available to steer.")
+            raise LinuxComputerUseError(
+                "No active computer-use run is available to steer."
+            )
         self._runner.steer(str(payload.get("instructions") or ""))
         return self.status()
 
     def queue_computer_use(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self._runner:
-            raise LinuxComputerUseError("No active computer-use run is available to queue.")
+            raise LinuxComputerUseError(
+                "No active computer-use run is available to queue."
+            )
         self._runner.queue(str(payload.get("instructions") or ""))
         return self.status()
 
@@ -529,7 +616,9 @@ class LinuxCompanion:
 
         while True:
             raw, width, height = await asyncio.to_thread(self.desktop.screenshot_rgba)
-            frame = rtc.VideoFrame(width, height, rtc.VideoBufferType.Value("RGBA"), raw)
+            frame = rtc.VideoFrame(
+                width, height, rtc.VideoBufferType.Value("RGBA"), raw
+            )
             source.capture_frame(frame)
             await asyncio.sleep(0.5)
 
@@ -547,7 +636,9 @@ class LinuxCompanion:
         sender_identity = getattr(sender, "string_value", None) or str(sender or "")
         try:
             if message_type == "openbase.remote_control.set_enabled":
-                self._set_remote_control_enabled(message.get("enabled") is True, sender_identity)
+                self._set_remote_control_enabled(
+                    message.get("enabled") is True, sender_identity
+                )
             elif message_type == "openbase.remote_control.input":
                 self._handle_remote_control_input(message, sender_identity)
         except Exception as exc:
@@ -567,8 +658,13 @@ class LinuxCompanion:
             self._authorized_identity = sender_identity
             self._remote_control_enabled = True
 
-    def _handle_remote_control_input(self, message: dict[str, Any], sender_identity: str) -> None:
-        if not self._remote_control_enabled or sender_identity != self._authorized_identity:
+    def _handle_remote_control_input(
+        self, message: dict[str, Any], sender_identity: str
+    ) -> None:
+        if (
+            not self._remote_control_enabled
+            or sender_identity != self._authorized_identity
+        ):
             return
         if self.state not in {"sharing", "controlling"}:
             self._remote_control_enabled = False
@@ -576,7 +672,9 @@ class LinuxCompanion:
             return
         self.desktop.handle_remote_control_message(message)
 
-    def _run_computer_use(self, runner: OpenAIComputerUseRunner, instructions: str) -> None:
+    def _run_computer_use(
+        self, runner: OpenAIComputerUseRunner, instructions: str
+    ) -> None:
         try:
             runner.run(instructions)
         except Exception as exc:
@@ -620,7 +718,14 @@ def serve_linux_companion(
 
         def _route(self) -> None:
             if self.headers.get("X-Openbase-Companion-Secret") != secret:
-                self._send(401, {"ok": False, "state": active_companion.state, "error": "Unauthorized"})
+                self._send(
+                    401,
+                    {
+                        "ok": False,
+                        "state": active_companion.state,
+                        "error": "Unauthorized",
+                    },
+                )
                 return
             try:
                 payload = self._read_json()
@@ -639,10 +744,20 @@ def serve_linux_companion(
                 elif self.command == "POST" and self.path == "/computer-use/interrupt":
                     self._send(200, active_companion.interrupt_computer_use())
                 else:
-                    self._send(404, {"ok": False, "state": active_companion.state, "error": "Unknown route"})
+                    self._send(
+                        404,
+                        {
+                            "ok": False,
+                            "state": active_companion.state,
+                            "error": "Unknown route",
+                        },
+                    )
             except Exception as exc:
                 active_companion.error = str(exc)
-                self._send(500, {"ok": False, "state": active_companion.state, "error": str(exc)})
+                self._send(
+                    500,
+                    {"ok": False, "state": active_companion.state, "error": str(exc)},
+                )
 
         def _read_json(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length") or "0")
@@ -671,7 +786,10 @@ def _computer_call(response: dict[str, Any]) -> dict[str, Any] | None:
         call_id = item.get("call_id") or item.get("callId")
         actions = item.get("actions")
         if call_id and isinstance(actions, list):
-            return {"call_id": call_id, "actions": [a for a in actions if isinstance(a, dict)]}
+            return {
+                "call_id": call_id,
+                "actions": [a for a in actions if isinstance(a, dict)],
+            }
     return None
 
 
@@ -737,8 +855,20 @@ def _normalize_key(key: str) -> str:
         "PAGEDOWN": "Next",
         "SPACE": "space",
     }
-    return mapping.get(normalized, normalized.lower() if len(normalized) == 1 else normalized)
+    return mapping.get(
+        normalized, normalized.lower() if len(normalized) == 1 else normalized
+    )
 
 
 def _is_modifier(key: str) -> bool:
-    return key.upper() in {"CTRL", "CONTROL", "SHIFT", "ALT", "OPTION", "META", "CMD", "COMMAND", "SUPER"}
+    return key.upper() in {
+        "CTRL",
+        "CONTROL",
+        "SHIFT",
+        "ALT",
+        "OPTION",
+        "META",
+        "CMD",
+        "COMMAND",
+        "SUPER",
+    }

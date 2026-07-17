@@ -28,7 +28,9 @@ def test_desktop_maps_remote_control_to_xdotool(toolchain):
     desktop.handle_remote_control_message({"action": "click", "button": "right"})
     desktop.handle_remote_control_message({"action": "type", "text": "hello"})
     desktop.handle_remote_control_message({"action": "keypress", "keys": ["CTRL", "A"]})
-    desktop.handle_remote_control_message({"action": "keypress", "keys": ["COMMAND", "C"]})
+    desktop.handle_remote_control_message(
+        {"action": "keypress", "keys": ["COMMAND", "C"]}
+    )
 
     assert commands == [
         ["xdotool", "mousemove_relative", "--", "14", "-7"],
@@ -96,3 +98,70 @@ def test_require_ready_reports_missing_tools(monkeypatch):
 
     assert "DISPLAY" in str(exc.value)
     assert "xdotool" in str(exc.value)
+
+
+@pytest.fixture
+def no_display_env(monkeypatch):
+    monkeypatch.delenv("OPENBASE_COMPUTER_USE_DISPLAY", raising=False)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("XAUTHORITY", raising=False)
+
+
+def test_detect_display_prefers_environment(monkeypatch, no_display_env):
+    monkeypatch.setenv("DISPLAY", ":3")
+    assert lcu.detect_display() == ":3"
+
+    monkeypatch.setenv("OPENBASE_COMPUTER_USE_DISPLAY", ":9")
+    assert lcu.detect_display() == ":9"
+
+
+def test_detect_display_finds_user_owned_x_socket(
+    monkeypatch, tmp_path, no_display_env
+):
+    for name in ("X1", "X5", "Xabc", "other"):
+        (tmp_path / name).touch()
+    monkeypatch.setattr(lcu, "X11_SOCKET_DIR", tmp_path)
+
+    assert lcu.detect_display() == ":1"
+
+
+def test_detect_display_ignores_other_users_sockets(
+    monkeypatch, tmp_path, no_display_env
+):
+    (tmp_path / "X0").touch()
+    monkeypatch.setattr(lcu, "X11_SOCKET_DIR", tmp_path)
+    monkeypatch.setattr(lcu.os, "getuid", lambda: 999999999)
+
+    assert lcu.detect_display() == lcu.DEFAULT_DISPLAY
+
+
+def test_detect_xauthority_prefers_environment_then_dcv(
+    monkeypatch, tmp_path, no_display_env
+):
+    monkeypatch.setattr(lcu, "DCV_XAUTH_DIR_TEMPLATE", str(tmp_path / "{uid}"))
+    dcv_dir = tmp_path / str(lcu.os.getuid())
+    dcv_dir.mkdir()
+    assert lcu.detect_xauthority() is None
+
+    xauth_path = dcv_dir / "openbase.xauth"
+    xauth_path.touch()
+    assert lcu.detect_xauthority() == str(xauth_path)
+
+    monkeypatch.setenv("XAUTHORITY", "/custom/xauth")
+    assert lcu.detect_xauthority() == "/custom/xauth"
+
+
+def test_run_exports_display_and_xauthority(toolchain):
+    captured_envs: list[dict] = []
+
+    def fake_run(command, **kwargs):
+        captured_envs.append(kwargs["env"])
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    desktop = lcu.LinuxDesktop(
+        display=":7", xauthority="/run/user/1/dcv/s.xauth", runner=fake_run
+    )
+    desktop.click_current()
+
+    assert captured_envs[0]["DISPLAY"] == ":7"
+    assert captured_envs[0]["XAUTHORITY"] == "/run/user/1/dcv/s.xauth"
