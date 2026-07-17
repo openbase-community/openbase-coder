@@ -153,6 +153,9 @@ from openbase_coder_cli.livekit_agent.packets import (  # noqa: F401
     parse_voice_route_packet,
     publish_agent_error_packet,
 )
+from openbase_coder_cli.livekit_agent.proc_pool_patch import (
+    install_proc_pool_liveness_patch,
+)
 from openbase_coder_cli.livekit_agent.room_diagnostics import (  # noqa: F401
     _participant_log_fields,
     _register_room_diagnostics,
@@ -879,6 +882,7 @@ async def livekit_agent(ctx: JobContext):
 
 def main():
     install_worker_init_failure_watchdog()
+    install_proc_pool_liveness_patch()
     install_assemblyai_idle_noise_filter()
     cli.run_app(server)
 
