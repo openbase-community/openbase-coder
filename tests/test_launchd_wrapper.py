@@ -127,3 +127,28 @@ def test_launchctl_bootstrap_kickstarts_once_after_successful_bootstrap(
     # failed attempts before it ran without a kickstart.
     assert len(bootstrap_indexes) == 3
     assert calls.index(("kickstart", target)) == bootstrap_indexes[-1] + 1
+
+
+def test_generate_wrapper_quotes_binary_paths_with_spaces(tmp_path, monkeypatch):
+    monkeypatch.setattr(launchd, "LAUNCHD_WRAPPER_DIR", tmp_path / "launchd")
+    monkeypatch.setattr(launchd, "OPENBASE_BASE_DIR", tmp_path / "openbase")
+
+    service = ServiceDefinition(
+        name="sample",
+        description="Sample",
+        command_template='exec {openbase_coder} server --port "$PORT"',
+        workdir_template="{workspace}",
+    )
+    config = InstallationConfig(
+        workspace_path=str(tmp_path / "workspace"),
+        env_file=str(tmp_path / ".env"),
+    )
+    bundled = "/Applications/Openbase Coder.app/Contents/Resources/OpenbaseCoderCLI/bin/openbase-coder"
+
+    wrapper = launchd.generate_wrapper(
+        service, config, {"openbase_coder": bundled}
+    )
+
+    content = wrapper.read_text()
+    assert f"exec '{bundled}' server" in content
+    assert f"exec {bundled} server" not in content

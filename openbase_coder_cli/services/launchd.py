@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import platform
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -338,9 +339,14 @@ def generate_wrapper(
     env_file = config.env_file
     data_dir = str(OPENBASE_BASE_DIR)
 
-    template_vars = {"workspace": workspace, "data_dir": data_dir, **binaries}
+    # Binary paths land in shell command position (e.g. the bundled CLI under
+    # "/Applications/Openbase Coder.app" contains a space) — quote them.
+    quoted_binaries = {name: shlex.quote(path) for name, path in binaries.items()}
+    template_vars = {"workspace": workspace, "data_dir": data_dir, **quoted_binaries}
     cmd = svc.command_template.format(**template_vars)
-    workdir = svc.workdir_template.format(**template_vars)
+    workdir = svc.workdir_template.format(
+        workspace=workspace, data_dir=data_dir, **binaries
+    )
 
     wrapper = _wrapper_path(svc)
     wrapper.parent.mkdir(parents=True, exist_ok=True)
