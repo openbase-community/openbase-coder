@@ -537,3 +537,12 @@ def test_claude_plugin_settings_toggles_chrome_independently(
     assert plugins["chrome"]["enabled"] is True
     assert plugins["chrome"]["plugin_id"] == "claude-in-chrome"
     assert plugins["computer-use"]["enabled"] is True
+
+
+def test_urlconf_loads_with_all_settings_views() -> None:
+    # Resolving through the root URLconf exercises the views.py re-export
+    # chain; a missing re-export 500s every request in a real install.
+    from django.urls import reverse
+
+    assert reverse("coding-backend-claude-plugin-settings")
+    assert reverse("coding-backend-codex-plugin-settings")

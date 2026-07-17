@@ -38,6 +38,7 @@ from openbase_coder_cli.openbase_coder_cli_app.auth import (
 )
 from openbase_coder_cli.openbase_coder_cli_app.backend_settings import (
     claude_auth_settings,
+    claude_plugin_settings,  # noqa: F401
     codex_plugin_settings,  # noqa: F401
     coding_backend_settings,
 )
@@ -294,6 +295,7 @@ __all__ = [
     "brain_readiness",
     "cartesia_voice_settings",
     "claude_auth_settings",
+    "claude_plugin_settings",
     "coding_backend_settings",
     "dangerous_confirmation_settings",
     "devices_list",
