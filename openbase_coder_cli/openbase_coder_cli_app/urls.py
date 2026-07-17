@@ -37,6 +37,7 @@ from openbase_coder_cli.openbase_coder_cli_app.views import (
     brain_readiness,
     cartesia_voice_settings,
     claude_auth_settings,
+    claude_plugin_settings,
     codex_plugin_settings,
     coding_backend_settings,
     dangerous_confirmation_settings,
@@ -325,6 +326,11 @@ urlpatterns = [
         "settings/coding-backend/codex-plugins/",
         codex_plugin_settings,
         name="coding-backend-codex-plugin-settings",
+    ),
+    path(
+        "settings/coding-backend/claude-plugins/",
+        claude_plugin_settings,
+        name="coding-backend-claude-plugin-settings",
     ),
     path(
         "settings/backend-model/",

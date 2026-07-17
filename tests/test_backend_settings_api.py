@@ -399,3 +399,95 @@ def test_claude_auth_settings_syncs_state_and_reports_status(
     assert response.data["logged_in"] is True
     assert response.data["state_updated"] is True
     assert response.data["keychain_copied"] is True
+
+
+def test_claude_plugin_settings_reports_enabled_state(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENBASE_CODING_BACKEND=claude-code\n", encoding="utf-8")
+    monkeypatch.setattr(backend_settings, "DEFAULT_ENV_FILE_PATH", env_file)
+    monkeypatch.setattr(
+        backend_settings.claude_plugins, "computer_use_enabled", lambda: True
+    )
+
+    response = backend_settings.claude_plugin_settings(
+        _authenticated_request("GET", "/api/settings/coding-backend/claude-plugins/")
+    )
+
+    assert response.status_code == 200
+    assert response.data["backend"] == "claude_code"
+    plugins = {item["id"]: item for item in response.data["plugins"]}
+    assert plugins["computer-use"]["enabled"] is True
+    assert plugins["computer-use"]["installed"] is True
+    assert plugins["computer-use"]["plugin_id"] == "openbase-computer-use"
+    assert response.data["restart_required"] is False
+
+
+def test_claude_plugin_settings_toggles_plugin_and_requests_restart(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENBASE_CODING_BACKEND=claude-code\n", encoding="utf-8")
+    monkeypatch.setattr(backend_settings, "DEFAULT_ENV_FILE_PATH", env_file)
+    state = {"enabled": False}
+    calls: list[bool] = []
+
+    def fake_set_enabled(enabled: bool) -> bool:
+        calls.append(enabled)
+        changed = state["enabled"] != enabled
+        state["enabled"] = enabled
+        return changed
+
+    monkeypatch.setattr(
+        backend_settings.claude_plugins,
+        "computer_use_enabled",
+        lambda: state["enabled"],
+    )
+    monkeypatch.setattr(
+        backend_settings.claude_plugins,
+        "set_computer_use_enabled",
+        fake_set_enabled,
+    )
+
+    response = backend_settings.claude_plugin_settings(
+        _authenticated_request(
+            "PUT",
+            "/api/settings/coding-backend/claude-plugins/",
+            {"plugin": "computer-use", "enabled": True},
+        )
+    )
+
+    assert response.status_code == 200
+    assert calls == [True]
+    assert response.data["changed"] is True
+    assert response.data["changed_plugin"] == "computer-use"
+    assert response.data["restart_required"] is True
+    plugins = {item["id"]: item for item in response.data["plugins"]}
+    assert plugins["computer-use"]["enabled"] is True
+
+    unchanged = backend_settings.claude_plugin_settings(
+        _authenticated_request(
+            "PUT",
+            "/api/settings/coding-backend/claude-plugins/",
+            {"plugin": "computer-use", "enabled": True},
+        )
+    )
+    assert unchanged.status_code == 200
+    assert unchanged.data["changed"] is False
+    assert unchanged.data["restart_required"] is False
+
+
+def test_claude_plugin_settings_rejects_unknown_plugin() -> None:
+    response = backend_settings.claude_plugin_settings(
+        _authenticated_request(
+            "PUT",
+            "/api/settings/coding-backend/claude-plugins/",
+            {"plugin": "surprise", "enabled": True},
+        )
+    )
+
+    assert response.status_code == 400
+    assert "plugin" in response.data

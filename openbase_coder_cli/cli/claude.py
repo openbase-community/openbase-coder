@@ -54,3 +54,11 @@ def login(sso: bool, email: str | None) -> None:
     """Run Claude Code login for Openbase's CLAUDE_CONFIG_DIR."""
     click.echo(f"Using CLAUDE_CONFIG_DIR={OPENBASE_CLAUDE_CONFIG_DIR}")
     raise SystemExit(run_claude_login(sso=sso, email=email))
+
+
+@claude.command("computer-use-mcp", hidden=True)
+def computer_use_mcp() -> None:
+    """Run the Openbase computer-use MCP server on stdio (desktop-app proxy)."""
+    from openbase_coder_cli.claude_computer_use_mcp import main as mcp_main
+
+    mcp_main()

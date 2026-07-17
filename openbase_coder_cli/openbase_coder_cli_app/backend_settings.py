@@ -10,6 +10,7 @@ from rest_framework import serializers, status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from openbase_coder_cli import claude_plugins
 from openbase_coder_cli.backend_binaries import find_backend_binary
 from openbase_coder_cli.backend_config import (
     CLAUDE_CODE_BACKEND,
@@ -60,6 +61,19 @@ CODEX_PLUGIN_TOGGLES = {
         "description": "Adds the $chrome skill and Chrome browser-control tools to Codex dispatcher sessions.",
     },
 }
+# Claude Code's built-in computer-use server is interactive-only, so the
+# Claude backend uses an Openbase MCP server proxied through the desktop app.
+CLAUDE_PLUGIN_TOGGLES = {
+    "computer-use": {
+        "id": "computer-use",
+        "plugin_id": claude_plugins.COMPUTER_USE_SERVER_NAME,
+        "label": "Computer Use",
+        "description": (
+            "Adds Openbase computer-use tools (hosted by the desktop app) to "
+            "Claude Code dispatcher sessions."
+        ),
+    },
+}
 
 
 class CodingBackendSerializer(serializers.Serializer):
@@ -68,6 +82,11 @@ class CodingBackendSerializer(serializers.Serializer):
 
 class CodexPluginToggleSerializer(serializers.Serializer):
     plugin = serializers.ChoiceField(choices=tuple(CODEX_PLUGIN_TOGGLES))
+    enabled = serializers.BooleanField()
+
+
+class ClaudePluginToggleSerializer(serializers.Serializer):
+    plugin = serializers.ChoiceField(choices=tuple(CLAUDE_PLUGIN_TOGGLES))
     enabled = serializers.BooleanField()
 
 
@@ -218,7 +237,9 @@ def _set_codex_plugin_enabled(plugin_name: str, enabled: bool) -> None:
     command = "add" if enabled else "remove"
     result = _run_codex_plugin_command([command, selector, "--json"])
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout or f"codex plugin {command} failed").strip()
+        detail = (
+            result.stderr or result.stdout or f"codex plugin {command} failed"
+        ).strip()
         raise RuntimeError(detail)
 
 
@@ -267,6 +288,47 @@ def codex_plugin_settings(request):
         return Response(_codex_plugins_payload())
     except RuntimeError as exc:
         return Response({"error": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+
+
+def _claude_plugins_payload(*, changed_plugin: str | None = None) -> dict:
+    enabled = claude_plugins.computer_use_enabled()
+    plugins = [
+        {
+            **toggle,
+            "installed": enabled,
+            "enabled": enabled,
+            "version": None,
+        }
+        for toggle in CLAUDE_PLUGIN_TOGGLES.values()
+    ]
+    return {
+        "backend": read_backend(DEFAULT_ENV_FILE_PATH),
+        "claude_config_dir": str(claude_plugins.OPENBASE_CLAUDE_JSON_PATH.parent),
+        "plugins": plugins,
+        "changed": changed_plugin is not None,
+        "changed_plugin": changed_plugin,
+        "restart_required": changed_plugin is not None,
+        "restart_hint": (
+            "Recreate the dispatcher thread so Claude Code reloads MCP servers."
+        ),
+    }
+
+
+@api_view(["GET", "PUT"])
+def claude_plugin_settings(request):
+    """Read or toggle Openbase MCP plugins for the managed Claude config."""
+    if request.method == "GET":
+        return Response(_claude_plugins_payload())
+
+    serializer = ClaudePluginToggleSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    enabled = serializer.validated_data["enabled"]
+    changed = claude_plugins.set_computer_use_enabled(enabled)
+    return Response(
+        _claude_plugins_payload(
+            changed_plugin=serializer.validated_data["plugin"] if changed else None
+        )
+    )
 
 
 @api_view(["GET", "POST"])
