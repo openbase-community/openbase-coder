@@ -38,6 +38,7 @@ from openbase_coder_cli.openbase_coder_cli_app.auth import (
 )
 from openbase_coder_cli.openbase_coder_cli_app.backend_settings import (
     claude_auth_settings,
+    codex_plugin_settings,  # noqa: F401
     coding_backend_settings,
 )
 from openbase_coder_cli.openbase_coder_cli_app.brain_readiness import brain_readiness

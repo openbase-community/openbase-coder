@@ -231,6 +231,128 @@ def test_coding_backend_settings_rejects_unsupported_backend(
     assert not env_file.exists()
 
 
+def test_codex_plugin_settings_reports_openbase_codex_plugins(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENBASE_CODING_BACKEND=codex\n", encoding="utf-8")
+    codex_home = tmp_path / "codex_home"
+    monkeypatch.setattr(backend_settings, "DEFAULT_ENV_FILE_PATH", env_file)
+    monkeypatch.setattr(backend_settings, "CODEX_HOME_DIR", codex_home)
+    monkeypatch.setattr(
+        backend_settings,
+        "_codex_plugin_list",
+        lambda: {
+            "installed": [
+                {
+                    "pluginId": "computer-use@openai-bundled",
+                    "installed": True,
+                    "enabled": True,
+                    "version": "1.0.857",
+                }
+            ],
+            "available": [
+                {
+                    "pluginId": "chrome@openai-bundled",
+                    "installed": False,
+                    "enabled": False,
+                    "version": "26.623.141536",
+                }
+            ],
+        },
+    )
+
+    response = backend_settings.codex_plugin_settings(
+        _authenticated_request("GET", "/api/settings/coding-backend/codex-plugins/")
+    )
+
+    assert response.status_code == 200
+    assert response.data["backend"] == "codex"
+    assert response.data["codex_home"] == str(codex_home)
+    plugins = {item["id"]: item for item in response.data["plugins"]}
+    assert plugins["computer-use"]["installed"] is True
+    assert plugins["computer-use"]["enabled"] is True
+    assert plugins["computer-use"]["version"] == "1.0.857"
+    assert plugins["chrome"]["installed"] is False
+    assert response.data["restart_required"] is False
+
+
+def test_codex_plugin_settings_toggles_plugin_and_requests_restart(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENBASE_CODING_BACKEND=codex\n", encoding="utf-8")
+    monkeypatch.setattr(backend_settings, "DEFAULT_ENV_FILE_PATH", env_file)
+    calls: list[tuple[str, bool]] = []
+    installed = {"chrome@openai-bundled": False}
+
+    def fake_plugin_list() -> dict:
+        return {
+            "installed": [
+                {
+                    "pluginId": plugin_id,
+                    "installed": True,
+                    "enabled": True,
+                    "version": "26.623.141536",
+                }
+                for plugin_id, is_installed in installed.items()
+                if is_installed
+            ],
+            "available": [
+                {
+                    "pluginId": plugin_id,
+                    "installed": False,
+                    "enabled": False,
+                    "version": "26.623.141536",
+                }
+                for plugin_id, is_installed in installed.items()
+                if not is_installed
+            ],
+        }
+
+    def fake_set_plugin(plugin_name: str, enabled: bool) -> None:
+        calls.append((plugin_name, enabled))
+        installed[f"{plugin_name}@openai-bundled"] = enabled
+
+    monkeypatch.setattr(backend_settings, "_codex_plugin_list", fake_plugin_list)
+    monkeypatch.setattr(
+        backend_settings,
+        "_set_codex_plugin_enabled",
+        fake_set_plugin,
+    )
+
+    response = backend_settings.codex_plugin_settings(
+        _authenticated_request(
+            "PUT",
+            "/api/settings/coding-backend/codex-plugins/",
+            {"plugin": "chrome", "enabled": True},
+        )
+    )
+
+    assert response.status_code == 200
+    assert calls == [("chrome", True)]
+    assert response.data["changed"] is True
+    assert response.data["changed_plugin"] == "chrome"
+    assert response.data["restart_required"] is True
+    plugins = {item["id"]: item for item in response.data["plugins"]}
+    assert plugins["chrome"]["installed"] is True
+
+
+def test_codex_plugin_settings_rejects_unknown_plugin() -> None:
+    response = backend_settings.codex_plugin_settings(
+        _authenticated_request(
+            "PUT",
+            "/api/settings/coding-backend/codex-plugins/",
+            {"plugin": "surprise", "enabled": True},
+        )
+    )
+
+    assert response.status_code == 400
+    assert "plugin" in response.data
+
+
 def test_claude_auth_settings_hidden_for_non_claude_backend(
     monkeypatch,
     tmp_path: Path,

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+
 from rest_framework import serializers, status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from openbase_coder_cli.backend_binaries import find_backend_binary
 from openbase_coder_cli.backend_config import (
     CLAUDE_CODE_BACKEND,
     CODEX_BACKEND,
@@ -19,7 +24,7 @@ from openbase_coder_cli.claude_auth import (
     sync_normal_claude_state,
 )
 from openbase_coder_cli.cli.backend import read_backend, write_backend
-from openbase_coder_cli.paths import DEFAULT_ENV_FILE_PATH
+from openbase_coder_cli.paths import CODEX_HOME_DIR, DEFAULT_ENV_FILE_PATH
 
 BACKEND_OPTIONS = {
     "codex": {
@@ -40,10 +45,30 @@ BACKEND_OPTIONS = {
 }
 
 SELECTABLE_BACKENDS = (CODEX_BACKEND, OPENBASE_CLOUD_BACKEND, CLAUDE_CODE_BACKEND)
+CODEX_PLUGIN_MARKETPLACE = "openai-bundled"
+CODEX_PLUGIN_TOGGLES = {
+    "computer-use": {
+        "id": "computer-use",
+        "plugin_id": "computer-use@openai-bundled",
+        "label": "Computer Use",
+        "description": "Adds the $computer-use skill and computer-use tools to Codex dispatcher sessions.",
+    },
+    "chrome": {
+        "id": "chrome",
+        "plugin_id": "chrome@openai-bundled",
+        "label": "Chrome",
+        "description": "Adds the $chrome skill and Chrome browser-control tools to Codex dispatcher sessions.",
+    },
+}
 
 
 class CodingBackendSerializer(serializers.Serializer):
     backend = serializers.ChoiceField(choices=SELECTABLE_BACKENDS)
+
+
+class CodexPluginToggleSerializer(serializers.Serializer):
+    plugin = serializers.ChoiceField(choices=tuple(CODEX_PLUGIN_TOGGLES))
+    enabled = serializers.BooleanField()
 
 
 def _restart_hint(backend: str) -> str:
@@ -110,6 +135,93 @@ def _backend_payload(*, changed: bool = False) -> dict:
     return payload
 
 
+def _codex_command() -> str:
+    return str(find_backend_binary("codex") or "codex")
+
+
+def _codex_plugin_env() -> dict[str, str]:
+    return {
+        **os.environ,
+        "CODEX_HOME": str(CODEX_HOME_DIR),
+    }
+
+
+def _run_codex_plugin_command(args: list[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            [_codex_command(), "plugin", *args],
+            env=_codex_plugin_env(),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("codex CLI was not found") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("codex plugin command timed out") from exc
+
+
+def _codex_plugin_list() -> dict:
+    result = _run_codex_plugin_command(
+        ["list", "--marketplace", CODEX_PLUGIN_MARKETPLACE, "--json", "--available"]
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "codex plugin list failed").strip()
+        raise RuntimeError(detail)
+    try:
+        return json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("codex plugin list returned invalid JSON") from exc
+
+
+def _codex_plugin_index() -> dict[str, dict]:
+    payload = _codex_plugin_list()
+    index: dict[str, dict] = {}
+    for group_name in ("installed", "available"):
+        for item in payload.get(group_name, []):
+            if isinstance(item, dict) and isinstance(item.get("pluginId"), str):
+                if group_name == "installed":
+                    index[item["pluginId"]] = item
+                else:
+                    index.setdefault(item["pluginId"], item)
+    return index
+
+
+def _codex_plugins_payload(*, changed_plugin: str | None = None) -> dict:
+    plugin_index = _codex_plugin_index()
+    plugins = []
+    for toggle in CODEX_PLUGIN_TOGGLES.values():
+        plugin_info = plugin_index.get(toggle["plugin_id"], {})
+        plugins.append(
+            {
+                **toggle,
+                "installed": bool(plugin_info.get("installed")),
+                "enabled": bool(plugin_info.get("installed"))
+                and bool(plugin_info.get("enabled")),
+                "version": plugin_info.get("version") or None,
+            }
+        )
+    return {
+        "backend": read_backend(DEFAULT_ENV_FILE_PATH),
+        "codex_home": str(CODEX_HOME_DIR),
+        "plugins": plugins,
+        "changed": changed_plugin is not None,
+        "changed_plugin": changed_plugin,
+        "restart_required": changed_plugin is not None,
+        "restart_hint": "Recreate the dispatcher thread so Codex reloads plugin skills and tools.",
+    }
+
+
+def _set_codex_plugin_enabled(plugin_name: str, enabled: bool) -> None:
+    selector = CODEX_PLUGIN_TOGGLES[plugin_name]["plugin_id"]
+    command = "add" if enabled else "remove"
+    result = _run_codex_plugin_command([command, selector, "--json"])
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or f"codex plugin {command} failed").strip()
+        raise RuntimeError(detail)
+
+
 @api_view(["GET", "PUT"])
 def coding_backend_settings(request):
     """Read or update the coding backend used by Super Agents."""
@@ -128,6 +240,33 @@ def coding_backend_settings(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
     return Response(_backend_payload(changed=previous_backend != next_backend))
+
+
+@api_view(["GET", "PUT"])
+def codex_plugin_settings(request):
+    """Read or toggle Codex plugins for Openbase's managed Codex home."""
+    if request.method == "GET":
+        try:
+            return Response(_codex_plugins_payload())
+        except RuntimeError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+
+    serializer = CodexPluginToggleSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    plugin_name = serializer.validated_data["plugin"]
+    enabled = serializer.validated_data["enabled"]
+
+    try:
+        before = _codex_plugin_index().get(
+            CODEX_PLUGIN_TOGGLES[plugin_name]["plugin_id"], {}
+        )
+        current_enabled = bool(before.get("installed")) and bool(before.get("enabled"))
+        if current_enabled != enabled:
+            _set_codex_plugin_enabled(plugin_name, enabled)
+            return Response(_codex_plugins_payload(changed_plugin=plugin_name))
+        return Response(_codex_plugins_payload())
+    except RuntimeError as exc:
+        return Response({"error": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
 
 
 @api_view(["GET", "POST"])
