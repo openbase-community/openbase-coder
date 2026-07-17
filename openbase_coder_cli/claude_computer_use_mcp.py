@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from typing import Any
 
@@ -178,31 +179,76 @@ ACTION_TOOLS = {
 }
 
 
-def _read_control_file() -> JsonObject:
+LINUX_COMPANION_NOT_RUNNING_ERROR = (
+    "The Openbase desktop companion is not running, so computer use is "
+    "unavailable. Start screen sharing first with `openbase-coder "
+    "computer-use screen-share start` (it launches the companion), then retry."
+)
+
+
+def _is_macos() -> bool:
+    return sys.platform == "darwin"
+
+
+def _endpoint() -> JsonObject:
+    """Resolve the platform's desktop-control endpoint.
+
+    macOS proxies through the Electron desktop app (dynamic port/secret from
+    the control file); Linux talks directly to the DevSpace companion (fixed
+    port, shared local secret) via the same /desktop-control contract.
+    """
+    if _is_macos():
+        try:
+            payload = json.loads(DESKTOP_CONTROL_JSON_PATH.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            raise RuntimeError(DESKTOP_NOT_RUNNING_ERROR) from None
+        port = payload.get("port")
+        secret = payload.get("secret")
+        if not isinstance(port, int) or port <= 0 or not isinstance(secret, str):
+            raise RuntimeError(DESKTOP_NOT_RUNNING_ERROR)
+        return {
+            "port": port,
+            "headers": {"X-Openbase-Desktop-Secret": secret},
+            "prefix": "/computer-use",
+            "unreachable_error": DESKTOP_NOT_RUNNING_ERROR,
+        }
+
+    from openbase_coder_cli.cli.computer_use import (
+        DEFAULT_COMPANION_PORT,
+        DEFAULT_COMPANION_SECRET,
+    )
+
     try:
-        payload = json.loads(DESKTOP_CONTROL_JSON_PATH.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
-        raise RuntimeError(DESKTOP_NOT_RUNNING_ERROR) from None
-    port = payload.get("port")
-    secret = payload.get("secret")
-    if not isinstance(port, int) or port <= 0 or not isinstance(secret, str):
-        raise RuntimeError(DESKTOP_NOT_RUNNING_ERROR)
-    return {"port": port, "secret": secret}
+        port = int(
+            os.environ.get(
+                "OPENBASE_LIVEKIT_COMPANION_IPC_PORT", DEFAULT_COMPANION_PORT
+            )
+        )
+    except ValueError:
+        port = DEFAULT_COMPANION_PORT
+    secret = os.environ.get(
+        "OPENBASE_LIVEKIT_COMPANION_IPC_SECRET", DEFAULT_COMPANION_SECRET
+    )
+    return {
+        "port": port,
+        "headers": {"X-Openbase-Companion-Secret": secret},
+        "prefix": "/desktop-control",
+        "unreachable_error": LINUX_COMPANION_NOT_RUNNING_ERROR,
+    }
 
 
 async def _desktop_request(
-    method: str, path: str, *, json_body: JsonObject | None = None
+    method: str, route: str, *, json_body: JsonObject | None = None
 ) -> JsonObject:
-    control = _read_control_file()
-    url = f"http://127.0.0.1:{control['port']}{path}"
-    headers = {"X-Openbase-Desktop-Secret": control["secret"]}
+    endpoint = _endpoint()
+    url = f"http://127.0.0.1:{endpoint['port']}{endpoint['prefix']}{route}"
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.request(
-                method, url, headers=headers, json=json_body
+                method, url, headers=endpoint["headers"], json=json_body
             )
     except httpx.HTTPError:
-        raise RuntimeError(DESKTOP_NOT_RUNNING_ERROR) from None
+        raise RuntimeError(endpoint["unreachable_error"]) from None
 
     payload: JsonObject = {}
     if response.content:
@@ -223,12 +269,12 @@ async def _desktop_request(
 
 
 async def _run_action(arguments: JsonObject) -> JsonObject:
-    return await _desktop_request("POST", "/computer-use/action", json_body=arguments)
+    return await _desktop_request("POST", "/action", json_body=arguments)
 
 
 async def _call_tool(name: str, arguments: JsonObject) -> list[types.ContentBlock]:
     if name == "screenshot":
-        payload = await _desktop_request("POST", "/computer-use/screenshot")
+        payload = await _desktop_request("POST", "/screenshot")
         image = payload.get("image")
         if not isinstance(image, str) or not image:
             raise RuntimeError("Desktop app returned no screenshot image.")
@@ -246,7 +292,7 @@ async def _call_tool(name: str, arguments: JsonObject) -> list[types.ContentBloc
         return [types.TextContent(type="text", text=f"Performed {name}.")]
 
     if name == "cursor_position":
-        payload = await _desktop_request("GET", "/computer-use/cursor")
+        payload = await _desktop_request("GET", "/cursor")
         return [
             types.TextContent(
                 type="text",
@@ -257,7 +303,7 @@ async def _call_tool(name: str, arguments: JsonObject) -> list[types.ContentBloc
 
     if name == "open_application":
         await _desktop_request(
-            "POST", "/computer-use/open-app", json_body={"name": arguments["name"]}
+            "POST", "/open-app", json_body={"name": arguments["name"]}
         )
         return [
             types.TextContent(

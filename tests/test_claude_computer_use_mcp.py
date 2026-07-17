@@ -77,6 +77,7 @@ def desktop_server(monkeypatch, tmp_path: Path):
         encoding="utf-8",
     )
     monkeypatch.setattr(mcp_shim, "DESKTOP_CONTROL_JSON_PATH", control_path)
+    monkeypatch.setattr(mcp_shim, "_is_macos", lambda: True)
 
     yield _FakeDesktopControlHandler
     server.shutdown()
@@ -147,4 +148,66 @@ async def test_missing_control_file_reports_desktop_not_running(
     )
 
     with pytest.raises(RuntimeError, match="desktop app is not running"):
+        await mcp_shim._call_tool("screenshot", {})
+
+
+class _FakeLinuxCompanionHandler(_FakeDesktopControlHandler):
+    """Same behavior, but on the Linux companion contract."""
+
+    def _handle(self) -> None:
+        if self.headers.get("X-Openbase-Companion-Secret") != SECRET:
+            self._respond(401, {"ok": False, "error": "Unauthorized"})
+            return
+
+        length = int(self.headers.get("Content-Length") or 0)
+        body = json.loads(self.rfile.read(length)) if length else {}
+        type(self).requests.append((self.command, self.path, body))
+
+        if self.path == "/desktop-control/screenshot":
+            self._respond(
+                200, {"ok": True, "image": "aGk=", "width": 1372, "height": 890}
+            )
+        elif self.path == "/desktop-control/action":
+            self._respond(200, {"ok": True})
+        else:
+            self._respond(404, {"ok": False, "error": "Unknown route"})
+
+
+@pytest.fixture
+def linux_companion_server(monkeypatch):
+    _FakeLinuxCompanionHandler.requests = []
+    server = HTTPServer(("127.0.0.1", 0), _FakeLinuxCompanionHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    monkeypatch.setattr(mcp_shim, "_is_macos", lambda: False)
+    monkeypatch.setenv(
+        "OPENBASE_LIVEKIT_COMPANION_IPC_PORT", str(server.server_address[1])
+    )
+    monkeypatch.setenv("OPENBASE_LIVEKIT_COMPANION_IPC_SECRET", SECRET)
+
+    yield _FakeLinuxCompanionHandler
+    server.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_linux_routes_through_companion_contract(linux_companion_server) -> None:
+    shot_blocks = await mcp_shim._call_tool("screenshot", {})
+    click_blocks = await mcp_shim._call_tool("left_click", {"x": 10, "y": 20})
+
+    assert shot_blocks[0].type == "image"
+    assert "Performed left_click" in click_blocks[0].text
+    assert linux_companion_server.requests == [
+        ("POST", "/desktop-control/screenshot", {}),
+        ("POST", "/desktop-control/action", {"type": "left_click", "x": 10, "y": 20}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_linux_unreachable_reports_companion_hint(monkeypatch) -> None:
+    monkeypatch.setattr(mcp_shim, "_is_macos", lambda: False)
+    monkeypatch.setenv("OPENBASE_LIVEKIT_COMPANION_IPC_PORT", "1")
+    monkeypatch.setenv("OPENBASE_LIVEKIT_COMPANION_IPC_SECRET", SECRET)
+
+    with pytest.raises(RuntimeError, match="computer-use screen-share start"):
         await mcp_shim._call_tool("screenshot", {})

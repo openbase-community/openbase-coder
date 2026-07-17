@@ -165,3 +165,109 @@ def test_run_exports_display_and_xauthority(toolchain):
 
     assert captured_envs[0]["DISPLAY"] == ":7"
     assert captured_envs[0]["XAUTHORITY"] == "/run/user/1/dcv/s.xauth"
+
+
+def _sharing_companion(desktop: lcu.LinuxDesktop) -> lcu.LinuxCompanion:
+    companion = lcu.LinuxCompanion(desktop=desktop)
+    companion.state = "sharing"
+    companion._room = object()
+    return companion
+
+
+def test_desktop_control_requires_screen_share(toolchain):
+    desktop = lcu.LinuxDesktop(display=":7", runner=subprocess.run)
+    companion = lcu.LinuxCompanion(desktop=desktop)
+
+    with pytest.raises(lcu.LinuxComputerUseError, match="Screen sharing is not active"):
+        companion.desktop_control_screenshot()
+    with pytest.raises(lcu.LinuxComputerUseError, match="Screen sharing is not active"):
+        companion.desktop_control_action({"type": "left_click", "x": 1, "y": 2})
+
+
+def test_desktop_control_screenshot_downscales_and_records_dims(tmp_path, toolchain):
+    def fake_run(command, **kwargs):
+        if command[0] == "scrot":
+            Path(command[1]).write_bytes(b"native-png")
+            return subprocess.CompletedProcess(command, 0, stdout="")
+        if command[0] == "identify" and "native.png" in command[-1]:
+            return subprocess.CompletedProcess(command, 0, stdout="1372 890")
+        if command[0] == "identify":
+            return subprocess.CompletedProcess(command, 0, stdout="2744 1780")
+        if command[0] == "convert":
+            Path(command[-1]).write_bytes(b"scaled-png")
+            return subprocess.CompletedProcess(command, 0, stdout="")
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    # First identify call reports the native capture as 2744x1780; the convert
+    # output is identified as 1372x890.
+    calls = {"identify": 0}
+
+    def dispatching_run(command, **kwargs):
+        if command[0] == "identify":
+            calls["identify"] += 1
+            size = "2744 1780" if calls["identify"] == 1 else "1372 890"
+            return subprocess.CompletedProcess(command, 0, stdout=size)
+        return fake_run(command, **kwargs)
+
+    desktop = lcu.LinuxDesktop(display=":7", runner=dispatching_run)
+    companion = _sharing_companion(desktop)
+
+    payload = companion.desktop_control_screenshot()
+
+    assert payload["ok"] is True
+    assert (payload["width"], payload["height"]) == (1372, 890)
+    assert companion._mcp_screenshot_dims == (1372, 890, 2744, 1780)
+
+
+def test_desktop_control_action_scales_to_native_pixels(toolchain):
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    desktop = lcu.LinuxDesktop(display=":7", runner=fake_run)
+    companion = _sharing_companion(desktop)
+    companion._mcp_screenshot_dims = (1372, 890, 2744, 1780)
+
+    companion.desktop_control_action({"type": "left_click", "x": 686, "y": 445})
+    companion.desktop_control_action({"type": "key", "combo": "cmd+n"})
+
+    assert commands == [
+        ["xdotool", "mousemove", "1372", "890"],
+        ["xdotool", "click", "--repeat", "1", "1"],
+        ["xdotool", "key", "--clearmodifiers", "ctrl+n"],
+    ]
+
+
+def test_desktop_control_cursor_maps_to_screenshot_space(toolchain):
+    def fake_run(command, **kwargs):
+        if command[:2] == ["xdotool", "getmouselocation"]:
+            return subprocess.CompletedProcess(command, 0, stdout="X=1372\nY=890\n")
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    desktop = lcu.LinuxDesktop(display=":7", runner=fake_run)
+    companion = _sharing_companion(desktop)
+    companion._mcp_screenshot_dims = (1372, 890, 2744, 1780)
+
+    payload = companion.desktop_control_cursor()
+
+    assert payload == {"ok": True, "x": 686, "y": 445}
+
+
+def test_desktop_control_open_app_activates_existing_window(toolchain):
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:2] == ["xdotool", "search"]:
+            return subprocess.CompletedProcess(command, 0, stdout="41\n42\n")
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    desktop = lcu.LinuxDesktop(display=":7", runner=fake_run)
+    companion = _sharing_companion(desktop)
+
+    payload = companion.desktop_control_open_app({"name": "Files"})
+
+    assert payload["ok"] is True
+    assert ["xdotool", "windowactivate", "42"] in commands

@@ -67,6 +67,11 @@ def detect_xauthority() -> str | None:
     return str(candidates[0]) if candidates else None
 
 
+# Matches the macOS companion's screenshot ceiling so MCP coordinate
+# semantics ("1:1 with the latest screenshot") are identical on both OSes.
+MAX_MCP_SCREENSHOT_WIDTH = 1372
+
+
 class LinuxComputerUseError(RuntimeError):
     pass
 
@@ -161,6 +166,90 @@ class LinuxDesktop:
                 width=int(width_text),
                 height=int(height_text),
             )
+
+    def screenshot_downscaled(self, max_width: int) -> tuple[Screenshot, int, int]:
+        """A screenshot at most max_width wide, plus the native dimensions."""
+        shot = self.screenshot()
+        if shot.width <= max_width:
+            return shot, shot.width, shot.height
+        with tempfile.TemporaryDirectory(prefix="openbase-computer-use-") as temp_dir:
+            src_path = Path(temp_dir) / "native.png"
+            dst_path = Path(temp_dir) / "scaled.png"
+            src_path.write_bytes(shot.png)
+            self._run(
+                ["convert", str(src_path), "-resize", f"{max_width}x", str(dst_path)]
+            )
+            dimensions = self._run(
+                ["identify", "-format", "%w %h", str(dst_path)],
+                capture_output=True,
+            ).stdout.strip()
+            width_text, height_text = dimensions.split(maxsplit=1)
+            scaled = Screenshot(
+                png=dst_path.read_bytes(),
+                width=int(width_text),
+                height=int(height_text),
+            )
+        return scaled, shot.width, shot.height
+
+    def execute_mcp_action(self, action: dict[str, Any]) -> None:
+        """One openbase-computer-use MCP action, coordinates in native pixels."""
+        action_type = str(action.get("type") or "")
+        if action_type == "left_click":
+            self.click(_number(action.get("x")), _number(action.get("y")), "left", [])
+        elif action_type == "double_click":
+            self.click(
+                _number(action.get("x")),
+                _number(action.get("y")),
+                "left",
+                [],
+                click_count=2,
+            )
+        elif action_type == "right_click":
+            self.click(_number(action.get("x")), _number(action.get("y")), "right", [])
+        elif action_type == "mouse_move":
+            self.move_to(_number(action.get("x")), _number(action.get("y")))
+        elif action_type == "type":
+            self.type_text(str(action.get("text") or ""))
+        elif action_type == "key":
+            combo = str(action.get("combo") or "")
+            self.keypress([part for part in combo.split("+") if part])
+        elif action_type == "scroll":
+            amount = max(1, int(_number(action.get("amount")) or 3))
+            direction = str(action.get("direction") or "down")
+            delta = amount * 40.0
+            dx, dy = {
+                "up": (0.0, -delta),
+                "left": (-delta, 0.0),
+                "right": (delta, 0.0),
+            }.get(direction, (0.0, delta))
+            self.move_to(_number(action.get("x")), _number(action.get("y")))
+            self.scroll(dx, dy)
+        else:
+            raise LinuxComputerUseError(
+                f"Unsupported desktop-control action: {action_type}"
+            )
+
+    def activate_window(self, name: str) -> bool:
+        try:
+            result = self._run(
+                ["xdotool", "search", "--name", name], capture_output=True
+            )
+        except LinuxComputerUseError:
+            # xdotool search exits nonzero when nothing matches.
+            return False
+        window_ids = [line for line in (result.stdout or "").split() if line.strip()]
+        if not window_ids:
+            return False
+        self._run(["xdotool", "windowactivate", window_ids[-1]])
+        return True
+
+    def cursor_position(self) -> tuple[int, int]:
+        output = self._run(
+            ["xdotool", "getmouselocation", "--shell"],
+            capture_output=True,
+        ).stdout
+        values = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+        return int(values.get("X", 0)), int(values.get("Y", 0))
 
     def screenshot_rgba(self) -> tuple[bytes, int, int]:
         screenshot = self.screenshot()
@@ -495,6 +584,10 @@ class LinuxCompanion:
         self._runner_thread: threading.Thread | None = None
         self._remote_control_enabled = False
         self._authorized_identity: str | None = None
+        # (scaled_width, scaled_height, native_width, native_height) of the
+        # most recent MCP screenshot; MCP action coordinates arrive in the
+        # scaled space and map proportionally back to native pixels.
+        self._mcp_screenshot_dims: tuple[int, int, int, int] | None = None
 
     def status(self) -> dict[str, Any]:
         return {
@@ -573,6 +666,78 @@ class LinuxCompanion:
         if self.state in {"starting-control", "controlling"}:
             self.state = "sharing" if self._room else "off"
         return self.status()
+
+    @property
+    def screen_share_active(self) -> bool:
+        return self.state in {"sharing", "controlling"} and self._room is not None
+
+    def _require_screen_share(self) -> None:
+        if not self.screen_share_active:
+            raise LinuxComputerUseError(
+                "Screen sharing is not active. Start it first with "
+                "`openbase-coder computer-use screen-share start` so the user "
+                "can watch, then retry."
+            )
+
+    def desktop_control_screenshot(self) -> dict[str, Any]:
+        self._require_screen_share()
+        scaled, native_width, native_height = self.desktop.screenshot_downscaled(
+            MAX_MCP_SCREENSHOT_WIDTH
+        )
+        self._mcp_screenshot_dims = (
+            scaled.width,
+            scaled.height,
+            native_width,
+            native_height,
+        )
+        return {
+            "ok": True,
+            "image": scaled.base64_png,
+            "width": scaled.width,
+            "height": scaled.height,
+        }
+
+    def desktop_control_action(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_screen_share()
+        self.desktop.execute_mcp_action(self._scale_action_to_native(payload))
+        return {"ok": True, "state": self.state}
+
+    def desktop_control_open_app(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_screen_share()
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise LinuxComputerUseError("open-app requires an application name.")
+        if not self.desktop.activate_window(name):
+            try:
+                subprocess.Popen([name.lower()], start_new_session=True)
+            except (FileNotFoundError, OSError):
+                raise LinuxComputerUseError(
+                    f'No window or executable named "{name}" was found.'
+                ) from None
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                time.sleep(0.25)
+                if self.desktop.activate_window(name):
+                    break
+        return {"ok": True, "state": self.state}
+
+    def desktop_control_cursor(self) -> dict[str, Any]:
+        self._require_screen_share()
+        native_x, native_y = self.desktop.cursor_position()
+        if self._mcp_screenshot_dims:
+            scaled_w, scaled_h, native_w, native_h = self._mcp_screenshot_dims
+            native_x = round(native_x * scaled_w / max(1, native_w))
+            native_y = round(native_y * scaled_h / max(1, native_h))
+        return {"ok": True, "x": native_x, "y": native_y}
+
+    def _scale_action_to_native(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self._mcp_screenshot_dims or "x" not in payload:
+            return payload
+        scaled_w, scaled_h, native_w, native_h = self._mcp_screenshot_dims
+        scaled = dict(payload)
+        scaled["x"] = _number(payload.get("x")) * native_w / max(1, scaled_w)
+        scaled["y"] = _number(payload.get("y")) * native_h / max(1, scaled_h)
+        return scaled
 
     async def _start_livekit(self, room_url: str, token: str) -> None:
         from livekit import rtc
@@ -743,6 +908,19 @@ def serve_linux_companion(
                     self._send(200, active_companion.queue_computer_use(payload))
                 elif self.command == "POST" and self.path == "/computer-use/interrupt":
                     self._send(200, active_companion.interrupt_computer_use())
+                elif (
+                    self.command == "POST"
+                    and self.path == "/desktop-control/screenshot"
+                ):
+                    self._send(200, active_companion.desktop_control_screenshot())
+                elif self.command == "POST" and self.path == "/desktop-control/action":
+                    self._send(200, active_companion.desktop_control_action(payload))
+                elif (
+                    self.command == "POST" and self.path == "/desktop-control/open-app"
+                ):
+                    self._send(200, active_companion.desktop_control_open_app(payload))
+                elif self.command == "GET" and self.path == "/desktop-control/cursor":
+                    self._send(200, active_companion.desktop_control_cursor())
                 else:
                     self._send(
                         404,
@@ -752,6 +930,13 @@ def serve_linux_companion(
                             "error": "Unknown route",
                         },
                     )
+            except LinuxComputerUseError as exc:
+                # Expected refusals (screen share inactive, bad action); do not
+                # poison companion status with them.
+                self._send(
+                    409,
+                    {"ok": False, "state": active_companion.state, "error": str(exc)},
+                )
             except Exception as exc:
                 active_companion.error = str(exc)
                 self._send(
