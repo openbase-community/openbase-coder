@@ -349,8 +349,12 @@ class CodexAppServerSessionManager:
         directory: str,
         thread_id: str | None = None,
     ) -> SessionInfo:
-        """Create or reuse a Codex app-server thread for the directory."""
-        return await self.create_session(directory, session_id=thread_id)
+        """Create a fresh Codex app-server thread for the directory."""
+        return await self.create_session(
+            directory,
+            session_id=thread_id,
+            reuse_existing=thread_id is not None,
+        )
 
     async def archive_thread(self, thread_id: str) -> bool:
         """Archive a Codex app-server thread."""
@@ -723,6 +727,7 @@ class CodexAppServerSessionManager:
         directory: str,
         session_id: str | None = None,
         session_type: Literal["codex"] = "codex",
+        reuse_existing: bool = True,
     ) -> SessionInfo:
         """Create or reuse a Codex app-server thread for the directory."""
         if session_type != "codex":
@@ -740,17 +745,22 @@ class CodexAppServerSessionManager:
 
         if self._uses_backend_session_api():
             existing_sessions = await self._backend_sessions()
-            for session in existing_sessions:
-                if session.directory == expanded_dir:
-                    return session
+            if reuse_existing:
+                for session in existing_sessions:
+                    if session.directory == expanded_dir:
+                        return session
             name = Path(expanded_dir).name or f"thread-{uuid.uuid4().hex[:8]}"
-            if any(session.name == name for session in existing_sessions):
+            if reuse_existing and any(
+                session.name == name for session in existing_sessions
+            ):
                 name = f"{name}-{uuid.uuid4().hex[:8]}"
             thread_input = {
                 "name": name,
                 "cwd": expanded_dir,
                 **self._codex_permission_defaults(),
             }
+            if not reuse_existing:
+                thread_input["fresh"] = True
             if model := self._model_for_role(SUPER_AGENTS_MODEL_ROLE):
                 thread_input["model"] = model
             developer_instructions = load_super_agent_developer_instructions()
@@ -762,14 +772,15 @@ class CodexAppServerSessionManager:
                 include_turns=False,
             )
 
-        result = await self._client.list_threads(
-            True,
-            cwd=expanded_dir,
-            limit=1,
-        )
-        existing = extract_threads(result)
-        if existing:
-            return _session_from_thread(existing[0], include_turns=False)
+        if reuse_existing:
+            result = await self._client.list_threads(
+                True,
+                cwd=expanded_dir,
+                limit=1,
+            )
+            existing = extract_threads(result)
+            if existing:
+                return _session_from_thread(existing[0], include_turns=False)
 
         thread_input = {"cwd": expanded_dir, **self._codex_permission_defaults()}
         if model := self._model_for_role(SUPER_AGENTS_MODEL_ROLE):

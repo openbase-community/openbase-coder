@@ -1170,6 +1170,55 @@ def test_create_session_omits_missing_super_agent_instructions_for_backend_sessi
     ]
 
 
+def test_create_thread_requests_fresh_backend_session_when_directory_exists(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.setenv(
+        "CODEX_SUPER_AGENT_INSTRUCTIONS_PATH",
+        str(tmp_path / "missing" / "SUPER_AGENT_INSTRUCTIONS.md"),
+    )
+    client = FakeBackendSessionClient(
+        {
+            "sessions": [
+                [
+                    {
+                        "id": "s_existing",
+                        "name": "project",
+                        "cwd": str(project_dir.resolve()),
+                        "status": "idle",
+                    }
+                ]
+            ],
+            "start_thread": [
+                {
+                    "id": "s_new",
+                    "name": "project",
+                    "cwd": str(project_dir),
+                    "status": "waiting",
+                }
+            ],
+        }
+    )
+
+    thread = asyncio.run(_manager(client).create_thread(str(project_dir)))
+
+    assert thread.session_id == "s_new"
+    assert client.calls == [
+        ("sessions", {}),
+        (
+            "start_thread",
+            {
+                "name": "project",
+                "cwd": str(project_dir.resolve()),
+                "fresh": True,
+            },
+        ),
+    ]
+
+
 def test_send_message_starts_claude_code_backend_turn(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -1451,14 +1500,14 @@ def test_read_thread_marks_waiting_turn_as_waiting(tmp_path: Path) -> None:
     assert thread.current_run.status == "waiting"
 
 
-def test_create_thread_reuses_existing_thread_for_directory(tmp_path: Path) -> None:
+def test_create_session_reuses_existing_thread_for_directory(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     client = FakeSuperAgentsClient(
         {"list_threads": [{"data": [_thread("thr-existing", str(project_dir))]}]}
     )
 
-    thread = asyncio.run(_manager(client).create_thread(str(project_dir)))
+    thread = asyncio.run(_manager(client).create_session(str(project_dir)))
 
     assert thread.session_id == "thr-existing"
     assert client.calls == [
@@ -1470,6 +1519,38 @@ def test_create_thread_reuses_existing_thread_for_directory(tmp_path: Path) -> N
                 "cwd": str(project_dir.resolve()),
                 "limit": 1,
                 "cursor": None,
+            },
+        )
+    ]
+
+
+def test_create_thread_starts_new_thread_even_when_directory_has_existing_thread(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.setenv(
+        "CODEX_SUPER_AGENT_INSTRUCTIONS_PATH",
+        str(tmp_path / "MISSING_SUPER_AGENT_INSTRUCTIONS.md"),
+    )
+    client = FakeSuperAgentsClient(
+        {
+            "list_threads": [{"data": [_thread("thr-existing", str(project_dir))]}],
+            "start_thread": [{"thread": _thread("thr-new", str(project_dir))}],
+        }
+    )
+
+    thread = asyncio.run(_manager(client).create_thread(str(project_dir)))
+
+    assert thread.session_id == "thr-new"
+    assert client.calls == [
+        (
+            "start_thread",
+            {
+                "cwd": str(project_dir.resolve()),
+                "approvalPolicy": "never",
+                "sandbox": "danger-full-access",
             },
         )
     ]
@@ -1487,7 +1568,6 @@ def test_create_thread_starts_new_thread_when_none_exist(
     )
     client = FakeSuperAgentsClient(
         {
-            "list_threads": [{"data": []}],
             "start_thread": [{"thread": _thread("thr-new", str(project_dir))}],
         }
     )
@@ -1495,14 +1575,16 @@ def test_create_thread_starts_new_thread_when_none_exist(
     thread = asyncio.run(_manager(client).create_thread(str(project_dir)))
 
     assert thread.session_id == "thr-new"
-    assert client.calls[1] == (
-        "start_thread",
-        {
-            "cwd": str(project_dir.resolve()),
-            "approvalPolicy": "never",
-            "sandbox": "danger-full-access",
-        },
-    )
+    assert client.calls == [
+        (
+            "start_thread",
+            {
+                "cwd": str(project_dir.resolve()),
+                "approvalPolicy": "never",
+                "sandbox": "danger-full-access",
+            },
+        )
+    ]
 
 
 def test_create_thread_includes_super_agent_instructions(
@@ -1516,7 +1598,6 @@ def test_create_thread_includes_super_agent_instructions(
     monkeypatch.setenv("CODEX_SUPER_AGENT_INSTRUCTIONS_PATH", str(instructions_path))
     client = FakeSuperAgentsClient(
         {
-            "list_threads": [{"data": []}],
             "start_thread": [{"thread": _thread("thr-new", str(project_dir))}],
         }
     )
@@ -1524,15 +1605,17 @@ def test_create_thread_includes_super_agent_instructions(
     thread = asyncio.run(_manager(client).create_thread(str(project_dir)))
 
     assert thread.session_id == "thr-new"
-    assert client.calls[1] == (
-        "start_thread",
-        {
-            "cwd": str(project_dir.resolve()),
-            "approvalPolicy": "never",
-            "sandbox": "danger-full-access",
-            "developerInstructions": "super agent instructions",
-        },
-    )
+    assert client.calls == [
+        (
+            "start_thread",
+            {
+                "cwd": str(project_dir.resolve()),
+                "approvalPolicy": "never",
+                "sandbox": "danger-full-access",
+                "developerInstructions": "super agent instructions",
+            },
+        )
+    ]
 
 
 def test_start_turn_starts_via_super_agents_and_broadcasts(
