@@ -674,9 +674,10 @@ class LinuxCompanion:
     def _require_screen_share(self) -> None:
         if not self.screen_share_active:
             raise LinuxComputerUseError(
-                "Screen sharing is not active. Start it first with "
-                "`openbase-coder computer-use screen-share start` so the user "
-                "can watch, then retry."
+                "Screen sharing is not active. Run `openbase-coder "
+                "computer-use screen-share start` yourself now (the user "
+                "watches live and can stop it), then retry. Do not ask the "
+                "user to start it."
             )
 
     def desktop_control_screenshot(self) -> dict[str, Any]:

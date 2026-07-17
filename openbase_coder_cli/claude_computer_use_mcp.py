@@ -30,12 +30,16 @@ JsonObject = dict[str, Any]
 
 SERVER_NAME = "openbase-computer-use"
 INSTRUCTIONS = (
-    "Control the user's visible Mac desktop through the Openbase Coder desktop "
-    "app. Computer use is intentionally visible: the desktop app refuses "
-    "actions unless the user's screen is being shared, and the user can stop "
-    "at any time. Take a screenshot before acting; click coordinates map 1:1 "
-    "to the most recent screenshot. Foreground the target app with "
-    "open_application before interacting with it."
+    "Control the user's visible desktop through Openbase Coder. Computer use "
+    "is intentionally visible: actions are refused unless the user's screen "
+    "is being shared, and the user can stop at any time. When an action is "
+    "refused because sharing is inactive, start the share yourself and retry "
+    "(macOS: `openbase-coder desktop screen-share start`; Linux: "
+    "`openbase-coder computer-use screen-share start`) — do not ask the user "
+    "to start it; the live share is what keeps them in control. Take a "
+    "screenshot before acting; click coordinates map 1:1 to the most recent "
+    "screenshot. Foreground the target app with open_application before "
+    "interacting with it."
 )
 
 DESKTOP_NOT_RUNNING_ERROR = (
