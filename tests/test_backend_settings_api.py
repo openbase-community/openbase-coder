@@ -491,3 +491,49 @@ def test_claude_plugin_settings_rejects_unknown_plugin() -> None:
 
     assert response.status_code == 400
     assert "plugin" in response.data
+
+
+def test_claude_plugin_settings_toggles_chrome_independently(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENBASE_CODING_BACKEND=claude-code\n", encoding="utf-8")
+    monkeypatch.setattr(backend_settings, "DEFAULT_ENV_FILE_PATH", env_file)
+    state = {"computer-use": True, "chrome": False}
+
+    monkeypatch.setattr(
+        backend_settings.claude_plugins,
+        "computer_use_enabled",
+        lambda: state["computer-use"],
+    )
+    monkeypatch.setattr(
+        backend_settings.claude_plugins,
+        "chrome_enabled",
+        lambda: state["chrome"],
+    )
+
+    def fake_set_chrome(enabled: bool) -> bool:
+        changed = state["chrome"] != enabled
+        state["chrome"] = enabled
+        return changed
+
+    monkeypatch.setattr(
+        backend_settings.claude_plugins, "set_chrome_enabled", fake_set_chrome
+    )
+
+    response = backend_settings.claude_plugin_settings(
+        _authenticated_request(
+            "PUT",
+            "/api/settings/coding-backend/claude-plugins/",
+            {"plugin": "chrome", "enabled": True},
+        )
+    )
+
+    assert response.status_code == 200
+    assert response.data["changed"] is True
+    assert response.data["changed_plugin"] == "chrome"
+    plugins = {item["id"]: item for item in response.data["plugins"]}
+    assert plugins["chrome"]["enabled"] is True
+    assert plugins["chrome"]["plugin_id"] == "claude-in-chrome"
+    assert plugins["computer-use"]["enabled"] is True

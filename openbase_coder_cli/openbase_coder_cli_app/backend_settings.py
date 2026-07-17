@@ -63,6 +63,8 @@ CODEX_PLUGIN_TOGGLES = {
 }
 # Claude Code's built-in computer-use server is interactive-only, so the
 # Claude backend uses an Openbase MCP server proxied through the desktop app.
+# Chrome is different: --chrome works headlessly, so the toggle passes the
+# flag to every session via SUPER_AGENTS_CLAUDE_EXTRA_ARGS.
 CLAUDE_PLUGIN_TOGGLES = {
     "computer-use": {
         "id": "computer-use",
@@ -73,7 +75,28 @@ CLAUDE_PLUGIN_TOGGLES = {
             "Claude Code dispatcher sessions."
         ),
     },
+    "chrome": {
+        "id": "chrome",
+        "plugin_id": "claude-in-chrome",
+        "label": "Chrome",
+        "description": (
+            "Adds the Claude in Chrome browser-control tools to Claude Code "
+            "dispatcher sessions (requires the Claude Chrome extension)."
+        ),
+    },
 }
+
+
+def _claude_plugin_enabled(plugin_name: str) -> bool:
+    if plugin_name == "chrome":
+        return claude_plugins.chrome_enabled()
+    return claude_plugins.computer_use_enabled()
+
+
+def _set_claude_plugin_enabled(plugin_name: str, enabled: bool) -> bool:
+    if plugin_name == "chrome":
+        return claude_plugins.set_chrome_enabled(enabled)
+    return claude_plugins.set_computer_use_enabled(enabled)
 
 
 class CodingBackendSerializer(serializers.Serializer):
@@ -291,16 +314,17 @@ def codex_plugin_settings(request):
 
 
 def _claude_plugins_payload(*, changed_plugin: str | None = None) -> dict:
-    enabled = claude_plugins.computer_use_enabled()
-    plugins = [
-        {
-            **toggle,
-            "installed": enabled,
-            "enabled": enabled,
-            "version": None,
-        }
-        for toggle in CLAUDE_PLUGIN_TOGGLES.values()
-    ]
+    plugins = []
+    for toggle in CLAUDE_PLUGIN_TOGGLES.values():
+        enabled = _claude_plugin_enabled(toggle["id"])
+        plugins.append(
+            {
+                **toggle,
+                "installed": enabled,
+                "enabled": enabled,
+                "version": None,
+            }
+        )
     return {
         "backend": read_backend(DEFAULT_ENV_FILE_PATH),
         "claude_config_dir": str(claude_plugins.OPENBASE_CLAUDE_JSON_PATH.parent),
@@ -309,25 +333,25 @@ def _claude_plugins_payload(*, changed_plugin: str | None = None) -> dict:
         "changed_plugin": changed_plugin,
         "restart_required": changed_plugin is not None,
         "restart_hint": (
-            "Recreate the dispatcher thread so Claude Code reloads MCP servers."
+            "Restart Openbase services and recreate the dispatcher so Claude "
+            "Code sessions pick up plugin changes."
         ),
     }
 
 
 @api_view(["GET", "PUT"])
 def claude_plugin_settings(request):
-    """Read or toggle Openbase MCP plugins for the managed Claude config."""
+    """Read or toggle Openbase plugins for Claude Code backend sessions."""
     if request.method == "GET":
         return Response(_claude_plugins_payload())
 
     serializer = ClaudePluginToggleSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+    plugin_name = serializer.validated_data["plugin"]
     enabled = serializer.validated_data["enabled"]
-    changed = claude_plugins.set_computer_use_enabled(enabled)
+    changed = _set_claude_plugin_enabled(plugin_name, enabled)
     return Response(
-        _claude_plugins_payload(
-            changed_plugin=serializer.validated_data["plugin"] if changed else None
-        )
+        _claude_plugins_payload(changed_plugin=plugin_name if changed else None)
     )
 
 

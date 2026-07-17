@@ -81,3 +81,55 @@ def test_enable_creates_missing_config_file(monkeypatch, tmp_path: Path) -> None
     assert config_path.is_file()
     mode = config_path.stat().st_mode & 0o777
     assert mode == 0o600
+
+
+def test_chrome_toggle_writes_extra_args_env(monkeypatch, tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENBASE_CODING_BACKEND=claude-code\n", encoding="utf-8")
+    monkeypatch.setattr(claude_plugins, "DEFAULT_ENV_FILE_PATH", env_file)
+
+    assert claude_plugins.chrome_enabled() is False
+    assert claude_plugins.set_chrome_enabled(True) is True
+    assert claude_plugins.chrome_enabled() is True
+    assert claude_plugins.set_chrome_enabled(True) is False
+
+    content = env_file.read_text(encoding="utf-8")
+    assert "OPENBASE_CODING_BACKEND=claude-code" in content
+    assert "SUPER_AGENTS_CLAUDE_EXTRA_ARGS" in content
+    from openbase_coder_cli.env_file import env_file_values
+
+    assert json.loads(
+        env_file_values(env_file)["SUPER_AGENTS_CLAUDE_EXTRA_ARGS"]
+    ) == {"chrome": None}
+
+
+def test_chrome_disable_preserves_other_extra_args(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        'SUPER_AGENTS_CLAUDE_EXTRA_ARGS="{\\"chrome\\": null, \\"max-turns\\": \\"5\\"}"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(claude_plugins, "DEFAULT_ENV_FILE_PATH", env_file)
+
+    assert claude_plugins.chrome_enabled() is True
+    assert claude_plugins.set_chrome_enabled(False) is True
+    assert claude_plugins.chrome_enabled() is False
+
+    from openbase_coder_cli.env_file import env_file_values
+
+    remaining = json.loads(
+        env_file_values(env_file)["SUPER_AGENTS_CLAUDE_EXTRA_ARGS"]
+    )
+    assert remaining == {"max-turns": "5"}
+
+
+def test_chrome_toggle_creates_missing_env_file(monkeypatch, tmp_path: Path) -> None:
+    env_file = tmp_path / "missing" / ".env"
+    env_file.parent.mkdir()
+    monkeypatch.setattr(claude_plugins, "DEFAULT_ENV_FILE_PATH", env_file)
+
+    assert claude_plugins.set_chrome_enabled(False) is False
+    assert claude_plugins.set_chrome_enabled(True) is True
+    assert env_file.is_file()

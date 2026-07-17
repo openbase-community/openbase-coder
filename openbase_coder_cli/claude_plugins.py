@@ -17,12 +17,17 @@ import sys
 from pathlib import Path
 from shutil import which
 
-from openbase_coder_cli.paths import OPENBASE_CLAUDE_JSON_PATH
+from openbase_coder_cli.env_file import env_file_values, upsert_env_file_values
+from openbase_coder_cli.paths import DEFAULT_ENV_FILE_PATH, OPENBASE_CLAUDE_JSON_PATH
 from openbase_coder_cli.runtime import current_runtime_package, stable_package_path
 
 COMPUTER_USE_SERVER_NAME = "openbase-computer-use"
 COMPUTER_USE_MCP_ARGS = ("claude", "computer-use-mcp")
 OPENBASE_CODER_COMMAND = "openbase-coder"
+# Read by super-agents when building Claude Agent SDK sessions; a "chrome"
+# key adds --chrome so sessions get the Claude in Chrome browser tools.
+CHROME_EXTRA_ARGS_ENV_KEY = "SUPER_AGENTS_CLAUDE_EXTRA_ARGS"
+CHROME_FLAG = "chrome"
 
 
 def openbase_coder_command_path() -> Path:
@@ -77,6 +82,43 @@ def set_computer_use_enabled(enabled: bool) -> bool:
         OPENBASE_CLAUDE_JSON_PATH, {**existing, "mcpServers": mcp_servers}
     )
     return True
+
+
+def chrome_enabled() -> bool:
+    return CHROME_FLAG in _extra_args_payload()
+
+
+def set_chrome_enabled(enabled: bool) -> bool:
+    """Add or remove the --chrome flag for Claude backend sessions.
+
+    Edits the SUPER_AGENTS_CLAUDE_EXTRA_ARGS JSON in the Openbase .env file,
+    preserving any other flags. Returns True when the file changed; a service
+    restart is required for sessions to pick it up.
+    """
+    extra_args = _extra_args_payload()
+    if (CHROME_FLAG in extra_args) == enabled:
+        return False
+    if enabled:
+        extra_args[CHROME_FLAG] = None
+    else:
+        del extra_args[CHROME_FLAG]
+
+    upsert_env_file_values(
+        DEFAULT_ENV_FILE_PATH,
+        {CHROME_EXTRA_ARGS_ENV_KEY: json.dumps(extra_args) if extra_args else ""},
+    )
+    return True
+
+
+def _extra_args_payload() -> dict[str, object]:
+    raw = env_file_values(DEFAULT_ENV_FILE_PATH).get(CHROME_EXTRA_ARGS_ENV_KEY, "")
+    if not raw.strip():
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _mcp_servers(payload: dict[str, object]) -> dict[str, object]:
