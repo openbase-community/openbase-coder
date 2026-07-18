@@ -3,10 +3,10 @@ from __future__ import annotations
 import click
 
 from openbase_coder_cli.claude_auth import (
-    claude_auth_status,
     copy_normal_claude_keychain,
     run_claude_login,
     sync_normal_claude_state,
+    verified_claude_auth_status,
 )
 from openbase_coder_cli.paths import OPENBASE_CLAUDE_CONFIG_DIR
 
@@ -19,11 +19,13 @@ def claude() -> None:
 @claude.command()
 def status() -> None:
     """Show Claude Code auth status for Openbase's CLAUDE_CONFIG_DIR."""
-    result = claude_auth_status()
+    result = verified_claude_auth_status()
     click.echo(result.raw_output)
     if not result.logged_in:
         raise click.ClickException(
-            "Openbase Claude Code is not logged in. Run `openbase-coder claude login`."
+            "Openbase Claude Code is not logged in. Run `openbase-coder claude "
+            "sync-state` to re-bridge your normal Claude login, or "
+            "`openbase-coder claude login`."
         )
 
 
@@ -34,10 +36,10 @@ def sync_state() -> None:
     if result.state_updated:
         click.echo("Updated Openbase Claude Code state.")
     click.echo(result.message)
-    status_result = claude_auth_status()
+    status_result = verified_claude_auth_status()
     if not status_result.logged_in and copy_normal_claude_keychain():
         click.echo("Copied normal Claude Code login into Openbase's keychain entry.")
-        status_result = claude_auth_status()
+        status_result = verified_claude_auth_status()
     if status_result.logged_in:
         click.echo("Openbase Claude Code auth is ready.")
         return

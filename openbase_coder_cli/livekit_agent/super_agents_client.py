@@ -4,12 +4,17 @@ import asyncio
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from openbase_coder_cli.claude_auth import (
+    heal_claude_auth,
+    is_claude_auth_failure_text,
+)
 from openbase_coder_cli.codex_session_defaults import (
     DEFAULT_CODEX_APPROVAL_POLICY,
     DEFAULT_CODEX_SANDBOX,
@@ -58,6 +63,40 @@ ORPHANED_RESULT_GRACE_SECONDS = 1.5
 # steered correction, or the user restating it) must not spawn a fresh
 # backend turn that answers with the same gist again.
 SPOKEN_TURN_DUPLICATE_SUPPRESSION_SECONDS = 10.0
+# The Openbase Claude Code credential is a copy of the normal login, so it
+# goes stale whenever the normal config dir rotates the shared refresh token
+# first. Claude Code then answers turns with a "Failed to authenticate ..."
+# string instead of erroring, which would otherwise be spoken on every turn
+# until someone runs `openbase-coder claude sync-state` by hand.
+CLAUDE_AUTH_HEAL_DEBOUNCE_SECONDS = 300.0
+_last_claude_auth_heal_monotonic: float | None = None
+
+
+def _maybe_schedule_claude_auth_heal(speech_text: str) -> None:
+    """Re-bridge Claude auth in the background when a turn spoke a login failure."""
+    global _last_claude_auth_heal_monotonic
+    if not is_claude_auth_failure_text(speech_text):
+        return
+    now = time.monotonic()
+    last = _last_claude_auth_heal_monotonic
+    if last is not None and now - last < CLAUDE_AUTH_HEAL_DEBOUNCE_SECONDS:
+        return
+    _last_claude_auth_heal_monotonic = now
+
+    def _heal() -> None:
+        try:
+            result = heal_claude_auth()
+        except Exception:
+            logger.exception("Claude auth auto-heal crashed")
+            return
+        log = logger.info if result.state_updated else logger.warning
+        log(
+            "Claude auth failure surfaced in a spoken answer; auto-heal %s: %s",
+            "succeeded" if result.state_updated else "failed",
+            result.message,
+        )
+
+    threading.Thread(target=_heal, name="claude-auth-heal", daemon=True).start()
 
 
 def _model_name_for_role(
@@ -304,6 +343,7 @@ class SuperAgentsLiveKitClient:
         try:
             result = await self._wait_for_turn(thread_id, turn_id)
             speech_text = _speech_text_from_progress(result)
+            _maybe_schedule_claude_auth_heal(speech_text)
             completed_turn = {
                 "id": turn_id,
                 "status": result.get("status")
@@ -375,6 +415,7 @@ class SuperAgentsLiveKitClient:
             and handler is not None
         ):
             speech_text = _speech_text_from_progress(wait_task.result())
+            _maybe_schedule_claude_auth_heal(speech_text)
             if speech_text:
                 logger.info(
                     "%s stage=completed_turn_handoff turn_id=%s speech_chars=%d",
@@ -884,6 +925,7 @@ class SuperAgentsLiveKitClient:
         if not turn_id or handler is None or turn_id in self._claimed_speech_turns:
             return
         speech_text = _speech_text_from_progress(wait_task.result())
+        _maybe_schedule_claude_auth_heal(speech_text)
         if not speech_text:
             return
         logger.info(

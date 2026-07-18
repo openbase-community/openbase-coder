@@ -1092,3 +1092,51 @@ def test_speech_text_from_progress_ignores_user_message_text() -> None:
     }
 
     assert _speech_text_from_progress(progress) == ""
+
+
+def test_claude_auth_heal_scheduled_on_auth_failure_speech(monkeypatch) -> None:
+    healed: list[str] = []
+    monkeypatch.setattr(
+        super_agents_client_module,
+        "heal_claude_auth",
+        lambda: healed.append("heal")
+        or SimpleNamespace(state_updated=True, message="ok"),
+    )
+
+    class InlineThread:
+        def __init__(self, *, target, name=None, daemon=None) -> None:
+            self._target = target
+
+        def start(self) -> None:
+            self._target()
+
+    monkeypatch.setattr(super_agents_client_module.threading, "Thread", InlineThread)
+    monkeypatch.setattr(
+        super_agents_client_module, "_last_claude_auth_heal_monotonic", None
+    )
+
+    super_agents_client_module._maybe_schedule_claude_auth_heal(
+        "Failed to authenticate: OAuth session expired and could not be refreshed"
+    )
+    assert healed == ["heal"]
+
+    # Debounced: an immediate repeat must not trigger a second heal.
+    super_agents_client_module._maybe_schedule_claude_auth_heal(
+        "Failed to authenticate: OAuth session expired and could not be refreshed"
+    )
+    assert healed == ["heal"]
+
+
+def test_claude_auth_heal_not_scheduled_for_normal_speech(monkeypatch) -> None:
+    def _no_heal():
+        raise AssertionError("heal must not run for normal speech")
+
+    monkeypatch.setattr(super_agents_client_module, "heal_claude_auth", _no_heal)
+    monkeypatch.setattr(
+        super_agents_client_module, "_last_claude_auth_heal_monotonic", None
+    )
+
+    super_agents_client_module._maybe_schedule_claude_auth_heal(
+        "The build passed and I pushed the fix."
+    )
+    super_agents_client_module._maybe_schedule_claude_auth_heal("")
