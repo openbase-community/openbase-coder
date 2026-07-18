@@ -168,8 +168,8 @@ def provision(
         json_progress=False,
     )
 
-    # 5. Install the idle heartbeat (not a default service; cloud-only).
-    _install_heartbeat_service()
+    # 5. Install cloud-only boot services.
+    _install_cloud_workspace_services()
 
     # 6. Optional code sync (bundles may omit the field entirely).
     if bundle.get("code_sync") is True:
@@ -178,11 +178,13 @@ def provision(
     click.echo(f"Provisioned {kind} workspace against {web_backend_url}.")
 
 
-def _install_heartbeat_service() -> None:
+def _install_cloud_workspace_services() -> None:
     from openbase_coder_cli.services.launchd import install_service
     from openbase_coder_cli.services.registry import find_service, require_installation
 
-    install_service(require_installation(), find_service("openbase-cloud-heartbeat"))
+    config = require_installation()
+    install_service(config, find_service("openbase-cloud-auth-rehydrate"))
+    install_service(config, find_service("openbase-cloud-heartbeat"))
 
 
 SYNCTHING_RELEASES_API = (

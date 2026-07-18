@@ -402,7 +402,7 @@ def generate_plist(svc: ServiceDefinition, config: InstallationConfig) -> Path:
             <key>RunAtLoad</key>
             <true/>
             <key>KeepAlive</key>
-            <true/>
+            <{str(svc.keep_alive).lower()}/>
             <key>ThrottleInterval</key>
             <integer>5</integer>
             <key>StandardOutPath</key>

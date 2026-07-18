@@ -17,6 +17,9 @@ class ServiceDefinition:
     cleanup_command_substrings: tuple[str, ...] = ()
     # Coding backends this service applies to; None means all backends.
     backends: tuple[str, ...] | None = None
+    service_type: str = "simple"
+    restart_policy: str | None = "always"
+    keep_alive: bool = True
 
     def supports_backend(self, coding_backend: str) -> bool:
         return self.backends is None or coding_backend in self.backends
@@ -267,10 +270,21 @@ SERVICES: list[ServiceDefinition] = [
         cleanup_command_substrings=("syncthing",),
     ),
     ServiceDefinition(
+        name="openbase-cloud-auth-rehydrate",
+        description="Openbase Cloud workspace auth rehydrate",
+        command_template="exec {openbase_coder} cloud rehydrate-auth",
+        workdir_template="{data_dir}",
+        install_by_default=False,
+        service_type="oneshot",
+        restart_policy="on-failure",
+        keep_alive=False,
+    ),
+    ServiceDefinition(
         name="openbase-cloud-heartbeat",
         description="Openbase Cloud idle heartbeat",
         command_template=(
             'OPENBASE_CLOUD_HEARTBEAT_INTERVAL="${{OPENBASE_CLOUD_HEARTBEAT_INTERVAL:-60}}"\n'
+            '{openbase_coder} cloud rehydrate-auth\n'
             'exec {openbase_coder} cloud heartbeat --interval "$OPENBASE_CLOUD_HEARTBEAT_INTERVAL"'
         ),
         workdir_template="{data_dir}",

@@ -36,6 +36,32 @@ def test_generate_unit_writes_systemd_user_unit(tmp_path, monkeypatch):
     assert "WantedBy=default.target" in text
 
 
+def test_generate_unit_supports_boot_oneshot(tmp_path, monkeypatch):
+    monkeypatch.setattr(launchd, "LAUNCHD_WRAPPER_DIR", tmp_path / "launchd")
+    monkeypatch.setattr(launchd, "DEFAULT_LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(systemd, "SYSTEMD_UNIT_DIR", tmp_path / "systemd")
+    monkeypatch.setattr(systemd, "OPENBASE_BASE_DIR", tmp_path / "openbase")
+    config = InstallationConfig(
+        workspace_path=str(tmp_path / "workspace"),
+        env_file=str(tmp_path / ".env"),
+    )
+    service = ServiceDefinition(
+        name="boot-once",
+        description="Boot once",
+        command_template="true",
+        workdir_template="{workspace}",
+        service_type="oneshot",
+        restart_policy="on-failure",
+        keep_alive=False,
+    )
+
+    unit = systemd.generate_unit(service, config)
+
+    text = unit.read_text()
+    assert "Type=oneshot" in text
+    assert "Restart=on-failure" in text
+
+
 def test_systemd_status_parses_show_output(monkeypatch):
     def fake_systemctl(*args, check=False):
         return subprocess.CompletedProcess(

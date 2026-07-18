@@ -84,11 +84,10 @@ def generate_unit(svc: ServiceDefinition, config: InstallationConfig) -> Path:
         Description={svc.description}
 
         [Service]
-        Type=simple
+        Type={svc.service_type}
         ExecStart=/bin/bash {wrapper}
         WorkingDirectory={workdir}
-        Restart=always
-        RestartSec=5
+        {_restart_lines(svc)}
         StandardOutput=append:{log_path}
         StandardError=append:{log_path}
 
@@ -97,6 +96,12 @@ def generate_unit(svc: ServiceDefinition, config: InstallationConfig) -> Path:
     """)
     )
     return unit
+
+
+def _restart_lines(svc: ServiceDefinition) -> str:
+    if not svc.restart_policy:
+        return ""
+    return f"Restart={svc.restart_policy}\n        RestartSec=5"
 
 
 def remove_unit(svc: ServiceDefinition) -> None:

@@ -1,10 +1,10 @@
 """Openbase Cloud workspace integration commands.
 
-Currently just the idle heartbeat: a workspace launched by openbase-cloud reports
-whether agent runs (Super Agents / Codex / Claude Code threads) made recent
-progress during the beat window, so the cloud API can defer idle auto-stop.
-Desktop (DCV) connections and console browsing intentionally do not count as
-activity: a workspace with no run activity is stopped for later.
+Includes the idle heartbeat and EC2 workspace auth repair. A workspace launched
+by openbase-cloud reports whether agent runs made recent progress during the
+beat window, so the cloud API can defer idle auto-stop. On every EC2 boot, the
+workspace also rehydrates missing/stale Cloud auth by proving its instance
+identity to the Cloud API.
 """
 
 from __future__ import annotations
@@ -16,14 +16,24 @@ import httpx
 
 from openbase_coder_cli.cli.backend import read_env_values
 from openbase_coder_cli.cli.local_server import local_server_url
+from openbase_coder_cli.config.machine_token_manager import MachineTokenManager
 from openbase_coder_cli.config.token_manager import (
     DEFAULT_WEB_BACKEND_URL,
+    AuthLoginRequiredError,
+    AuthTransientError,
     CloudAccessTokenAuth,
     TokenManager,
 )
+from openbase_coder_cli.env_file import upsert_env_file_values
 from openbase_coder_cli.paths import DEFAULT_ENV_FILE_PATH
+from openbase_coder_cli.services.cloud_registration import register_and_report
+from openbase_coder_cli.services.ec2_identity import (
+    EC2IdentityError,
+    build_instance_rehydrate_payload,
+)
 
 HEARTBEAT_PATH = "/api/openbase/devspaces/heartbeat/"
+REHYDRATE_PATH = "/api/openbase/devspaces/instance-auth/rehydrate/"
 THREAD_ACTIVITY_PATH = "/api/threads/activity/"
 
 # Runs shorter than one heartbeat interval would be invisible to a single
@@ -114,3 +124,81 @@ def heartbeat(interval: int) -> None:
                 break
             time.sleep(min(RUN_SAMPLE_INTERVAL_SECONDS, remaining))
             active = _agent_runs_active(local_url, manager) or active
+
+
+@cloud.command("rehydrate-auth")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Request fresh Cloud workspace auth even if the current token is valid.",
+)
+def rehydrate_auth(force: bool) -> None:
+    """Repair Cloud auth on an EC2 workspace boot/resume."""
+    url = _web_backend_url()
+    manager = TokenManager(web_backend_url=url)
+    if not force and _stored_auth_is_valid(manager):
+        click.echo("Cloud auth is already valid.")
+        return
+
+    try:
+        request_payload = build_instance_rehydrate_payload()
+    except EC2IdentityError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        response = httpx.post(
+            f"{url}{REHYDRATE_PATH}",
+            json=request_payload,
+            timeout=30,
+        )
+    except httpx.HTTPError as exc:
+        raise click.ClickException(
+            f"Cloud auth rehydrate request failed: {exc}"
+        ) from exc
+    if response.status_code >= 400:
+        raise click.ClickException(
+            f"Cloud auth rehydrate was rejected with HTTP {response.status_code}: "
+            f"{response.text[:300]}"
+        )
+    payload = response.json()
+    access_token = str(payload.get("access_token") or "")
+    refresh_token = str(payload.get("refresh_token") or "")
+    if not access_token or not refresh_token:
+        raise click.ClickException("Cloud auth rehydrate response was missing tokens.")
+    web_backend_url = str(payload.get("web_backend_url") or url).rstrip("/")
+    expires_at = payload.get("access_expires_at")
+    expires_in = max(int(expires_at - time.time()), 60) if expires_at else 300
+
+    if web_backend_url != url:
+        url = web_backend_url
+        manager = TokenManager(web_backend_url=url)
+    DEFAULT_ENV_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    upsert_env_file_values(
+        DEFAULT_ENV_FILE_PATH,
+        {"OPENBASE_CODER_CLI_WEB_BACKEND_URL": url},
+    )
+    manager.store_tokens(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=expires_in,
+    )
+    MachineTokenManager(url, manager).get_machine_token(rotate=True)
+    report = register_and_report()
+    if not report.ok and report.supported:
+        click.echo(
+            f"Warning: Cloud auth was repaired, but device registration failed: {report.error}",
+            err=True,
+        )
+    click.echo("Cloud auth rehydrated.")
+
+
+def _stored_auth_is_valid(manager: TokenManager) -> bool:
+    try:
+        manager.get_access_token()
+    except AuthLoginRequiredError:
+        return False
+    except AuthTransientError as exc:
+        raise click.ClickException(
+            f"Could not verify stored Cloud auth: {exc}"
+        ) from exc
+    return True

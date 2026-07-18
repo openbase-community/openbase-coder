@@ -5,10 +5,14 @@ import importlib
 import httpx
 from click.testing import CliRunner
 
+from openbase_coder_cli.config.token_manager import AuthLoginRequiredError
+
 cloud_cli = importlib.import_module("openbase_coder_cli.cli.cloud")
 
 
 class FakeTokenManager:
+    stored_tokens = []
+
     def __init__(self, web_backend_url: str | None = None):
         self.web_backend_url = web_backend_url
 
@@ -17,6 +21,14 @@ class FakeTokenManager:
 
     def get_access_token(self) -> str:
         return "jwt.token.value"
+
+    def store_tokens(self, **kwargs) -> None:
+        self.stored_tokens.append((self.web_backend_url, kwargs))
+
+
+class LoginRequiredTokenManager(FakeTokenManager):
+    def get_access_token(self) -> str:
+        raise AuthLoginRequiredError("login required")
 
 
 def _patch_activity_response(monkeypatch, handler) -> None:
@@ -106,3 +118,65 @@ def test_single_heartbeat_reports_inactive_without_runs(monkeypatch):
 
     assert result.exit_code == 0
     assert posts == [{"active": False}]
+
+
+def test_rehydrate_auth_stores_tokens_and_registers(monkeypatch, tmp_path):
+    posts = []
+    FakeTokenManager.stored_tokens = []
+
+    def fake_post(url, **kwargs):
+        posts.append((url, kwargs["json"]))
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "new-access",
+                "refresh_token": "new-refresh",
+                "web_backend_url": "https://cloud.test",
+            },
+        )
+
+    class FakeMachineTokenManager:
+        def __init__(self, url, manager):
+            self.url = url
+            self.manager = manager
+
+        def get_machine_token(self, *, rotate=False):
+            assert rotate is True
+            return "obmt_token"
+
+    monkeypatch.setattr(cloud_cli, "TokenManager", LoginRequiredTokenManager)
+    monkeypatch.setattr(cloud_cli, "_web_backend_url", lambda: "https://cloud.test")
+    monkeypatch.setattr(
+        cloud_cli,
+        "build_instance_rehydrate_payload",
+        lambda: {"workspace_id": "abc123"},
+    )
+    monkeypatch.setattr(cloud_cli.httpx, "post", fake_post)
+    monkeypatch.setattr(cloud_cli, "MachineTokenManager", FakeMachineTokenManager)
+    monkeypatch.setattr(
+        cloud_cli,
+        "register_and_report",
+        lambda: type("Result", (), {"ok": True, "supported": True, "error": None})(),
+    )
+    monkeypatch.setattr(cloud_cli, "DEFAULT_ENV_FILE_PATH", tmp_path / ".env")
+
+    result = CliRunner().invoke(cloud_cli.cloud, ["rehydrate-auth"])
+
+    assert result.exit_code == 0
+    assert posts == [
+        (
+            "https://cloud.test/api/openbase/devspaces/instance-auth/rehydrate/",
+            {"workspace_id": "abc123"},
+        )
+    ]
+    assert FakeTokenManager.stored_tokens == [
+        (
+            "https://cloud.test",
+            {
+                "access_token": "new-access",
+                "refresh_token": "new-refresh",
+                "expires_in": 300,
+            },
+        )
+    ]
+    assert "Cloud auth rehydrated." in result.output
