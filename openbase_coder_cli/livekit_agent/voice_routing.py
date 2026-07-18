@@ -149,6 +149,12 @@ class LiveKitVoiceRouter:
     async def close(self) -> None:
         for client in self._target_clients.values():
             await client.aclose()
+        # The dispatcher client must close too: the claude_code backend keeps
+        # a Claude CLI subprocess attached to the shared dispatcher session,
+        # and leaving it connected past the room lets it flush buffered
+        # transcript entries after another worker's turns — the next resume
+        # then forks the dispatcher conversation from a stale leaf.
+        await self._dispatcher_client.aclose()
 
 
 async def _transfer_voice_route(

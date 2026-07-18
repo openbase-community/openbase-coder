@@ -1056,6 +1056,26 @@ def test_proactive_steer_dedup_matches_formatted_twin_transcripts():
 
 
 @pytest.mark.asyncio
+async def test_voice_router_close_closes_dispatcher_client():
+    # The dispatcher client holds the claude_code backend's CLI subprocess;
+    # leaving it connected past the room corrupts the shared dispatcher
+    # session's resume leaf once another worker takes the next call.
+    class FakeDispatcherClient:
+        def __init__(self):
+            self.closed = False
+
+        async def aclose(self):
+            self.closed = True
+
+    dispatcher = FakeDispatcherClient()
+    router = LiveKitVoiceRouter(dispatcher)
+
+    await router.close()
+
+    assert dispatcher.closed is True
+
+
+@pytest.mark.asyncio
 async def test_voice_router_transfers_to_prepared_target(monkeypatch, tmp_path):
     dispatcher = PreparedClient()
     prepared = []
