@@ -125,10 +125,14 @@ def _backend_note(backend: str) -> str | None:
     return None
 
 
-def _claude_auth_payload(*, sync: bool = False) -> dict:
+def _claude_auth_payload(
+    *, sync: bool = False, sync_if_logged_out: bool = False
+) -> dict:
     state_updated = False
     keychain_copied = False
     message = None
+    if sync_if_logged_out and not sync:
+        sync = not claude_auth_status().logged_in
     if sync:
         sync_result = sync_normal_claude_state()
         state_updated = sync_result.state_updated
@@ -150,7 +154,7 @@ def _claude_auth_payload(*, sync: bool = False) -> dict:
     }
 
 
-def _backend_payload(*, changed: bool = False) -> dict:
+def _backend_payload(*, changed: bool = False, sync_claude_auth: bool = False) -> dict:
     configured_backend = read_backend(DEFAULT_ENV_FILE_PATH)
     payload = {
         "backend": configured_backend,
@@ -173,7 +177,11 @@ def _backend_payload(*, changed: bool = False) -> dict:
         "restart_hint": _restart_hint(configured_backend),
     }
     if configured_backend == CLAUDE_CODE_BACKEND:
-        payload["claude_auth"] = _claude_auth_payload()
+        # Saving the backend from settings should repair a dead bridged login
+        # (stranded refresh token) instead of just reporting it.
+        payload["claude_auth"] = _claude_auth_payload(
+            sync_if_logged_out=sync_claude_auth
+        )
     return payload
 
 
@@ -283,7 +291,12 @@ def coding_backend_settings(request):
             {"error": str(exc)},
             status=status.HTTP_400_BAD_REQUEST,
         )
-    return Response(_backend_payload(changed=previous_backend != next_backend))
+    return Response(
+        _backend_payload(
+            changed=previous_backend != next_backend,
+            sync_claude_auth=True,
+        )
+    )
 
 
 @api_view(["GET", "PUT"])

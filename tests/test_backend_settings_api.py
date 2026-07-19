@@ -546,3 +546,48 @@ def test_urlconf_loads_with_all_settings_views() -> None:
 
     assert reverse("coding-backend-claude-plugin-settings")
     assert reverse("coding-backend-codex-plugin-settings")
+
+
+def test_coding_backend_settings_heals_dead_claude_login_on_save(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr(backend_settings, "DEFAULT_ENV_FILE_PATH", env_file)
+    statuses = iter(
+        [
+            SimpleNamespace(
+                logged_in=False, raw_output='{"loggedIn": false}', returncode=1
+            ),
+            SimpleNamespace(
+                logged_in=True, raw_output='{"loggedIn": true}', returncode=0
+            ),
+        ]
+    )
+    monkeypatch.setattr(backend_settings, "claude_auth_status", lambda: next(statuses))
+    synced: list[str] = []
+    monkeypatch.setattr(
+        backend_settings,
+        "sync_normal_claude_state",
+        lambda: synced.append("state")
+        or SimpleNamespace(state_updated=True, message="synced"),
+    )
+    monkeypatch.setattr(
+        backend_settings,
+        "copy_normal_claude_keychain",
+        lambda: synced.append("keychain") or True,
+    )
+
+    response = backend_settings.coding_backend_settings(
+        _authenticated_request(
+            "PUT",
+            "/api/settings/coding-backend/",
+            {"backend": "claude_code"},
+        )
+    )
+
+    assert response.status_code == 200
+    assert synced == ["state", "keychain"]
+    assert response.data["claude_auth"]["logged_in"] is True
+    assert response.data["claude_auth"]["keychain_copied"] is True
+    assert response.data["claude_auth"]["state_updated"] is True

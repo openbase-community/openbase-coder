@@ -87,6 +87,7 @@ def test_is_claude_auth_failure_text_matches_turn_failures() -> None:
     assert claude_auth.is_claude_auth_failure_text(
         "Failed to authenticate: OAuth session expired and could not be refreshed"
     )
+    assert claude_auth.is_claude_auth_failure_text("Not logged in · Please run /login")
     assert not claude_auth.is_claude_auth_failure_text("")
     assert not claude_auth.is_claude_auth_failure_text(None)
     assert not claude_auth.is_claude_auth_failure_text(

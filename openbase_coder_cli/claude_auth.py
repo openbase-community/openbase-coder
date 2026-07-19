@@ -18,10 +18,13 @@ from openbase_coder_cli.paths import (
 )
 
 NORMAL_CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
-# Claude Code prints turn-level auth failures as result text (exit code 0),
-# e.g. "Failed to authenticate. API Error: 401 Invalid bearer token" or
-# "Failed to authenticate: OAuth session expired and could not be refreshed".
-CLAUDE_AUTH_FAILURE_PREFIX = "Failed to authenticate"
+# Claude Code prints turn-level auth failures as result text (exit code 0).
+# An expired-but-present login answers "Failed to authenticate. API Error:
+# 401 Invalid bearer token" or "Failed to authenticate: OAuth session expired
+# and could not be refreshed"; a wiped credential (Claude Code clears the
+# keychain entry after a failed refresh) answers "Not logged in · Please run
+# /login".
+CLAUDE_AUTH_FAILURE_PREFIXES = ("Failed to authenticate", "Not logged in")
 CLAUDE_AUTH_PROBE_PROMPT = "Reply with the single word ok."
 CLAUDE_AUTH_PROBE_TIMEOUT_SECONDS = 90
 
@@ -186,7 +189,7 @@ def claude_auth_status(
 
 def is_claude_auth_failure_text(text: str | None) -> bool:
     """Whether turn output is Claude Code's spoken-back auth failure."""
-    return bool(text) and text.strip().startswith(CLAUDE_AUTH_FAILURE_PREFIX)
+    return bool(text) and text.strip().startswith(CLAUDE_AUTH_FAILURE_PREFIXES)
 
 
 def read_openbase_claude_credential_expiry(

@@ -11,9 +11,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from openbase_coder_cli.backend_config import CLAUDE_CODE_BACKEND
 from openbase_coder_cli.claude_auth import (
     heal_claude_auth,
     is_claude_auth_failure_text,
+    verified_claude_auth_status,
 )
 from openbase_coder_cli.codex_session_defaults import (
     DEFAULT_CODEX_APPROVAL_POLICY,
@@ -1060,7 +1062,38 @@ class SuperAgentsLiveKitClient:
                     self._thread_loaded = False
             return await self._start_thread()
 
+    async def _ensure_claude_auth_ready(self) -> None:
+        """Heal a dead Openbase Claude login before the thread takes turns.
+
+        A stranded refresh token can leave the scoped config dir fully logged
+        out (Claude Code wipes the credential after a failed refresh), and in
+        that state every turn answers "Not logged in · Please run /login".
+        The spoken-answer heal only fires after a failed turn, so verify and
+        re-bridge up front instead of letting the first turn fail.
+        """
+        if getattr(self._backend_client, "backend", None) != CLAUDE_CODE_BACKEND:
+            return
+        try:
+            status = await asyncio.to_thread(verified_claude_auth_status)
+            if status.logged_in:
+                return
+            logger.warning(
+                "Openbase Claude Code login unavailable before thread start; "
+                "attempting auto-heal: %s",
+                status.raw_output,
+            )
+            result = await asyncio.to_thread(heal_claude_auth)
+            log = logger.info if result.state_updated else logger.warning
+            log(
+                "Claude auth pre-flight heal %s: %s",
+                "succeeded" if result.state_updated else "failed",
+                result.message,
+            )
+        except Exception:
+            logger.exception("Claude auth pre-flight heal crashed")
+
     async def _start_thread(self) -> str:
+        await self._ensure_claude_auth_ready()
         params: dict[str, Any] = {
             "name": self._super_agent_name or DEFAULT_DISPATCHER_LABEL,
             "label": self._super_agent_name or DEFAULT_DISPATCHER_LABEL,
@@ -1092,6 +1125,7 @@ class SuperAgentsLiveKitClient:
         return thread_id
 
     async def _resume_thread(self, thread_id: str) -> str:
+        await self._ensure_claude_auth_ready()
         if self._backend_is_codex() and hasattr(self._backend_client, "resume_thread"):
             resumed = await self._backend_client.resume_thread(
                 thread_id,

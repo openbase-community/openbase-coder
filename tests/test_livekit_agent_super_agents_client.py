@@ -1140,3 +1140,84 @@ def test_claude_auth_heal_not_scheduled_for_normal_speech(monkeypatch) -> None:
         "The build passed and I pushed the fix."
     )
     super_agents_client_module._maybe_schedule_claude_auth_heal("")
+
+
+@pytest.mark.asyncio
+async def test_preflight_heal_runs_for_logged_out_claude_backend(
+    monkeypatch, tmp_path: Path
+) -> None:
+    backend = FakeSuperAgentsBackend()
+    backend.backend = "claude_code"
+    calls: list[str] = []
+    monkeypatch.setattr(
+        super_agents_client_module,
+        "verified_claude_auth_status",
+        lambda: calls.append("status")
+        or SimpleNamespace(
+            logged_in=False,
+            raw_output="Not logged in · Please run /login",
+            returncode=0,
+        ),
+    )
+    monkeypatch.setattr(
+        super_agents_client_module,
+        "heal_claude_auth",
+        lambda: calls.append("heal")
+        or SimpleNamespace(state_updated=True, message="ok"),
+    )
+
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(tmp_path / "state.json"),
+        backend_client=backend,
+    )
+    thread_id = await client.prepare()
+
+    assert thread_id == "dispatcher-thread"
+    assert calls == ["status", "heal"]
+
+
+@pytest.mark.asyncio
+async def test_preflight_heal_skipped_when_claude_logged_in(
+    monkeypatch, tmp_path: Path
+) -> None:
+    backend = FakeSuperAgentsBackend()
+    backend.backend = "claude_code"
+
+    def _no_heal():
+        raise AssertionError("heal must not run for a healthy login")
+
+    monkeypatch.setattr(
+        super_agents_client_module,
+        "verified_claude_auth_status",
+        lambda: SimpleNamespace(
+            logged_in=True, raw_output='{"loggedIn": true}', returncode=0
+        ),
+    )
+    monkeypatch.setattr(super_agents_client_module, "heal_claude_auth", _no_heal)
+
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(tmp_path / "state.json"),
+        backend_client=backend,
+    )
+    await client.prepare()
+
+
+@pytest.mark.asyncio
+async def test_preflight_heal_skipped_for_non_claude_backends(
+    monkeypatch, tmp_path: Path
+) -> None:
+    def _no_status():
+        raise AssertionError("auth status must not run for non-claude backends")
+
+    monkeypatch.setattr(
+        super_agents_client_module, "verified_claude_auth_status", _no_status
+    )
+
+    client = SuperAgentsLiveKitClient(
+        cwd="/tmp/project",
+        state_path=str(tmp_path / "state.json"),
+        backend_client=FakeSuperAgentsBackend(),
+    )
+    await client.prepare()
