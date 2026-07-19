@@ -11,6 +11,7 @@ fallback and still trips the version-skew health warning when it diverges.
 
 from __future__ import annotations
 
+import os
 import platform
 import re
 import shutil
@@ -88,8 +89,15 @@ def _install_binary(staged: Path, pin: str) -> Path:
         )
     installed = installed_livekit_server_path()
     installed.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(staged, installed)
-    installed.chmod(0o755)
+    # Never overwrite the installed binary in place: the service may be
+    # running it, and rewriting a signed executable's pages invalidates the
+    # kernel's cached code signature — later execs die with SIGKILL (Code
+    # Signature Invalid). Stage next to the target and rename into place so
+    # the new binary gets a fresh vnode.
+    staging = installed.with_name(f"{installed.name}.new.{os.getpid()}")
+    shutil.copy2(staged, staging)
+    staging.chmod(0o755)
+    staging.replace(installed)
     click.echo(f"Installed pinned livekit-server {pin} at {installed}")
     return installed
 

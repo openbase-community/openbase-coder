@@ -207,7 +207,7 @@ from openbase_coder_cli.livekit_agent.voices import (  # noqa: F401
     stable_super_agent_voice_id,
 )
 from openbase_coder_cli.livekit_agent.worker_watchdog import (
-    install_worker_init_failure_watchdog,
+    install_worker_failure_watchdog,
 )
 from openbase_coder_cli.stt_providers import (
     ASSEMBLYAI_STT_PROVIDER_ID,
@@ -881,7 +881,7 @@ async def livekit_agent(ctx: JobContext):
 
 
 def main():
-    install_worker_init_failure_watchdog()
+    install_worker_failure_watchdog()
     install_proc_pool_liveness_patch()
     install_assemblyai_idle_noise_filter()
     cli.run_app(server)

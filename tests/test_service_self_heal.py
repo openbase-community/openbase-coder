@@ -20,7 +20,7 @@ from openbase_coder_cli.livekit_agent.stt_log_noise import (
 from openbase_coder_cli.livekit_agent.worker_watchdog import (
     WORKER_INIT_FAILURE_THRESHOLD,
     WORKER_INIT_FAILURE_WINDOW_SECONDS,
-    WorkerInitFailureWatchdog,
+    WorkerFailureWatchdog,
 )
 
 
@@ -39,11 +39,11 @@ def _log_record(message: str, level: int = logging.ERROR) -> logging.LogRecord:
 def test_worker_watchdog_exits_after_repeated_init_failures(monkeypatch):
     exits: list[bool] = []
     monkeypatch.setattr(
-        WorkerInitFailureWatchdog,
+        WorkerFailureWatchdog,
         "_initiate_exit",
         lambda self: exits.append(True),
     )
-    watchdog = WorkerInitFailureWatchdog()
+    watchdog = WorkerFailureWatchdog()
 
     for _ in range(WORKER_INIT_FAILURE_THRESHOLD - 1):
         watchdog.emit(_log_record("error initializing process"))
@@ -60,13 +60,13 @@ def test_worker_watchdog_exits_after_repeated_init_failures(monkeypatch):
 def test_worker_watchdog_ignores_other_errors_and_old_failures(monkeypatch):
     exits: list[bool] = []
     monkeypatch.setattr(
-        WorkerInitFailureWatchdog,
+        WorkerFailureWatchdog,
         "_initiate_exit",
         lambda self: exits.append(True),
     )
     clock = {"now": 1000.0}
     monkeypatch.setattr(watchdog_module.time, "monotonic", lambda: clock["now"])
-    watchdog = WorkerInitFailureWatchdog()
+    watchdog = WorkerFailureWatchdog()
 
     watchdog.emit(_log_record("process exited with non-zero exit code 1"))
     watchdog.emit(_log_record("some unrelated error"))
@@ -173,3 +173,20 @@ def test_idle_noise_filter_keeps_first_warning_and_drops_escalations():
     )
     # Unrelated plugin warnings always pass.
     assert noise_filter.filter(_assemblyai_record("websocket reconnecting"))
+
+
+def test_worker_watchdog_exits_immediately_when_connection_task_dies(monkeypatch):
+    exits: list[bool] = []
+    monkeypatch.setattr(
+        WorkerFailureWatchdog,
+        "_initiate_exit",
+        lambda self: exits.append(True),
+    )
+    watchdog = WorkerFailureWatchdog()
+
+    watchdog.emit(_log_record("Error in _connection_task"))
+    assert exits == [True]
+
+    # The exit fires once even if the message repeats.
+    watchdog.emit(_log_record("Error in _connection_task"))
+    assert exits == [True]

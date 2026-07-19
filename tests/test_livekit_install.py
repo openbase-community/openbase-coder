@@ -51,3 +51,29 @@ def test_install_refuses_version_mismatch(tmp_path, monkeypatch):
     # The mismatch is caught inside ensure() and reported as a fallback.
     assert livekit_install.ensure_pinned_livekit_server() is None
     assert not (tmp_path / "bin" / "livekit-server").exists()
+
+
+def test_install_replaces_binary_with_fresh_inode(tmp_path, monkeypatch):
+    """In-place overwrites of a running signed binary corrupt the kernel's
+    cached code signature (execs then die with SIGKILL); the installer must
+    rename a freshly staged copy into place instead."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    installed = bin_dir / "livekit-server"
+    installed.write_text("old\n", encoding="utf-8")
+    old_inode = installed.stat().st_ino
+    monkeypatch.setattr(livekit_install, "OPENBASE_BIN_DIR", bin_dir)
+    staged = tmp_path / "staged-livekit-server"
+    staged.write_text("new\n", encoding="utf-8")
+    monkeypatch.setattr(
+        livekit_install,
+        "_binary_version",
+        lambda _binary: LIVEKIT_SERVER_PINNED_VERSION,
+    )
+
+    result = livekit_install._install_binary(staged, LIVEKIT_SERVER_PINNED_VERSION)
+
+    assert result == installed
+    assert installed.read_text(encoding="utf-8") == "new\n"
+    assert installed.stat().st_ino != old_inode
+    assert list(bin_dir.iterdir()) == [installed]
