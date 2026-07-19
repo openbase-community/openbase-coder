@@ -336,6 +336,11 @@ def _session_from_thread(
             thread.get("isLikelyStale") or thread.get("is_likely_stale")
         ),
         status_warning=status_warning,
+        backend_session_id=_optional_thread_string(
+            thread,
+            "backendSessionId",
+            "backend_session_id",
+        ),
         session_type="codex",
         created_at=_timestamp_to_datetime(thread.get("createdAt")),
         updated_at=_timestamp_to_datetime(
