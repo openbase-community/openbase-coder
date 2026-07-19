@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import uuid
 from dataclasses import asdict, dataclass
 from typing import Literal
@@ -79,6 +80,7 @@ def stt_provider_options_payload() -> list[dict[str, str | bool | None]]:
 
 def local_mlx_whisper_readiness() -> STTDownloadStatus:
     try:
+        importlib.import_module("mlx_whisper")
         from huggingface_hub import snapshot_download
     except ImportError:
         return STTDownloadStatus(

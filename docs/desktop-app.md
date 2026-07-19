@@ -23,8 +23,12 @@ app. On first run it shows a guided setup flow:
    automatically), and Tailscale. You can download Tailscale from here if it
    is missing.
 3. **Setup backend** — choose a coding backend (Codex, Claude Code, or
-   Openbase Cloud) and an audio provider (Openbase Cloud, Cartesia, or
-   Local), then watch the CLI setup command stream its output live.
+   Openbase Cloud) and an audio provider. **Free Beta Access** uses local
+   MLX Whisper and Kokoro without an audio subscription or provider keys;
+   Openbase Cloud and provider-key audio remain available. Then watch the CLI
+   setup command stream its output live. Local setup downloads its models and
+   can take longer on the first install and first call. The selected coding
+   backend still requires its own Codex, Claude Code, or Openbase Cloud access.
 4. **Voice configuration** — if you chose Cartesia, enter AssemblyAI and
    Cartesia API keys; they are saved to `~/.openbase/.env`.
 5. **Sign in** — a browser opens for Openbase Cloud OAuth; completion is

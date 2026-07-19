@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import threading
 import uuid
 from dataclasses import asdict, dataclass
@@ -231,6 +232,8 @@ class KokoroTTSProvider(BaseTTSProvider):
         files = _kokoro_required_files()
         cached = 0
         try:
+            importlib.import_module("kokoro")
+            importlib.import_module("en_core_web_sm")
             from huggingface_hub import hf_hub_download
         except ImportError:
             return TTSDownloadStatus(
@@ -265,6 +268,8 @@ class KokoroTTSProvider(BaseTTSProvider):
     def download_all_voices(self) -> TTSDownloadStatus:
         files = _kokoro_required_files()
         try:
+            importlib.import_module("kokoro")
+            importlib.import_module("en_core_web_sm")
             from huggingface_hub import hf_hub_download
         except ImportError:
             return TTSDownloadStatus(

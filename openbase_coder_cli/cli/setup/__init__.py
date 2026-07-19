@@ -76,15 +76,14 @@ from openbase_coder_cli.cli.setup.dispatcher import (
     AUDIO_PROVIDER_OPTIONS,
     CODEX_HOME_DEFAULT_DISPATCHER_CONFIG,  # noqa: F401
     DEFAULT_AUDIO_PROVIDER,  # noqa: F401
-    LOCAL_AUDIO_PYTHON_MAX,  # noqa: F401
     LOCAL_AUDIO_REQUIREMENTS,  # noqa: F401
+    LOCAL_AUDIO_SPACY_MODEL,  # noqa: F401
     _audio_provider_config,  # noqa: F401
     _default_dispatcher_config,  # noqa: F401
     _download_local_audio_models,
     _ensure_codex_home_dispatcher_config,
     _ensure_local_audio_dependencies,
     _local_audio_dependencies_available,  # noqa: F401
-    _python_version,  # noqa: F401
     _update_dispatcher_audio_provider,  # noqa: F401
 )
 from openbase_coder_cli.cli.setup.env import (

@@ -1187,6 +1187,7 @@ def test_setup_configures_tailscale_serve(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         setup_cli, "_ensure_codex_home_dispatcher_config", lambda **_kwargs: None
     )
+    _patch_setup(monkeypatch, "set_dispatcher_service_tier", lambda _value: None)
     _patch_setup(monkeypatch, "_download_local_audio_models", lambda: None)
     monkeypatch.setattr(
         setup_cli, "_symlink_codex_home_skills", lambda _workspace_dir: None
@@ -1269,7 +1270,12 @@ def test_ensure_local_audio_dependencies_installs_into_runtime_python(
 
     setup_cli._ensure_local_audio_dependencies(runtime_package)
 
-    assert [command for command, _kwargs in commands][-1] == [
+    install_command, install_kwargs = next(
+        (command, kwargs)
+        for command, kwargs in commands
+        if command[1:4] == ["-m", "pip", "install"]
+    )
+    assert install_command == [
         str(python_path),
         "-m",
         "pip",
@@ -1277,21 +1283,64 @@ def test_ensure_local_audio_dependencies_installs_into_runtime_python(
         "--upgrade",
         *setup_cli.LOCAL_AUDIO_REQUIREMENTS,
     ]
+    assert install_kwargs["env"]["PIP_BREAK_SYSTEM_PACKAGES"] == "1"
+    assert install_kwargs["env"]["PATH"].split(os.pathsep)[0] == str(
+        python_path.parent
+    )
+    assert install_kwargs["env"]["PATH"].endswith(os.environ["PATH"])
 
 
-def test_ensure_local_audio_dependencies_rejects_python_313(
+def test_ensure_local_audio_dependencies_installs_kokoro_spacy_model(
+    tmp_path, monkeypatch
+) -> None:
+    python_path = tmp_path / "python"
+    runtime_package = type("RuntimePackage", (), {"python_path": python_path})()
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append((command, kwargs))
+        if command[1:] == [
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ]:
+            return subprocess.CompletedProcess(command, 0, stdout="3.12\n")
+        if command[1:] == ["-c", f"import {setup_cli.LOCAL_AUDIO_SPACY_MODEL}"]:
+            return subprocess.CompletedProcess(command, 1)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    setup_cli._ensure_local_audio_dependencies(runtime_package)
+
+    model_command, model_kwargs = commands[-1]
+    assert model_command == [
+        str(python_path),
+        "-m",
+        "spacy",
+        "download",
+        setup_cli.LOCAL_AUDIO_SPACY_MODEL,
+    ]
+    assert model_kwargs["env"]["PIP_BREAK_SYSTEM_PACKAGES"] == "1"
+
+
+def test_ensure_local_audio_dependencies_supports_python_313(
     tmp_path, monkeypatch
 ) -> None:
     python_path = tmp_path / "python"
     runtime_package = type("RuntimePackage", (), {"python_path": python_path})()
 
+    commands = []
+
     def fake_run(command, **kwargs):
-        return subprocess.CompletedProcess(command, 0, stdout="3.13\n")
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    with pytest.raises(Exception, match="requires a Python 3.12"):
-        setup_cli._ensure_local_audio_dependencies(runtime_package)
+    setup_cli._ensure_local_audio_dependencies(runtime_package)
+
+    assert all("sys.version_info" not in command[-1] for command in commands)
+    assert "numpy>=2.3.0,<2.5" in setup_cli.LOCAL_AUDIO_REQUIREMENTS
 
 
 def test_workspace_skill_sources_supports_direct_skill_dirs(tmp_path) -> None:

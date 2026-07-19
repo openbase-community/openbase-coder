@@ -17,13 +17,18 @@ During first-time desktop setup:
 
 1. Open the Openbase desktop app.
 2. Continue to the voice audio step.
-3. Choose `Local audio`.
+3. Choose **Free Beta Access**.
 4. Run setup from the desktop app.
 
 That setup path selects:
 
 - Speech-to-text: `Local MLX Whisper`
 - Text-to-speech: `Local Kokoro`
+
+This beta option does not require an Openbase Cloud audio subscription,
+AssemblyAI key, or Cartesia key. It does not include coding-model access: use
+an authenticated Codex or Claude Code backend (or configure a supported local
+coding model separately).
 
 If Openbase is already installed:
 

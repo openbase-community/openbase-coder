@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 from livekit import rtc
 
+from openbase_coder_cli import stt_providers
 from openbase_coder_cli.stt_providers import MLXWhisperSTT, _frame_to_whisper_audio
 
 
@@ -64,3 +65,17 @@ def test_mlx_whisper_stt_passes_audio_array_without_ffmpeg(monkeypatch) -> None:
     assert isinstance(audio, np.ndarray)
     assert kwargs["language"] == "en"
     assert kwargs["task"] == "transcribe"
+
+
+def test_local_mlx_whisper_readiness_requires_importable_runtime(monkeypatch) -> None:
+    def missing_mlx_whisper(module_name: str):
+        if module_name == "mlx_whisper":
+            raise ImportError("mlx_whisper is missing")
+        raise AssertionError(f"Unexpected module import: {module_name}")
+
+    monkeypatch.setattr(stt_providers.importlib, "import_module", missing_mlx_whisper)
+
+    status = stt_providers.local_mlx_whisper_readiness()
+
+    assert status.ready is False
+    assert status.detail == "MLX Whisper dependencies are not installed."
