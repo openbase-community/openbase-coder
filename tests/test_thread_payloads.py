@@ -7,13 +7,16 @@ def test_session_from_thread_maps_backend_session_id() -> None:
             "threadId": "s_abc123",
             "name": "fix-things",
             "cwd": "/tmp/project",
+            "backend": "claude_code",
             "backendSessionId": "44bc456e-3f2c-4130-bb68-55ef84ea6d55",
         },
         include_turns=False,
     )
 
+    assert session.backend == "claude_code"
     assert session.backend_session_id == "44bc456e-3f2c-4130-bb68-55ef84ea6d55"
     payload = session.model_dump(mode="json")
+    assert payload["backend"] == "claude_code"
     assert payload["backend_session_id"] == "44bc456e-3f2c-4130-bb68-55ef84ea6d55"
 
 

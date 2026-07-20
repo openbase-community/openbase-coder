@@ -68,6 +68,7 @@ class ThreadInfo(BaseModel):
     preview: str | None = None
     is_likely_stale: bool = False
     status_warning: str | None = None
+    backend: str | None = None
     # The backend-native conversation id (e.g. the Claude Code session id for
     # claude_code threads), used to resume the transcript outside Openbase.
     backend_session_id: str | None = None

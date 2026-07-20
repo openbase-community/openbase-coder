@@ -336,6 +336,7 @@ def _session_from_thread(
             thread.get("isLikelyStale") or thread.get("is_likely_stale")
         ),
         status_warning=status_warning,
+        backend=_optional_thread_string(thread, "backend"),
         backend_session_id=_optional_thread_string(
             thread,
             "backendSessionId",
