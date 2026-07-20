@@ -22,11 +22,20 @@ logger = logging.getLogger(__name__)
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def auth_session(request):
-    """Report whether locally managed JWT refresh credentials exist."""
+    """Report validated Openbase Cloud login state for this install.
+
+    ``logged_in`` means the cloud still accepts the stored credentials (or
+    the cloud was unreachable and credentials are present — see
+    ``validated``), not merely that a token file exists.
+    """
     manager = get_token_manager()
+    login = manager.login_status()
     return Response(
         {
-            "logged_in": manager.has_refresh_token,
+            "logged_in": login["status"] == "logged_in",
+            "status": login["status"],
+            "validated": login["validated"],
+            "detail": login["detail"],
             "auth_path": str(Path.home() / ".openbase" / "auth.json"),
         },
         status=status.HTTP_200_OK,

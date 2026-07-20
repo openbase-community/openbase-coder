@@ -30,7 +30,9 @@ from openbase_coder_cli.paths import AUTH_JSON_PATH, MACHINE_TOKEN_JSON_PATH
 from openbase_coder_cli.services.cloud_registration import register_and_report
 
 DEFAULT_WEB_BACKEND_URL = "https://app.openbase.cloud"
-DESKTOP_LOGIN_COMPLETE_URL = "openbase-coder://open?source=cli-auth&intent=login-complete"
+DESKTOP_LOGIN_COMPLETE_URL = (
+    "openbase-coder://open?source=cli-auth&intent=login-complete"
+)
 
 
 def _oauth_success_html(*, desktop_url: str = DESKTOP_LOGIN_COMPLETE_URL) -> bytes:
@@ -281,7 +283,12 @@ def login() -> None:
     )
     try:
         MachineTokenManager(web_backend_url, mgr).get_machine_token(rotate=True)
-    except (AuthLoginRequiredError, AuthTransientError, MachineTokenError, httpx.HTTPError) as exc:
+    except (
+        AuthLoginRequiredError,
+        AuthTransientError,
+        MachineTokenError,
+        httpx.HTTPError,
+    ) as exc:
         click.echo(
             click.style(
                 f"Warning: logged in, but could not create an Openbase Cloud machine token: {exc}",
@@ -316,6 +323,41 @@ def logout() -> None:
 @click.group()
 def auth() -> None:
     """Authentication helpers."""
+
+
+@auth.command("status")
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Print machine-readable JSON (always exits 0).",
+)
+def auth_status(as_json: bool) -> None:
+    """Report validated Openbase Cloud login status.
+
+    Unlike a token-file presence check, this validates the stored refresh
+    token against Openbase Cloud (with short-lived caching), so an expired
+    or revoked login reports ``login_expired`` instead of logged in.
+    """
+    manager = TokenManager(_get_web_backend_url())
+    login = manager.login_status()
+    if as_json:
+        identity = manager.get_owner_identity()
+        click.echo(json.dumps({**login, "email": identity.get("email", "")}))
+        return
+    if login["status"] == "logged_in":
+        email = manager.get_owner_identity().get("email", "")
+        suffix = f" as {email}" if email else ""
+        click.echo(f"Logged in{suffix}")
+        if not login["validated"]:
+            click.echo(click.style(f"Warning: {login['detail']}", fg="yellow"))
+    elif login["status"] == "login_expired":
+        raise click.ClickException(
+            "Login expired: Openbase Cloud rejected the stored login. "
+            "Run 'openbase-coder login' again."
+        )
+    else:
+        raise click.ClickException("Not logged in. Run 'openbase-coder login'.")
 
 
 @auth.command("print-access-token")
@@ -355,7 +397,11 @@ def print_machine_token(rotate: bool) -> None:
             f"Unable to refresh Openbase login or mint machine token: {exc}"
         ) from exc
     except (MachineTokenError, httpx.HTTPError) as exc:
-        raise click.ClickException(f"Unable to mint Openbase machine token: {exc}") from exc
+        raise click.ClickException(
+            f"Unable to mint Openbase machine token: {exc}"
+        ) from exc
     if not token:
-        raise click.ClickException("Openbase machine token command returned empty token.")
+        raise click.ClickException(
+            "Openbase machine token command returned empty token."
+        )
     click.echo(token)

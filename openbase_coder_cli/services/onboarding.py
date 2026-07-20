@@ -19,7 +19,7 @@ from openbase_coder_cli.backend_config import (
 from openbase_coder_cli.claude_auth import claude_auth_status
 from openbase_coder_cli.config.token_manager import (
     DEFAULT_WEB_BACKEND_URL,
-    TokenManager,
+    get_token_manager,
 )
 from openbase_coder_cli.env_file import selected_backend_from_env_file
 from openbase_coder_cli.paths import (
@@ -115,7 +115,7 @@ def backend_auth_status(*, authenticated: bool | None = None) -> dict[str, Any]:
         ready = claude_auth_status().logged_in
     elif backend == OPENBASE_CLOUD_BACKEND:
         if authenticated is None:
-            authenticated = TokenManager(web_backend_url()).has_refresh_token
+            authenticated = cloud_login_status()["status"] == "logged_in"
         ready = authenticated
     else:
         ready = codex_auth_present()
@@ -128,17 +128,28 @@ def web_backend_url() -> str:
     ).rstrip("/")
 
 
+def cloud_login_status() -> dict[str, Any]:
+    """Validated Openbase Cloud login status (see TokenManager.login_status).
+
+    The singleton keeps the short-lived validation cache effective across the
+    repeated onboarding polls from the desktop app and console.
+    """
+    return get_token_manager(web_backend_url()).login_status()
+
+
 def onboarding_status_payload() -> dict[str, Any]:
     """Local onboarding status consumed by the Mac app and console."""
     checks = cli_configured_checks()
     from openbase_coder_cli.self_update import version_info
 
-    authenticated = TokenManager(web_backend_url()).has_refresh_token
+    auth_status = cloud_login_status()
+    authenticated = auth_status["status"] == "logged_in"
     return {
         "cli_configured": all(checks.values()),
         "checks": checks,
         "versions": version_info(),
         "authenticated": authenticated,
+        "auth_status": auth_status,
         "backend_auth": backend_auth_status(authenticated=authenticated),
         "tailscale_self": tailscale_self_identity(),
         "tailscale_serve": tailscale_serve_health().to_dict(),

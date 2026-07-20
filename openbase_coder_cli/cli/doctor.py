@@ -25,7 +25,6 @@ from openbase_coder_cli.dispatcher_config import (
     selected_tts_provider_id,
 )
 from openbase_coder_cli.paths import (
-    AUTH_JSON_PATH,
     CODEX_HOME_DIR,
     DEFAULT_ENV_FILE_PATH,
     NORMAL_CLAUDE_STATE_PATH,
@@ -326,8 +325,19 @@ def _check_agent_auth(env: dict[str, str], ok, warn, fail, action=None) -> None:
             )
 
     if backend == OPENBASE_CLOUD_BACKEND:
-        if AUTH_JSON_PATH.is_file():
-            ok("Openbase Cloud auth: logged in")
+        from openbase_coder_cli.services.onboarding import cloud_login_status
+
+        login = cloud_login_status()
+        if login["status"] == "logged_in":
+            if login["validated"]:
+                ok("Openbase Cloud auth: logged in")
+            else:
+                warn(f"Openbase Cloud auth: {login['detail']}")
+        elif login["status"] == "login_expired":
+            action(
+                "Openbase Cloud login expired or was revoked: "
+                "run 'openbase-coder login' again"
+            )
         else:
             action("Openbase Cloud auth missing: run 'openbase-coder login'")
 

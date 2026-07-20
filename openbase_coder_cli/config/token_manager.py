@@ -57,6 +57,12 @@ def decode_jwt_claims_unverified(token: str) -> dict[str, Any]:
 
 # Refresh the access token 60 seconds before it expires
 _REFRESH_MARGIN_SECONDS = 60
+# How long a validated login_status() result may be reused before re-checking
+# with the backend.
+_LOGIN_STATUS_CACHE_SECONDS = 60
+LOGIN_STATUS_LOGGED_IN = "logged_in"
+LOGIN_STATUS_LOGGED_OUT = "logged_out"
+LOGIN_STATUS_LOGIN_EXPIRED = "login_expired"
 DEFAULT_OAUTH_CLIENT_ID = "openbase-coder-cli"
 DEFAULT_OAUTH_REDIRECT_URI = "http://127.0.0.1:52807/oauth/callback"
 DEFAULT_WEB_BACKEND_URL = "https://app.openbase.cloud"
@@ -77,6 +83,8 @@ class TokenManager:
         self._access_token: str = ""
         self._refresh_token: str = ""
         self._access_expires_at: float = 0  # epoch seconds
+        self._refresh_rejected_at: float = 0  # epoch seconds; 0 = not rejected
+        self._login_status_cache: dict[str, Any] | None = None
         # Serializes refresh across threads in this process; the flock in
         # _file_lock() serializes across processes sharing auth.json.
         self._lock = threading.RLock()
@@ -104,6 +112,7 @@ class TokenManager:
             self._access_token = ""
             self._refresh_token = ""
             self._access_expires_at = 0
+            self._refresh_rejected_at = 0
             return
         try:
             data = json.loads(AUTH_JSON_PATH.read_text())
@@ -117,6 +126,7 @@ class TokenManager:
         self._access_token = data.get("access_token", "")
         self._refresh_token = data.get("refresh_token", "")
         self._access_expires_at = data.get("access_expires_at", 0)
+        self._refresh_rejected_at = data.get("refresh_rejected_at", 0)
 
     def save(self) -> None:
         """Persist current tokens to disk atomically."""
@@ -126,6 +136,7 @@ class TokenManager:
                 "access_token": self._access_token,
                 "refresh_token": self._refresh_token,
                 "access_expires_at": self._access_expires_at,
+                "refresh_rejected_at": self._refresh_rejected_at,
             },
             indent=2,
         )
@@ -145,6 +156,8 @@ class TokenManager:
             self._access_token = ""
             self._refresh_token = ""
             self._access_expires_at = 0
+            self._refresh_rejected_at = 0
+            self._login_status_cache = None
             if AUTH_JSON_PATH.is_file():
                 AUTH_JSON_PATH.unlink()
 
@@ -164,6 +177,8 @@ class TokenManager:
             self._access_token = access_token
             self._refresh_token = refresh_token
             self._access_expires_at = time.time() + expires_in
+            self._refresh_rejected_at = 0
+            self._login_status_cache = None
             self.save()
 
     @property
@@ -224,7 +239,11 @@ class TokenManager:
 
         if resp.status_code in (400, 401, 403):
             # The refresh token was rotated away or expired; only a new
-            # login can recover.
+            # login can recover. Persist the rejection so every process
+            # (and mere presence checks on auth.json) can see the login is
+            # dead without repeating this network call.
+            self._refresh_rejected_at = time.time()
+            self.save()
             raise AuthLoginRequiredError(
                 "Refresh token was rejected. Run 'openbase-coder login' again."
             )
@@ -256,14 +275,102 @@ class TokenManager:
             or 300
         )
         self._access_expires_at = time.time() + expires_in
+        self._refresh_rejected_at = 0
         self.save()
         logger.info("Refreshed JWT access token")
 
     @property
     def has_refresh_token(self) -> bool:
+        """Whether a refresh token is merely PRESENT on disk.
+
+        Presence is not login state: the token may already be rejected by
+        the cloud. Surfaces that report "logged in with Openbase Cloud"
+        must use :meth:`login_status` instead.
+        """
         with self._lock:
             self.load()
             return bool(self._refresh_token)
+
+    def login_status(
+        self, *, max_age_seconds: float = _LOGIN_STATUS_CACHE_SECONDS
+    ) -> dict[str, Any]:
+        """Validated Openbase Cloud login status — the single source of truth.
+
+        Returns ``{"status", "validated", "detail"}`` where ``status`` is one
+        of ``logged_in`` / ``logged_out`` / ``login_expired``. Unlike
+        ``has_refresh_token`` (mere token presence), this reflects whether the
+        cloud still accepts the stored credentials: a definitive refresh
+        rejection is remembered on disk (``refresh_rejected_at``), so every
+        process answers consistently without repeating the network call.
+        ``validated`` is False only when the backend was unreachable and token
+        presence is the best available answer.
+        """
+        with self._lock:
+            self.load()
+            if not self._refresh_token:
+                return {
+                    "status": LOGIN_STATUS_LOGGED_OUT,
+                    "validated": True,
+                    "detail": "Not logged in. Run 'openbase-coder login'.",
+                }
+            if self._refresh_rejected_at:
+                return {
+                    "status": LOGIN_STATUS_LOGIN_EXPIRED,
+                    "validated": True,
+                    "detail": (
+                        "Openbase Cloud rejected the stored login. "
+                        "Run 'openbase-coder login' again."
+                    ),
+                }
+            if self._access_is_valid():
+                return {
+                    "status": LOGIN_STATUS_LOGGED_IN,
+                    "validated": True,
+                    "detail": "",
+                }
+
+            now = time.time()
+            cached = self._login_status_cache
+            if (
+                cached
+                and cached["refresh_token"] == self._refresh_token
+                and now - cached["checked_at"] < max_age_seconds
+            ):
+                return dict(cached["result"])
+
+            refresh_token = self._refresh_token
+            try:
+                self.get_access_token()
+            except AuthLoginRequiredError:
+                # _do_refresh persisted refresh_rejected_at for us.
+                result = {
+                    "status": LOGIN_STATUS_LOGIN_EXPIRED,
+                    "validated": True,
+                    "detail": (
+                        "Openbase Cloud rejected the stored login. "
+                        "Run 'openbase-coder login' again."
+                    ),
+                }
+            except AuthTransientError as exc:
+                result = {
+                    "status": LOGIN_STATUS_LOGGED_IN,
+                    "validated": False,
+                    "detail": (
+                        f"Could not reach Openbase Cloud to validate the login: {exc}"
+                    ),
+                }
+            else:
+                result = {
+                    "status": LOGIN_STATUS_LOGGED_IN,
+                    "validated": True,
+                    "detail": "",
+                }
+            self._login_status_cache = {
+                "checked_at": now,
+                "refresh_token": refresh_token,
+                "result": dict(result),
+            }
+            return result
 
     def get_owner_identity(self) -> dict[str, str]:
         """Return the ``{sub, email}`` of the account that owns this server.

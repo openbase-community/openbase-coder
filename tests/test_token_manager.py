@@ -78,8 +78,71 @@ def test_rejected_refresh_raises_login_required(manager, auth_path):
     with mock.patch.object(httpx, "post", return_value=refresh_response(400)):
         with pytest.raises(AuthLoginRequiredError):
             manager.get_access_token()
-    # Tokens are not deleted; another process may have saved fresh ones.
+    # Tokens are not deleted; another process may have saved fresh ones. The
+    # rejection is remembered so login_status() reports login_expired.
     assert auth_path.is_file()
+    assert json.loads(auth_path.read_text())["refresh_rejected_at"] > 0
+
+
+def test_login_status_logged_out_without_tokens(manager, auth_path):
+    status = manager.login_status()
+    assert status["status"] == "logged_out"
+    assert status["validated"] is True
+
+
+def test_login_status_logged_in_with_valid_access_token(manager, auth_path):
+    write_auth(auth_path, access="cached", expires_at=9e12)
+    with mock.patch.object(httpx, "post") as post:
+        status = manager.login_status()
+        post.assert_not_called()
+    assert status == {"status": "logged_in", "validated": True, "detail": ""}
+
+
+def test_login_status_validates_via_refresh(manager, auth_path):
+    write_auth(auth_path, access="stale", expires_at=0)
+    with mock.patch.object(httpx, "post", return_value=refresh_response()):
+        status = manager.login_status()
+    assert status == {"status": "logged_in", "validated": True, "detail": ""}
+
+
+def test_login_status_expired_is_remembered_across_processes(manager, auth_path):
+    write_auth(auth_path, access="stale", expires_at=0)
+    with mock.patch.object(httpx, "post", return_value=refresh_response(401)) as post:
+        assert manager.login_status()["status"] == "login_expired"
+        assert post.call_count == 1
+    # A fresh manager (fresh process) sees the persisted rejection without
+    # repeating the network call.
+    other = TokenManager("https://backend.example.com")
+    with mock.patch.object(httpx, "post") as post:
+        status = other.login_status()
+        post.assert_not_called()
+    assert status["status"] == "login_expired"
+    assert status["validated"] is True
+
+
+def test_login_status_unvalidated_when_backend_unreachable(manager, auth_path):
+    write_auth(auth_path, access="stale", expires_at=0)
+    with mock.patch.object(
+        httpx, "post", side_effect=httpx.ConnectError("boom")
+    ) as post:
+        status = manager.login_status()
+        # A second call inside the cache window reuses the result.
+        assert manager.login_status() == status
+        assert post.call_count == 1
+    assert status["status"] == "logged_in"
+    assert status["validated"] is False
+
+
+def test_login_status_recovers_after_new_login(manager, auth_path):
+    write_auth(auth_path, access="stale", expires_at=0)
+    with mock.patch.object(httpx, "post", return_value=refresh_response(401)):
+        assert manager.login_status()["status"] == "login_expired"
+    manager.store_tokens(access_token="at2", refresh_token="rt2", expires_in=300)
+    assert manager.login_status() == {
+        "status": "logged_in",
+        "validated": True,
+        "detail": "",
+    }
 
 
 def test_network_error_raises_transient(manager, auth_path):
@@ -175,7 +238,10 @@ def test_machine_token_manager_mints_and_persists_token(machine_token_path):
         assert manager.get_machine_token(scopes=["llm_proxy"]) == "obmt_new"
 
     request = post.call_args
-    assert request.args[0] == "https://backend.example.com/api/openbase/auth/machine-tokens/"
+    assert (
+        request.args[0]
+        == "https://backend.example.com/api/openbase/auth/machine-tokens/"
+    )
     assert request.kwargs["headers"]["Authorization"] == "Bearer jwt.token.value"
     assert request.kwargs["json"]["scopes"] == ["llm_proxy"]
     saved = json.loads(machine_token_path.read_text())

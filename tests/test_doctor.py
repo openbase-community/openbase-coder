@@ -24,7 +24,7 @@ def _collect_credential_check(env):
     return messages
 
 
-def _collect_auth_check(env, monkeypatch, tmp_path):
+def _collect_auth_check(env, monkeypatch, tmp_path, cloud_login=None):
     messages = []
 
     def ok(message):
@@ -44,7 +44,14 @@ def _collect_auth_check(env, monkeypatch, tmp_path):
         "home",
         classmethod(lambda cls: tmp_path),
     )
-    monkeypatch.setattr(doctor_cli, "AUTH_JSON_PATH", tmp_path / "openbase-auth.json")
+    from openbase_coder_cli.services import onboarding as onboarding_module
+
+    monkeypatch.setattr(
+        onboarding_module,
+        "cloud_login_status",
+        lambda: cloud_login
+        or {"status": "logged_out", "validated": True, "detail": ""},
+    )
     monkeypatch.setattr(doctor_cli, "CODEX_HOME_DIR", tmp_path / "codex_home")
     _check_agent_auth(env, ok, warn, fail, action)
     return messages
@@ -123,6 +130,35 @@ def test_agent_auth_requires_openbase_login_for_cloud_backend(monkeypatch, tmp_p
         "action",
         "Openbase Cloud auth missing: run 'openbase-coder login'",
     ) in messages
+
+
+def test_agent_auth_reports_expired_openbase_login_for_cloud_backend(
+    monkeypatch, tmp_path
+):
+    messages = _collect_auth_check(
+        {"OPENBASE_CODING_BACKEND": "openbase_cloud"},
+        monkeypatch,
+        tmp_path,
+        cloud_login={"status": "login_expired", "validated": True, "detail": ""},
+    )
+
+    assert (
+        "action",
+        "Openbase Cloud login expired or was revoked: run 'openbase-coder login' again",
+    ) in messages
+
+
+def test_agent_auth_accepts_validated_openbase_login_for_cloud_backend(
+    monkeypatch, tmp_path
+):
+    messages = _collect_auth_check(
+        {"OPENBASE_CODING_BACKEND": "openbase_cloud"},
+        monkeypatch,
+        tmp_path,
+        cloud_login={"status": "logged_in", "validated": True, "detail": ""},
+    )
+
+    assert ("ok", "Openbase Cloud auth: logged in") in messages
 
 
 def test_agent_auth_requires_claude_login_for_claude_backend(monkeypatch, tmp_path):

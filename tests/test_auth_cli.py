@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 
 from click.testing import CliRunner
 
@@ -76,6 +77,67 @@ def test_auth_print_machine_token_can_rotate(monkeypatch):
 
     assert result.exit_code == 0
     assert result.output == "obmt_rotated\n"
+
+
+def _fake_status_token_manager(status, *, validated=True, email="user@example.com"):
+    class FakeTokenManager:
+        def __init__(self, web_backend_url):
+            pass
+
+        def login_status(self):
+            return {"status": status, "validated": validated, "detail": ""}
+
+        def get_owner_identity(self):
+            return {"email": email} if email else {}
+
+    return FakeTokenManager
+
+
+def test_auth_status_json_always_exits_zero(monkeypatch):
+    monkeypatch.setattr(
+        auth_cli, "TokenManager", _fake_status_token_manager("login_expired")
+    )
+
+    result = CliRunner().invoke(main, ["auth", "status", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["status"] == "login_expired"
+    assert payload["validated"] is True
+    assert payload["email"] == "user@example.com"
+
+
+def test_auth_status_reports_logged_in_with_email(monkeypatch):
+    monkeypatch.setattr(
+        auth_cli, "TokenManager", _fake_status_token_manager("logged_in")
+    )
+
+    result = CliRunner().invoke(main, ["auth", "status"])
+
+    assert result.exit_code == 0
+    assert "Logged in as user@example.com" in result.output
+
+
+def test_auth_status_expired_exits_nonzero(monkeypatch):
+    monkeypatch.setattr(
+        auth_cli, "TokenManager", _fake_status_token_manager("login_expired")
+    )
+
+    result = CliRunner().invoke(main, ["auth", "status"])
+
+    assert result.exit_code != 0
+    assert "openbase-coder login" in result.output
+
+
+def test_auth_status_logged_out_exits_nonzero(monkeypatch):
+    monkeypatch.setattr(
+        auth_cli, "TokenManager", _fake_status_token_manager("logged_out")
+    )
+
+    result = CliRunner().invoke(main, ["auth", "status"])
+
+    assert result.exit_code != 0
+    assert "Not logged in" in result.output
 
 
 def test_oauth_success_page_announces_success_and_returns_to_desktop():
